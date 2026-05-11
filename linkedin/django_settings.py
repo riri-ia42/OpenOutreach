@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "crm.apps.CrmConfig",
     "chat.apps.ChatConfig",
     "linkedin",
+    "ekoalu.apps.EkoaluConfig",
 ]
 
 MIDDLEWARE = [
