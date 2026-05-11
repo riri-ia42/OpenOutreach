@@ -1,27 +1,38 @@
-"""Management command : configure OpenOutreach pour EKOALU à partir d'env vars.
+"""Management command : configure OpenOutreach pour EKOALU.
 
-Lit les variables sensibles depuis l'environnement (pas de JSON en clair sur disque)
-et appelle linkedin.onboarding.apply() avec un OnboardConfig adapté.
+Lit les variables depuis :
+1. `.env.production` à la racine du projet (parse via python-dotenv — SAFE
+   pour caractères spéciaux dans passwords, contrairement à `source` bash)
+2. Variables d'environnement (override .env.production si présentes)
 
 Idempotent. À lancer une fois que `setup_ekoalu` a déjà créé les 8 Campaigns.
 
 Usage :
-    # Définir d'abord (dans .env ou export shell) :
-    #   EKOALU_LINKEDIN_EMAIL=richard@ekoalu.com
-    #   EKOALU_LINKEDIN_PASSWORD=...
-    #   ANTHROPIC_API_KEY=sk-ant-...
-    #   ANTHROPIC_MODEL=claude-sonnet-4-6
-
     python manage.py configure_ekoalu --dry-run
     python manage.py configure_ekoalu
 """
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
+from dotenv import dotenv_values
 
 from ekoalu import conf
+
+# Racine du projet (parent du dossier openoutreach/)
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+ENV_FILE = PROJECT_ROOT / ".env.production"
+
+
+def _load_var(key: str) -> str:
+    """Lit une variable depuis .env.production (priorité), sinon env shell."""
+    if ENV_FILE.exists():
+        dotenv = dotenv_values(ENV_FILE)
+        if key in dotenv and dotenv[key]:
+            return dotenv[key].strip()
+    return os.environ.get(key, "").strip()
 
 
 REQUIRED_ENV_VARS = [
@@ -54,10 +65,10 @@ class Command(BaseCommand):
         dry_run = options["dry_run"]
         ai_model = options["ai_model"]
 
-        # Lire env vars
-        linkedin_email = os.environ.get("EKOALU_LINKEDIN_EMAIL", "").strip()
-        linkedin_password = os.environ.get("EKOALU_LINKEDIN_PASSWORD", "").strip()
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        # Lire depuis .env.production (priorité) ou environnement
+        linkedin_email = _load_var("EKOALU_LINKEDIN_EMAIL")
+        linkedin_password = _load_var("EKOALU_LINKEDIN_PASSWORD")
+        anthropic_key = _load_var("ANTHROPIC_API_KEY")
 
         missing = []
         if not linkedin_email:
@@ -68,11 +79,14 @@ class Command(BaseCommand):
             missing.append("ANTHROPIC_API_KEY")
 
         if missing:
+            source = (
+                f".env.production ({ENV_FILE})" if ENV_FILE.exists()
+                else "variables d environnement"
+            )
             raise CommandError(
-                "Variables d environnement manquantes :\n  - "
+                f"Variables manquantes dans {source} :\n  - "
                 + "\n  - ".join(missing)
-                + "\n\nDefinissez-les (export EKOALU_LINKEDIN_EMAIL=... etc.) "
-                "puis relancez."
+                + "\n\nVerifiez le fichier .env.production a la racine du projet."
             )
 
         self.stdout.write(
