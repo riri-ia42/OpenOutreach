@@ -1,0 +1,145 @@
+"""Dashboard EKOALU — vue d'ensemble live pour piloter la prospection.
+
+URL : /ekoalu/
+"""
+from __future__ import annotations
+
+from collections import defaultdict
+
+from django.contrib.admin.views.decorators import staff_member_required
+from django.db.models import Count, Q
+from django.shortcuts import render
+from django.utils import timezone
+
+from ekoalu import conf
+from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+from ekoalu.personas import PERSONAS
+
+
+@staff_member_required
+def dashboard(request):
+    """Vue dashboard principal."""
+    from chat.models import ChatMessage
+    from crm.models import Deal, Lead
+    from linkedin.models import Campaign, LinkedInProfile, SiteConfig, Task
+
+    # ---- Infrastructure ----
+    profile = LinkedInProfile.objects.filter(active=True).first()
+    site_cfg = SiteConfig.load()
+
+    # ---- Campaigns EKOALU avec stats ----
+    campaigns_data = []
+    for campaign in Campaign.objects.filter(name__startswith="EKOALU - ").order_by("pk"):
+        # Identifier le persona depuis le label de la campagne
+        persona_slug = None
+        for p in PERSONAS.values():
+            if p.label in campaign.name:
+                persona_slug = p.slug
+                break
+
+        deals_by_state = (
+            Deal.objects.filter(campaign=campaign)
+            .values("state")
+            .annotate(n=Count("id"))
+        )
+        state_counts = {d["state"]: d["n"] for d in deals_by_state}
+
+        campaigns_data.append({
+            "campaign": campaign,
+            "persona_slug": persona_slug,
+            "states": {
+                "qualified": state_counts.get("Qualified", 0),
+                "ready_to_connect": state_counts.get("Ready_to_connect", 0),
+                "pending": state_counts.get("Pending", 0),
+                "connected": state_counts.get("Connected", 0),
+                "completed": state_counts.get("Completed", 0),
+                "failed": state_counts.get("Failed", 0),
+            },
+            "total_leads": sum(state_counts.values()),
+        })
+
+    # ---- KPI globaux ----
+    all_deals = Deal.objects.filter(campaign__name__startswith="EKOALU - ")
+    total_qualified = all_deals.filter(state="Qualified").count()
+    total_ready = all_deals.filter(state="Ready_to_connect").count()
+    total_pending = all_deals.filter(state="Pending").count()
+    total_connected = all_deals.filter(state__in=["Connected", "Completed"]).count()
+    total_failed = all_deals.filter(state="Failed").count()
+    total_disqualified = all_deals.filter(state="Failed", outcome="wrong_fit").count()
+    total_replied = ChatMessage.objects.filter(
+        owner__isnull=True,  # message inbound (du prospect)
+    ).count() if hasattr(ChatMessage, "owner") else 0
+
+    # Taux d acceptation (Connected / Pending+Connected+Failed_with_no_response)
+    total_invited = total_pending + total_connected + all_deals.filter(
+        state="Failed", outcome="unresponsive",
+    ).count()
+    accept_rate = (
+        round(total_connected / total_invited * 100, 1)
+        if total_invited > 0 else None
+    )
+
+    # ---- Pending replies (inbox_assist) ----
+    pending_replies = PendingReply.objects.filter(
+        status=PendingReply.Status.PENDING,
+    ).order_by("-created_at")[:5]
+    pending_count = PendingReply.objects.filter(
+        status=PendingReply.Status.PENDING,
+    ).count()
+
+    # ---- Tasks en queue ----
+    tasks_pending = Task.objects.filter(status="pending").count()
+    tasks_running = Task.objects.filter(status="running").count()
+    next_task = (
+        Task.objects.filter(status="pending")
+        .order_by("scheduled_at")
+        .first()
+    )
+
+    # ---- Apprentissage inbox_assist ----
+    corrections_count = CorrectionExample.objects.count()
+    corrections_in_use = CorrectionExample.objects.filter(used_in_prompt=True).count()
+    avg_similarity = None
+    if corrections_count > 0:
+        from django.db.models import Avg
+        avg_similarity = CorrectionExample.objects.aggregate(
+            avg=Avg("similarity_ratio"),
+        )["avg"]
+        avg_similarity = round(avg_similarity * 100, 1) if avg_similarity else None
+
+    context = {
+        "now": timezone.localtime(),
+        "profile": profile,
+        "site_cfg": site_cfg,
+        "campaigns_data": campaigns_data,
+        "kpis": {
+            "total_qualified": total_qualified,
+            "total_ready": total_ready,
+            "total_pending": total_pending,
+            "total_connected": total_connected,
+            "total_failed": total_failed,
+            "total_disqualified": total_disqualified,
+            "accept_rate": accept_rate,
+            "total_invited": total_invited,
+        },
+        "pending_replies": pending_replies,
+        "pending_count": pending_count,
+        "tasks": {
+            "pending": tasks_pending,
+            "running": tasks_running,
+            "next_at": next_task.scheduled_at if next_task else None,
+        },
+        "learning": {
+            "total": corrections_count,
+            "in_use": corrections_in_use,
+            "avg_similarity": avg_similarity,
+        },
+        "conf": {
+            "active_windows": conf.ACTIVE_WINDOWS,
+            "weekly_target": conf.WEEKLY_INVITE_TARGET,
+            "weekly_cap": conf.WEEKLY_INVITE_HARD_CAP,
+            "daily_cap": conf.DAILY_INVITE_CAP,
+            "booking_url": conf.CALENDAR_BOOKING_URL,
+        },
+    }
+    return render(request, "ekoalu/dashboard.html", context)

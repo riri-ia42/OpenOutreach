@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EKOALU — Dashboard prospection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">EKOALU — Prospection</h1>
+            <p class="text-sm text-gray-500">{{ now|date:"l j F Y, H:i" }} · Chasselay (69)</p>
+        </div>
+        <div class="flex items-center gap-4">
+            {% if profile %}
+                {% if profile.active %}
+                    <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                        ● Compte actif : {{ profile.linkedin_username }}
+                    </span>
+                {% else %}
+                    <span class="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                        ○ Compte désactivé (kill switch)
+                    </span>
+                {% endif %}
+            {% else %}
+                <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
+                    Aucun compte LinkedIn configuré
+                </span>
+            {% endif %}
+            <a href="/admin/" class="text-sm text-blue-600 hover:underline">Admin Django →</a>
+        </div>
+    </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- KPIs globaux -->
+    <section>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Vue d'ensemble</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Qualifiés</div>
+                <div class="text-2xl font-bold text-gray-900 mt-1">{{ kpis.total_qualified }}</div>
+                <div class="text-xs text-gray-400 mt-1">en file</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Prêts</div>
+                <div class="text-2xl font-bold text-yellow-600 mt-1">{{ kpis.total_ready }}</div>
+                <div class="text-xs text-gray-400 mt-1">ready_to_connect</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Invités</div>
+                <div class="text-2xl font-bold text-orange-600 mt-1">{{ kpis.total_pending }}</div>
+                <div class="text-xs text-gray-400 mt-1">pending</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Connectés</div>
+                <div class="text-2xl font-bold text-green-600 mt-1">{{ kpis.total_connected }}</div>
+                <div class="text-xs text-gray-400 mt-1">connected</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Disqualifiés</div>
+                <div class="text-2xl font-bold text-gray-500 mt-1">{{ kpis.total_disqualified }}</div>
+                <div class="text-xs text-gray-400 mt-1">hors cible</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Taux accept.</div>
+                <div class="text-2xl font-bold {% if kpis.accept_rate >= 30 %}text-green-600{% elif kpis.accept_rate >= 20 %}text-yellow-600{% elif kpis.accept_rate %}text-red-600{% else %}text-gray-400{% endif %} mt-1">
+                    {% if kpis.accept_rate is not None %}{{ kpis.accept_rate }}%{% else %}—{% endif %}
+                </div>
+                <div class="text-xs text-gray-400 mt-1">cible &gt; 30%</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Inbox brouillons en attente -->
+    {% if pending_count > 0 %}
+    <section>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">
+                Inbox — {{ pending_count }} brouillon{{ pending_count|pluralize }} en attente
+            </h2>
+            <a href="/admin/ekoalu/pendingreply/?status__exact=pending" class="text-sm text-blue-600 hover:underline">
+                Voir tous →
+            </a>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
+            {% for pr in pending_replies %}
+            <div class="p-4 hover:bg-gray-50">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <a href="https://www.linkedin.com/in/{{ pr.prospect_public_id }}/" target="_blank"
+                               class="font-medium text-gray-900 hover:underline">{{ pr.prospect_public_id }}</a>
+                            <span class="text-xs px-2 py-0.5 rounded-full
+                                {% if pr.intent == 'rdv_request' %}bg-green-100 text-green-800
+                                {% elif pr.intent == 'technical_question' %}bg-blue-100 text-blue-800
+                                {% elif pr.intent == 'objection' %}bg-yellow-100 text-yellow-800
+                                {% elif pr.intent == 'opt_out' %}bg-red-100 text-red-800
+                                {% else %}bg-gray-100 text-gray-700{% endif %}">
+                                {{ pr.intent }}
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-2">
+                            <span class="font-medium">Reçu :</span> {{ pr.inbound_message|truncatechars:120 }}
+                        </p>
+                        <p class="text-sm text-gray-700">
+                            <span class="font-medium">Brouillon IA :</span> {{ pr.ai_draft|truncatechars:150 }}
+                        </p>
+                    </div>
+                    <a href="/admin/ekoalu/pendingreply/{{ pr.pk }}/change/"
+                       class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                        Éditer
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Campaigns par persona -->
+    <section>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Campagnes par persona</h2>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Persona</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qualif.</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Prêt</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Connecté</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Échec</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for c in campaigns_data %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3">
+                            <a href="/admin/linkedin/campaign/{{ c.campaign.pk }}/change/"
+                               class="text-sm font-medium text-gray-900 hover:text-blue-600">
+                                {{ c.campaign.name|cut:"EKOALU - " }}
+                            </a>
+                        </td>
+                        <td class="px-4 py-3 text-right text-sm text-gray-600">{{ c.states.qualified }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-yellow-700">{{ c.states.ready_to_connect }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-orange-700">{{ c.states.pending }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-green-700 font-medium">{{ c.states.connected }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-gray-400">{{ c.states.failed }}</td>
+                        <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.total_leads }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Config + apprentissage -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Queue de tâches</h3>
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-500">En attente</span>
+                    <span class="font-medium text-gray-900">{{ tasks.pending }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500">En cours</span>
+                    <span class="font-medium {% if tasks.running %}text-green-600{% else %}text-gray-400{% endif %}">{{ tasks.running }}</span>
+                </div>
+                {% if tasks.next_at %}
+                <div class="flex justify-between pt-2 border-t">
+                    <span class="text-gray-500">Prochaine</span>
+                    <span class="font-medium text-gray-900 text-xs">{{ tasks.next_at|date:"d/m H:i" }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Apprentissage inbox</h3>
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-500">Corrections enregistrées</span>
+                    <span class="font-medium text-gray-900">{{ learning.total }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500">Utilisées en few-shot</span>
+                    <span class="font-medium text-gray-900">{{ learning.in_use }}</span>
+                </div>
+                {% if learning.avg_similarity %}
+                <div class="flex justify-between pt-2 border-t">
+                    <span class="text-gray-500">Similarité moyenne</span>
+                    <span class="font-medium text-gray-900">{{ learning.avg_similarity }}%</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Config courante</h3>
+            <div class="space-y-2 text-xs text-gray-600">
+                <div>
+                    Plages : {% for w in conf.active_windows %}{{ w.0 }}h-{{ w.1 }}h{% if not forloop.last %} + {% endif %}{% endfor %}
+                </div>
+                <div>Vol. cible : {{ conf.weekly_target }}/sem (cap dur {{ conf.weekly_cap }})</div>
+                <div>LLM : {{ site_cfg.llm_provider }} / {{ site_cfg.ai_model }}</div>
+                <div class="pt-2 border-t">
+                    <a href="{{ conf.booking_url }}" target="_blank" class="text-blue-600 hover:underline break-all">
+                        Booking ↗
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">
+    EKOALU · prospection-ia · fork OpenOutreach + extensions ekoalu/
+</footer>
+
+</body>
+</html>
