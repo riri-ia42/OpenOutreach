@@ -3,10 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="60">
     <title>EKOALU — Dashboard prospection</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .pulse { animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -34,9 +40,24 @@
                 </span>
             {% endif %}
             <a href="/ekoalu/campaigns/" class="text-sm text-blue-600 hover:underline">Campagnes</a>
-            <a href="/ekoalu/companies-validation/" class="text-sm text-blue-600 hover:underline">Entreprises ✓</a>
-            <a href="/ekoalu/messages/" class="text-sm text-blue-600 hover:underline">Messages</a>
-            <a href="/ekoalu/inbox/" class="text-sm text-blue-600 hover:underline">Inbox</a>
+            <a href="/ekoalu/companies-validation/" class="relative text-sm text-blue-600 hover:underline">
+                Entreprises ✓
+                {% if companies_pending_count > 0 %}
+                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ companies_pending_count }}</span>
+                {% endif %}
+            </a>
+            <a href="/ekoalu/messages/" class="relative text-sm text-blue-600 hover:underline">
+                Messages
+                {% if pending_outbound_count > 0 %}
+                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ pending_outbound_count }}</span>
+                {% endif %}
+            </a>
+            <a href="/ekoalu/inbox/" class="relative text-sm text-blue-600 hover:underline">
+                Inbox
+                {% if pending_count > 0 %}
+                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ pending_count }}</span>
+                {% endif %}
+            </a>
             <a href="/ekoalu/companies/" class="text-sm text-blue-600 hover:underline">Sociétés</a>
             <a href="/ekoalu/leads/add/" class="text-sm text-blue-600 hover:underline">+ Prospects</a>
             <a href="/admin/" class="text-sm text-blue-600 hover:underline">Admin</a>
@@ -206,20 +227,36 @@
     <!-- Config + apprentissage -->
     <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <h3 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Queue de tâches</h3>
+            <h3 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+                Activité daemon
+                {% if tasks.running %}
+                <span class="ml-2 inline-block w-2 h-2 bg-green-500 rounded-full pulse"></span>
+                <span class="text-xs text-green-700 font-normal">en cours</span>
+                {% endif %}
+            </h3>
             <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
-                    <span class="text-gray-500">En attente</span>
-                    <span class="font-medium text-gray-900">{{ tasks.pending }}</span>
+                    <span class="text-gray-500">En attente / En cours</span>
+                    <span class="font-medium text-gray-900">{{ tasks.pending }} / {{ tasks.running }}</span>
                 </div>
                 <div class="flex justify-between">
-                    <span class="text-gray-500">En cours</span>
-                    <span class="font-medium {% if tasks.running %}text-green-600{% else %}text-gray-400{% endif %}">{{ tasks.running }}</span>
+                    <span class="text-gray-500">24h : OK / Échec</span>
+                    <span class="font-medium">
+                        <span class="text-green-700">{{ tasks.tasks_24h.completed }}</span>
+                        /
+                        <span class="text-red-700">{{ tasks.tasks_24h.failed }}</span>
+                    </span>
                 </div>
                 {% if tasks.next_at %}
                 <div class="flex justify-between pt-2 border-t">
                     <span class="text-gray-500">Prochaine</span>
                     <span class="font-medium text-gray-900 text-xs">{{ tasks.next_at|date:"d/m H:i" }}</span>
+                </div>
+                {% endif %}
+                {% if tasks.last_completed %}
+                <div class="flex justify-between text-xs pt-2 border-t">
+                    <span class="text-gray-500">Dernière action</span>
+                    <span class="text-gray-600">{{ tasks.last_completed.task_type }} · {{ tasks.last_completed.completed_at|date:"H:i" }}</span>
                 </div>
                 {% endif %}
             </div>

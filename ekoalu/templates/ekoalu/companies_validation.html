@@ -46,6 +46,37 @@
     </div>
     {% endif %}
 
+    <!-- Suggestion par IA -->
+    <details class="bg-white rounded-lg shadow-sm border border-purple-200">
+        <summary class="px-6 py-3 cursor-pointer font-medium text-purple-900 text-sm uppercase tracking-wide hover:bg-purple-50">
+            🤖 Demander à l'IA des suggestions d'entreprises
+        </summary>
+        <form method="post" class="p-6 border-t border-gray-200 space-y-3">
+            {% csrf_token %}
+            <p class="text-xs text-gray-600">
+                Claude propose des entreprises cibles selon l'ICP EKOALU (wedge tertiaire technique).
+                Elles sont créées en statut <strong>pending</strong>, à toi de valider ou refuser.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Nombre (1-25)</label>
+                    <input type="number" name="nb_suggestions" value="10" min="1" max="25"
+                           class="w-full border border-gray-300 rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Focus (optionnel)</label>
+                    <input type="text" name="focus" placeholder="ex: charpentier métallique Rhône-Alpes"
+                           class="w-full border border-gray-300 rounded p-2 text-sm">
+                </div>
+            </div>
+            <button type="submit" name="action" value="suggest_ai"
+                    class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+                🤖 Générer suggestions
+            </button>
+            <p class="text-xs text-gray-500">⚠ Coûte ~0.01 USD par appel (Claude API)</p>
+        </form>
+    </details>
+
     <!-- Ajout manuel -->
     <details class="bg-white rounded-lg shadow-sm border border-gray-200">
         <summary class="px-6 py-3 cursor-pointer font-medium text-gray-900 text-sm uppercase tracking-wide hover:bg-gray-50">

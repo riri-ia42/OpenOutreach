@@ -111,6 +111,36 @@ def dashboard(request):
         .first()
     )
 
+    # ---- Activité récente daemon ----
+    from linkedin.models import Task as DaemonTask
+    last_completed = (
+        DaemonTask.objects.filter(status="completed")
+        .order_by("-completed_at").first()
+    )
+    last_failed = (
+        DaemonTask.objects.filter(status="failed")
+        .order_by("-completed_at").first()
+    )
+
+    # Tasks dans les 24h
+    from datetime import timedelta
+    since = timezone.now() - timedelta(hours=24)
+    tasks_24h = {
+        "completed": DaemonTask.objects.filter(status="completed", completed_at__gte=since).count(),
+        "failed": DaemonTask.objects.filter(status="failed", completed_at__gte=since).count(),
+        "by_type": list(
+            DaemonTask.objects.filter(completed_at__gte=since)
+            .values("task_type")
+            .annotate(n=Count("id"))
+        ),
+    }
+
+    # Entreprises pending
+    from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
+    companies_pending_count = ApprovedCompany.objects.filter(
+        status=CompanyStatus.PENDING,
+    ).count()
+
     # ---- Apprentissage inbox_assist ----
     corrections_count = CorrectionExample.objects.count()
     corrections_in_use = CorrectionExample.objects.filter(used_in_prompt=True).count()
@@ -147,7 +177,11 @@ def dashboard(request):
             "pending": tasks_pending,
             "running": tasks_running,
             "next_at": next_task.scheduled_at if next_task else None,
+            "last_completed": last_completed,
+            "last_failed": last_failed,
+            "tasks_24h": tasks_24h,
         },
+        "companies_pending_count": companies_pending_count,
         "learning": {
             "total": corrections_count,
             "in_use": corrections_in_use,
@@ -381,6 +415,34 @@ def companies_validation(request):
                         obj.decided_at = timezone.now()
                     obj.save()
                 django_messages.success(request, f"'{name}' enregistrée comme {obj.get_status_display()}.")
+            return redirect("ekoalu:companies_validation")
+
+        elif action == "suggest_ai":
+            from ekoalu.company_validation.suggester import (
+                import_suggestions_into_db,
+                suggest_companies,
+            )
+            try:
+                n = int(request.POST.get("nb_suggestions", "10"))
+            except ValueError:
+                n = 10
+            n = min(max(n, 1), 25)  # cap [1, 25]
+            focus = request.POST.get("focus", "").strip()
+
+            suggestions = suggest_companies(n=n, focus=focus)
+            if not suggestions:
+                django_messages.error(
+                    request,
+                    "Échec génération suggestions (clé API ? prompt ? erreur réseau ?). "
+                    "Voir logs serveur.",
+                )
+            else:
+                stats = import_suggestions_into_db(suggestions)
+                django_messages.success(
+                    request,
+                    f"{stats['created']} entreprise(s) suggérée(s) ajoutée(s) en attente. "
+                    f"{stats['skipped_existing']} déjà existante(s)."
+                )
             return redirect("ekoalu:companies_validation")
 
         elif action in ("approve", "reject", "set_pending"):
