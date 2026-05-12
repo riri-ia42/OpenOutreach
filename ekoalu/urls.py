@@ -11,4 +11,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("messages/", views.outbound_list, name="outbound_list"),
     path("messages/<int:pk>/", views.outbound_detail, name="outbound_detail"),
+    path("campaigns/", views.campaigns_list, name="campaigns_list"),
+    path("campaigns/<int:pk>/", views.campaign_detail, name="campaign_detail"),
+    path("leads/add/", views.leads_add, name="leads_add"),
 ]

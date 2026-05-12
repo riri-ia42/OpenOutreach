@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ campaign.name }} — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
+        <div class="flex-1 min-w-0">
+            <h1 class="text-xl font-bold text-gray-900 truncate">{{ campaign.name }}</h1>
+            <div class="flex items-center gap-2 mt-1 text-sm">
+                {% if is_active %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-800">● actif</span>
+                {% else %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">○ pause</span>
+                {% endif %}
+                {% if persona %}
+                <span class="text-gray-500">· {{ persona.category.value }} · prio {{ persona.priority }} · {{ persona.geo_scope }}</span>
+                {% endif %}
+            </div>
+        </div>
+        <a href="{% url 'ekoalu:campaigns_list' %}" class="text-sm text-blue-600 hover:underline whitespace-nowrap">← Toutes les campagnes</a>
+    </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="rounded-lg p-4 {% if message.tags == 'success' %}bg-green-100 text-green-800{% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <!-- KPIs -->
+    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div class="bg-white rounded p-3 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Total</div>
+            <div class="text-xl font-bold text-gray-900">{{ total_leads }}</div>
+        </div>
+        <div class="bg-white rounded p-3 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Qualifiés</div>
+            <div class="text-xl font-bold text-gray-700">{{ state_counts.Qualified|default:0 }}</div>
+        </div>
+        <div class="bg-white rounded p-3 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Prêts</div>
+            <div class="text-xl font-bold text-yellow-700">{{ state_counts.Ready_to_connect|default:0 }}</div>
+        </div>
+        <div class="bg-white rounded p-3 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Invités</div>
+            <div class="text-xl font-bold text-orange-700">{{ state_counts.Pending|default:0 }}</div>
+        </div>
+        <div class="bg-white rounded p-3 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Connectés</div>
+            <div class="text-xl font-bold text-green-700">{{ state_counts.Connected|default:0 }}</div>
+        </div>
+        <div class="bg-white rounded p-3 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase">Échecs</div>
+            <div class="text-xl font-bold text-gray-400">{{ state_counts.Failed|default:0 }}</div>
+        </div>
+    </section>
+
+    <!-- Actions -->
+    <section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+        <div class="flex flex-wrap gap-2">
+            <form method="post" class="inline">
+                {% csrf_token %}
+                {% if is_active %}
+                <button type="submit" name="action" value="pause"
+                        class="px-4 py-2 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700">
+                    ⏸ Mettre en pause
+                </button>
+                {% else %}
+                <button type="submit" name="action" value="resume"
+                        class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                    ▶ Réactiver
+                </button>
+                {% endif %}
+            </form>
+            <a href="/admin/linkedin/campaign/{{ campaign.pk }}/change/"
+               class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
+                Admin avancé (CRUD)
+            </a>
+        </div>
+    </section>
+
+    <!-- Édition contenu -->
+    <form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
+        {% csrf_token %}
+        <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Paramètres de campagne</h2>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Description du produit / cible (pour Claude)</label>
+            <textarea name="product_docs" rows="8"
+                      class="w-full border border-gray-300 rounded p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent">{{ campaign.product_docs }}</textarea>
+            <p class="text-xs text-gray-500 mt-1">Décrit ton produit et ta cible. Claude l'utilise pour générer des keywords + qualifier des leads + rédiger des messages.</p>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Objectif de campagne</label>
+            <textarea name="campaign_objective" rows="3"
+                      class="w-full border border-gray-300 rounded p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent">{{ campaign.campaign_objective }}</textarea>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Lien Bookings (RDV)</label>
+            <input type="url" name="booking_link" value="{{ campaign.booking_link }}"
+                   class="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        </div>
+
+        <div class="flex gap-2 pt-2 border-t border-gray-200">
+            <button type="submit" name="action" value="save"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                💾 Enregistrer
+            </button>
+        </div>
+    </form>
+
+    <!-- Recent deals -->
+    {% if recent_deals %}
+    <section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-6 py-3 border-b border-gray-200">
+            <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Prospects récents ({{ recent_deals|length }})</h2>
+        </div>
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">Prospect</th>
+                    <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">État</th>
+                    <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">Raison</th>
+                    <th class="px-4 py-2 text-right text-xs text-gray-500 uppercase">Date</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for d in recent_deals %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2">
+                        <a href="https://www.linkedin.com/in/{{ d.lead.public_identifier }}/" target="_blank"
+                           class="text-sm text-blue-600 hover:underline">{{ d.lead.public_identifier }}</a>
+                    </td>
+                    <td class="px-4 py-2">
+                        <span class="text-xs px-2 py-0.5 rounded-full
+                            {% if d.state == 'Qualified' %}bg-gray-100 text-gray-700
+                            {% elif d.state == 'Ready_to_connect' %}bg-yellow-100 text-yellow-800
+                            {% elif d.state == 'Pending' %}bg-orange-100 text-orange-800
+                            {% elif d.state == 'Connected' %}bg-green-100 text-green-800
+                            {% elif d.state == 'Failed' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-700{% endif %}">
+                            {{ d.state }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2 text-sm text-gray-600">{{ d.reason|default:""|truncatechars:80 }}</td>
+                    <td class="px-4 py-2 text-right text-xs text-gray-500">{{ d.creation_date|date:"d/m H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    <!-- Pending outbound liés -->
+    {% if pending_outbound_list %}
+    <section>
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Messages liés à cette campagne</h2>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y">
+            {% for o in pending_outbound_list %}
+            <div class="p-3 hover:bg-gray-50 text-sm">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <span class="text-xs px-2 py-0.5 rounded-full
+                            {% if o.status == 'pending' %}bg-yellow-100 text-yellow-800
+                            {% elif o.status == 'approved' %}bg-blue-100 text-blue-800
+                            {% elif o.status == 'sent' %}bg-green-100 text-green-800
+                            {% else %}bg-gray-100 text-gray-700{% endif %}">{{ o.get_status_display }}</span>
+                        <span class="font-medium text-gray-900 ml-2">{{ o.prospect_public_id }}</span>
+                        <span class="text-gray-500 text-xs ml-2">{{ o.get_kind_display }}</span>
+                    </div>
+                    <a href="{% url 'ekoalu:outbound_detail' o.pk %}" class="text-xs text-blue-600 hover:underline">Voir →</a>
+                </div>
+                <p class="text-xs text-gray-600 mt-1">{{ o.content_to_send|truncatechars:120 }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">EKOALU · détail campagne</footer>
+
+</body>
+</html>

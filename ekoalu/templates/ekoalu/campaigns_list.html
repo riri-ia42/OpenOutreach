@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campagnes — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Campagnes</h1>
+            <p class="text-sm text-gray-500">{{ now|date:"l j F Y, H:i" }}</p>
+        </div>
+        <div class="flex gap-3 items-center">
+            <div class="bg-white border border-gray-200 rounded-lg p-1 inline-flex">
+                <a href="?scope=ekoalu" class="px-3 py-1 rounded text-sm {% if only_ekoalu %}bg-blue-100 text-blue-800 font-medium{% else %}text-gray-600{% endif %}">EKOALU</a>
+                <a href="?scope=all" class="px-3 py-1 rounded text-sm {% if not only_ekoalu %}bg-blue-100 text-blue-800 font-medium{% else %}text-gray-600{% endif %}">Toutes</a>
+            </div>
+            <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
+        </div>
+    </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagne</th>
+                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">État</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qualif.</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Prêt</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Connecté</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">À valider</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Approuvé</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for c in campaigns_data %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3">
+                        <a href="{% url 'ekoalu:campaign_detail' c.campaign.pk %}"
+                           class="text-sm font-medium text-gray-900 hover:text-blue-600">
+                            {{ c.campaign.name|cut:"EKOALU - " }}
+                        </a>
+                        {% if c.campaign.is_freemium %}
+                        <span class="text-xs text-gray-400 ml-2">(freemium)</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        {% if c.is_active %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-800">● actif</span>
+                        {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">○ pause</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right text-sm text-gray-600">{{ c.states.qualified }}</td>
+                    <td class="px-4 py-3 text-right text-sm text-yellow-700">{{ c.states.ready }}</td>
+                    <td class="px-4 py-3 text-right text-sm text-orange-700">{{ c.states.pending }}</td>
+                    <td class="px-4 py-3 text-right text-sm text-green-700 font-medium">{{ c.states.connected }}</td>
+                    <td class="px-4 py-3 text-right text-sm {% if c.pending_out %}text-yellow-700 font-medium{% else %}text-gray-400{% endif %}">{{ c.pending_out }}</td>
+                    <td class="px-4 py-3 text-right text-sm {% if c.approved_out %}text-blue-700 font-medium{% else %}text-gray-400{% endif %}">{{ c.approved_out }}</td>
+                    <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.total }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="9" class="px-4 py-8 text-center text-gray-500 text-sm">Aucune campagne.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">EKOALU · campagnes</footer>
+
+</body>
+</html>

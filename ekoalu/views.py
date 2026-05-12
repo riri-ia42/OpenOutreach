@@ -165,6 +165,173 @@ def dashboard(request):
 
 
 @staff_member_required
+def leads_add(request):
+    """Formulaire d'ajout de prospects (seeds) à une Campaign."""
+    from linkedin.models import Campaign
+    from linkedin.setup.seeds import create_seed_leads, parse_seed_urls
+
+    ekoalu_campaigns = Campaign.objects.filter(name__startswith="EKOALU - ").order_by("pk")
+
+    if request.method == "POST":
+        campaign_id = request.POST.get("campaign_id", "")
+        urls_text = request.POST.get("urls", "").strip()
+
+        if not campaign_id:
+            django_messages.error(request, "Choisis une Campaign cible.")
+        elif not urls_text:
+            django_messages.error(request, "Colle au moins une URL LinkedIn.")
+        else:
+            try:
+                campaign = Campaign.objects.get(pk=int(campaign_id))
+            except (ValueError, Campaign.DoesNotExist):
+                django_messages.error(request, "Campaign introuvable.")
+                return redirect("ekoalu:leads_add")
+
+            public_ids = parse_seed_urls(urls_text)
+            if not public_ids:
+                django_messages.warning(
+                    request,
+                    "Aucune URL LinkedIn valide trouvée. Format attendu : "
+                    "https://www.linkedin.com/in/<slug>/",
+                )
+            else:
+                created = create_seed_leads(campaign, public_ids)
+                skipped = len(public_ids) - created
+                msg = f"{created} prospect(s) ajouté(s) à \"{campaign.name}\""
+                if skipped:
+                    msg += f" ({skipped} déjà existant(s), ignoré(s))"
+                django_messages.success(request, msg)
+                return redirect("ekoalu:campaign_detail", pk=campaign.pk)
+
+    return render(request, "ekoalu/leads_add.html", {
+        "campaigns": ekoalu_campaigns,
+    })
+
+
+@staff_member_required
+def campaigns_list(request):
+    """Liste des Campaigns EKOALU avec stats live."""
+    from crm.models import Deal
+    from linkedin.models import Campaign
+
+    only_ekoalu = request.GET.get("scope", "ekoalu") == "ekoalu"
+    queryset = Campaign.objects.all()
+    if only_ekoalu:
+        queryset = queryset.filter(name__startswith="EKOALU - ")
+    queryset = queryset.order_by("pk")
+
+    campaigns_data = []
+    for campaign in queryset:
+        deals = Deal.objects.filter(campaign=campaign)
+        state_counts = {}
+        for d in deals.values("state").annotate(n=Count("id")):
+            state_counts[d["state"]] = d["n"]
+
+        # Identifier persona
+        persona_slug = None
+        for p in PERSONAS.values():
+            if p.label in campaign.name:
+                persona_slug = p.slug
+                break
+
+        # Compter PendingOutbound liés
+        pending_out = PendingOutbound.objects.filter(
+            campaign_id=campaign.pk,
+            status=OutboundStatus.PENDING,
+        ).count()
+        approved_out = PendingOutbound.objects.filter(
+            campaign_id=campaign.pk,
+            status=OutboundStatus.APPROVED,
+        ).count()
+
+        campaigns_data.append({
+            "campaign": campaign,
+            "persona_slug": persona_slug,
+            "states": {
+                "qualified": state_counts.get("Qualified", 0),
+                "ready": state_counts.get("Ready_to_connect", 0),
+                "pending": state_counts.get("Pending", 0),
+                "connected": state_counts.get("Connected", 0),
+                "completed": state_counts.get("Completed", 0),
+                "failed": state_counts.get("Failed", 0),
+            },
+            "total": sum(state_counts.values()),
+            "pending_out": pending_out,
+            "approved_out": approved_out,
+            "is_active": campaign.action_fraction > 0 and not campaign.is_freemium,
+        })
+
+    return render(request, "ekoalu/campaigns_list.html", {
+        "campaigns_data": campaigns_data,
+        "only_ekoalu": only_ekoalu,
+        "now": timezone.localtime(),
+    })
+
+
+@staff_member_required
+def campaign_detail(request, pk: int):
+    """Détail d'une Campaign : édition params + liste prospects + actions."""
+    from crm.models import Deal
+    from linkedin.models import Campaign
+
+    campaign = get_object_or_404(Campaign, pk=pk)
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+
+        if action == "save":
+            campaign.product_docs = request.POST.get("product_docs", "").strip()
+            campaign.campaign_objective = request.POST.get("campaign_objective", "").strip()
+            campaign.booking_link = request.POST.get("booking_link", "").strip()
+            campaign.save()
+            django_messages.success(request, "Campaign mise à jour.")
+            return redirect("ekoalu:campaign_detail", pk=pk)
+
+        elif action == "pause":
+            campaign.action_fraction = 0.0
+            campaign.save()
+            django_messages.warning(request, "Campaign mise en pause.")
+            return redirect("ekoalu:campaign_detail", pk=pk)
+
+        elif action == "resume":
+            campaign.action_fraction = 1.0
+            campaign.save()
+            django_messages.success(request, "Campaign réactivée.")
+            return redirect("ekoalu:campaign_detail", pk=pk)
+
+    # Stats
+    deals = Deal.objects.filter(campaign=campaign).select_related("lead").order_by("-creation_date")
+    state_counts = {}
+    for d in deals.values("state").annotate(n=Count("id")):
+        state_counts[d["state"]] = d["n"]
+
+    # Persona
+    persona = None
+    for p in PERSONAS.values():
+        if p.label in campaign.name:
+            persona = p
+            break
+
+    # Recent deals (10 derniers)
+    recent_deals = deals[:20]
+
+    # Pending outbound
+    pending_outbound_list = PendingOutbound.objects.filter(
+        campaign_id=campaign.pk,
+    ).order_by("-created_at")[:10]
+
+    return render(request, "ekoalu/campaign_detail.html", {
+        "campaign": campaign,
+        "persona": persona,
+        "state_counts": state_counts,
+        "total_leads": sum(state_counts.values()),
+        "recent_deals": recent_deals,
+        "pending_outbound_list": pending_outbound_list,
+        "is_active": campaign.action_fraction > 0 and not campaign.is_freemium,
+    })
+
+
+@staff_member_required
 def outbound_list(request):
     """Liste des messages sortants à valider."""
     status_filter = request.GET.get("status", "pending")

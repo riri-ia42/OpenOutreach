@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ajouter des prospects — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-gray-900">Ajouter des prospects</h1>
+        <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
+    </div>
+</header>
+
+<main class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    {% if messages %}
+    <div class="space-y-2 mb-6">
+        {% for message in messages %}
+        <div class="rounded-lg p-3 text-sm
+            {% if message.tags == 'success' %}bg-green-100 text-green-800
+            {% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800
+            {% elif message.tags == 'error' %}bg-red-100 text-red-800
+            {% else %}bg-blue-100 text-blue-800{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-5">
+        {% csrf_token %}
+
+        <div>
+            <label for="campaign_id" class="block text-sm font-medium text-gray-700 mb-1">
+                Campaign cible
+            </label>
+            <select name="campaign_id" id="campaign_id" required
+                    class="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <option value="">— Choisir une campagne —</option>
+                {% for c in campaigns %}
+                <option value="{{ c.pk }}">{{ c.name|cut:"EKOALU - " }}</option>
+                {% endfor %}
+            </select>
+            <p class="text-xs text-gray-500 mt-1">
+                Les prospects seront ajoutés en statut <strong>Qualified</strong>
+                (= prêts à être invités par le daemon, dans le respect des limites EKOALU).
+            </p>
+        </div>
+
+        <div>
+            <label for="urls" class="block text-sm font-medium text-gray-700 mb-1">
+                URLs LinkedIn (une par ligne)
+            </label>
+            <textarea name="urls" id="urls" rows="10" required
+                      placeholder="https://www.linkedin.com/in/slug-prospect-1/&#10;https://www.linkedin.com/in/slug-prospect-2/&#10;https://www.linkedin.com/in/slug-prospect-3/"
+                      class="w-full border border-gray-300 rounded p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"></textarea>
+            <p class="text-xs text-gray-500 mt-1">
+                Une URL par ligne. Format accepté :
+                <code class="bg-gray-100 px-1 rounded">https://www.linkedin.com/in/SLUG/</code>.
+                Les doublons et les prospects déjà dans la campagne sont ignorés automatiquement.
+            </p>
+        </div>
+
+        <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900">
+            <p class="font-medium mb-1">💡 Conseil "warm start"</p>
+            <p>
+                Ajoute 3-5 prospects que tu connais bien et qui correspondent parfaitement à ta cible.
+                Ils servent de graines au modèle d'apprentissage (Gaussian Process) qui généralisera
+                ensuite pour trouver des profils similaires de manière autonome.
+            </p>
+        </div>
+
+        <div class="flex gap-2 pt-2 border-t border-gray-200">
+            <button type="submit"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                Ajouter les prospects
+            </button>
+            <a href="/ekoalu/campaigns/"
+               class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
+                Annuler
+            </a>
+        </div>
+    </form>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">EKOALU · sourcing prospects</footer>
+
+</body>
+</html>
