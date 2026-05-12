@@ -17,6 +17,7 @@ class OutboundStatus(models.TextChoices):
     REJECTED = "rejected", "Refusé"
     EXPIRED = "expired", "Expiré"
     FAILED = "failed", "Échec envoi"
+    BLOCKED_COMPANY = "blocked_company", "Bloqué (entreprise non validée)"
 
 
 class PendingOutbound(models.Model):
@@ -25,6 +26,10 @@ class PendingOutbound(models.Model):
     # Identification
     prospect_public_id = models.CharField(max_length=128, db_index=True)
     prospect_urn = models.CharField(max_length=128, blank=True)
+    prospect_company = models.CharField(
+        max_length=255, blank=True, db_index=True,
+        help_text="Nom de l'entreprise extrait du profil (pour validation entreprise)",
+    )
     campaign_id = models.IntegerField(null=True, blank=True, db_index=True)
     campaign_name = models.CharField(max_length=255, blank=True)
 

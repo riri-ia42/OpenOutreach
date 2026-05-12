@@ -17,4 +17,5 @@ urlpatterns = [
     path("leads/<str:slug>/", views.lead_detail, name="lead_detail"),
     path("companies/", views.companies_list, name="companies_list"),
     path("inbox/", views.inbox, name="inbox"),
+    path("companies-validation/", views.companies_validation, name="companies_validation"),
 ]

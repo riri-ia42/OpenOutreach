@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validation entreprises — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <h1 class="text-xl font-bold text-gray-900">Validation entreprises</h1>
+            <p class="text-sm text-gray-500">
+                Approuve les sociétés que tu autorises l'outil à prospecter.
+                <span class="ml-2">Mode :
+                {% if validation_enabled %}
+                    <span class="text-green-700 font-medium">validation requise</span>
+                {% else %}
+                    <span class="text-orange-700 font-medium">100% auto (validation skip)</span>
+                {% endif %}
+                </span>
+            </p>
+        </div>
+        <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
+    </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="rounded-lg p-3 text-sm
+            {% if message.tags == 'success' %}bg-green-100 text-green-800
+            {% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800
+            {% elif message.tags == 'error' %}bg-red-100 text-red-800
+            {% else %}bg-blue-100 text-blue-800{% endif %}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    {% if nb_blocked > 0 %}
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-900">
+        ⚠ {{ nb_blocked }} message{{ nb_blocked|pluralize }} en attente — bloqués car leur entreprise n'est pas validée.
+    </div>
+    {% endif %}
+
+    <!-- Ajout manuel -->
+    <details class="bg-white rounded-lg shadow-sm border border-gray-200">
+        <summary class="px-6 py-3 cursor-pointer font-medium text-gray-900 text-sm uppercase tracking-wide hover:bg-gray-50">
+            + Ajouter manuellement une entreprise
+        </summary>
+        <form method="post" class="p-6 border-t border-gray-200 space-y-3">
+            {% csrf_token %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Nom de l'entreprise</label>
+                    <input type="text" name="name" required
+                           class="w-full border border-gray-300 rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">URL page LinkedIn (optionnel)</label>
+                    <input type="url" name="linkedin_company_url"
+                           class="w-full border border-gray-300 rounded p-2 text-sm">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Statut initial</label>
+                <select name="status" class="border border-gray-300 rounded p-2 text-sm">
+                    {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if value == 'approved' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" name="action" value="add_manual"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                Enregistrer
+            </button>
+        </form>
+    </details>
+
+    <!-- En attente (priorité visuelle) -->
+    {% if pending %}
+    <section>
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+            ⏳ En attente de validation ({{ pending|length }})
+        </h2>
+        <div class="bg-white rounded-lg shadow-sm border border-yellow-200 divide-y divide-gray-200">
+            {% for c in pending %}
+            <div class="p-4 hover:bg-gray-50">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div class="flex-1 min-w-0">
+                        <div class="font-medium text-gray-900">{{ c.name }}</div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            Source : {{ c.get_source_display }}
+                            {% if c.leads_count %}· {{ c.leads_count }} prospect{{ c.leads_count|pluralize }} identifié{{ c.leads_count|pluralize }}{% endif %}
+                            · {{ c.created_at|date:"d/m H:i" }}
+                        </div>
+                        {% if c.rationale %}
+                        <p class="text-xs text-gray-600 mt-1 italic">{{ c.rationale|truncatechars:200 }}</p>
+                        {% endif %}
+                        {% if c.linkedin_company_url %}
+                        <a href="{{ c.linkedin_company_url }}" target="_blank" class="text-xs text-blue-600 hover:underline mt-1 inline-block">
+                            Voir sur LinkedIn ↗
+                        </a>
+                        {% endif %}
+                    </div>
+                    <form method="post" class="flex gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="company_id" value="{{ c.pk }}">
+                        <button type="submit" name="action" value="approve"
+                                class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">
+                            ✓ Approuver
+                        </button>
+                        <button type="submit" name="action" value="reject"
+                                class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                            ✗ Refuser
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Approuvées -->
+    <section>
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+            ✓ Approuvées ({{ approved|length }})
+        </h2>
+        {% if approved %}
+        <div class="bg-white rounded-lg shadow-sm border border-green-200 divide-y divide-gray-200">
+            {% for c in approved %}
+            <div class="p-4 hover:bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-900">{{ c.name }}</div>
+                    <div class="text-xs text-gray-500 mt-1">
+                        {{ c.get_source_display }}
+                        {% if c.decided_at %}· validée {{ c.decided_at|date:"d/m H:i" }}{% endif %}
+                        {% if c.leads_count %}· {{ c.leads_count }} prospect{{ c.leads_count|pluralize }}{% endif %}
+                    </div>
+                    {% if c.notes %}
+                    <p class="text-xs text-gray-600 mt-1">{{ c.notes|truncatechars:160 }}</p>
+                    {% endif %}
+                </div>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="company_id" value="{{ c.pk }}">
+                    <button type="submit" name="action" value="set_pending"
+                            class="text-xs text-gray-600 hover:underline">
+                        Re-mettre en attente
+                    </button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 text-center text-gray-500 text-sm">
+            Aucune entreprise approuvée pour le moment.
+        </div>
+        {% endif %}
+    </section>
+
+    <!-- Refusées -->
+    {% if rejected %}
+    <section>
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+            ✗ Refusées ({{ rejected|length }})
+        </h2>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
+            {% for c in rejected %}
+            <div class="p-3 hover:bg-gray-50 flex items-center justify-between text-sm">
+                <span class="text-gray-700">{{ c.name }}</span>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="company_id" value="{{ c.pk }}">
+                    <button type="submit" name="action" value="set_pending"
+                            class="text-xs text-gray-500 hover:underline">Annuler refus</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Mode auto -->
+    <section class="bg-gray-100 rounded-lg p-4 text-xs text-gray-600">
+        <strong>Mode 100% auto</strong> : pour skip cette validation entreprise, définis dans
+        <code class="bg-white px-1 rounded">.env.production</code> :
+        <code class="bg-white px-1 rounded">EKOALU_COMPANY_VALIDATION=off</code>
+    </section>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">EKOALU · validation entreprises</footer>
+
+</body>
+</html>

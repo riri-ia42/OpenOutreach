@@ -338,6 +338,129 @@ def inbox(request):
 
 
 @staff_member_required
+def companies_validation(request):
+    """Liste des entreprises avec leur statut de validation + actions."""
+    from ekoalu.company_validation.config import is_company_validation_enabled
+    from ekoalu.company_validation.models import ApprovedCompany, CompanySource, CompanyStatus
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+
+        if action == "add_manual":
+            name = request.POST.get("name", "").strip()
+            url = request.POST.get("linkedin_company_url", "").strip()
+            status = request.POST.get("status", CompanyStatus.APPROVED)
+            if name:
+                obj, created = ApprovedCompany.objects.update_or_create(
+                    name_normalized=ApprovedCompany.objects.model.objects.none().model._meta.get_field("name_normalized"),
+                    name=name,
+                    defaults={
+                        "linkedin_company_url": url,
+                        "source": CompanySource.MANUAL,
+                        "status": status,
+                        "decided_at": timezone.now() if status != CompanyStatus.PENDING else None,
+                    },
+                ) if False else (None, False)  # we'll re-do simpler below
+                # Simpler create
+                from ekoalu.company_validation.models import _normalize_company_name
+                normalized = _normalize_company_name(name)
+                obj, created = ApprovedCompany.objects.get_or_create(
+                    name_normalized=normalized,
+                    defaults={
+                        "name": name,
+                        "linkedin_company_url": url,
+                        "source": CompanySource.MANUAL,
+                        "status": status,
+                        "decided_at": timezone.now() if status != CompanyStatus.PENDING else None,
+                    },
+                )
+                if not created:
+                    obj.status = status
+                    obj.linkedin_company_url = url or obj.linkedin_company_url
+                    if status != CompanyStatus.PENDING:
+                        obj.decided_at = timezone.now()
+                    obj.save()
+                django_messages.success(request, f"'{name}' enregistrée comme {obj.get_status_display()}.")
+            return redirect("ekoalu:companies_validation")
+
+        elif action in ("approve", "reject", "set_pending"):
+            company_id = request.POST.get("company_id", "")
+            if company_id:
+                try:
+                    obj = ApprovedCompany.objects.get(pk=int(company_id))
+                except (ValueError, ApprovedCompany.DoesNotExist):
+                    django_messages.error(request, "Entreprise introuvable.")
+                    return redirect("ekoalu:companies_validation")
+
+                new_status = {
+                    "approve": CompanyStatus.APPROVED,
+                    "reject": CompanyStatus.REJECTED,
+                    "set_pending": CompanyStatus.PENDING,
+                }[action]
+                obj.status = new_status
+                obj.decided_at = timezone.now() if new_status != CompanyStatus.PENDING else None
+                obj.save()
+
+                # Si on approuve : débloquer les PendingOutbound liés à cette entreprise
+                if new_status == CompanyStatus.APPROVED:
+                    from ekoalu.company_validation.models import _normalize_company_name
+                    n = _normalize_company_name(obj.name)
+                    # Match approximatif sur prospect_company
+                    blocked = PendingOutbound.objects.filter(
+                        status=OutboundStatus.BLOCKED_COMPANY,
+                    )
+                    debloque = 0
+                    for po in blocked:
+                        if _normalize_company_name(po.prospect_company or "") == n:
+                            po.status = OutboundStatus.PENDING
+                            po.save()
+                            debloque += 1
+                    django_messages.success(
+                        request,
+                        f"'{obj.name}' approuvée. {debloque} message(s) débloqué(s)."
+                    )
+                # Si on refuse : marquer comme REJECTED tous les pending de cette société
+                elif new_status == CompanyStatus.REJECTED:
+                    from ekoalu.company_validation.models import _normalize_company_name
+                    n = _normalize_company_name(obj.name)
+                    bloqued = 0
+                    for po in PendingOutbound.objects.filter(
+                        status__in=[OutboundStatus.PENDING, OutboundStatus.BLOCKED_COMPANY],
+                    ):
+                        if _normalize_company_name(po.prospect_company or "") == n:
+                            po.status = OutboundStatus.REJECTED
+                            po.rejection_reason = f"Entreprise refusée : {obj.name}"
+                            po.save()
+                            bloqued += 1
+                    django_messages.warning(
+                        request,
+                        f"'{obj.name}' refusée. {bloqued} message(s) annulé(s)."
+                    )
+                else:
+                    django_messages.info(request, f"'{obj.name}' remise en attente.")
+            return redirect("ekoalu:companies_validation")
+
+    # Liste par statut
+    approved = ApprovedCompany.objects.filter(status=CompanyStatus.APPROVED).order_by("name")
+    pending = ApprovedCompany.objects.filter(status=CompanyStatus.PENDING).order_by("-created_at")
+    rejected = ApprovedCompany.objects.filter(status=CompanyStatus.REJECTED).order_by("name")
+
+    # Stats PendingOutbound bloqués
+    nb_blocked_by_company = PendingOutbound.objects.filter(
+        status=OutboundStatus.BLOCKED_COMPANY,
+    ).count()
+
+    return render(request, "ekoalu/companies_validation.html", {
+        "approved": approved,
+        "pending": pending,
+        "rejected": rejected,
+        "nb_blocked": nb_blocked_by_company,
+        "validation_enabled": is_company_validation_enabled(),
+        "status_choices": CompanyStatus.choices,
+    })
+
+
+@staff_member_required
 def leads_add(request):
     """Formulaire d'ajout de prospects (seeds) à une Campaign."""
     from linkedin.models import Campaign

@@ -60,8 +60,10 @@ def apply_outbound_validation_patch() -> None:
     _original_send_raw_message = original_send_raw_message
 
     def patched_send_connection_request(session, profile):
+        from ekoalu.company_validation.config import is_company_validation_enabled
+        from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
         from ekoalu.outbound_validation.config import is_approval_required
-        from ekoalu.outbound_validation.models import OutboundKind, PendingOutbound
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
 
         if not is_approval_required():
             return original_send_connection(session, profile)
@@ -69,17 +71,51 @@ def apply_outbound_validation_patch() -> None:
         # Mode require_approval : on crée PendingOutbound au lieu d'envoyer
         public_id = profile.get("public_identifier", "")
         urn = profile.get("urn", "")
+        company = profile.get("company", "") or profile.get("company_name", "")
         campaign = getattr(session, "campaign", None)
         campaign_id = getattr(campaign, "pk", None)
         campaign_name = getattr(campaign, "name", "") if campaign else ""
 
+        # Vérif entreprise (si validation entreprise activée)
+        initial_status = OutboundStatus.PENDING
+        if is_company_validation_enabled() and company:
+            if ApprovedCompany.is_rejected(company):
+                logger.info(
+                    "EKOALU: invitation pour %s SKIP - entreprise '%s' refusee",
+                    public_id, company,
+                )
+                # Tracée comme rejected directement
+                PendingOutbound.objects.create(
+                    prospect_public_id=public_id,
+                    prospect_urn=urn,
+                    prospect_company=company,
+                    campaign_id=campaign_id,
+                    campaign_name=campaign_name,
+                    kind=OutboundKind.INVITATION,
+                    ai_draft="(Invitation LinkedIn sans note)",
+                    status=OutboundStatus.REJECTED,
+                    rejection_reason=f"Entreprise refusee: {company}",
+                )
+                return ProfileState.QUALIFIED
+
+            if not ApprovedCompany.is_approved(company):
+                # Pas approuvée → bloquée + créer ApprovedCompany pending
+                ApprovedCompany.find_or_create_pending(company)
+                initial_status = OutboundStatus.BLOCKED_COMPANY
+                logger.info(
+                    "EKOALU: invitation pour %s BLOQUEE - entreprise '%s' a valider",
+                    public_id, company,
+                )
+
         PendingOutbound.objects.create(
             prospect_public_id=public_id,
             prospect_urn=urn,
+            prospect_company=company,
             campaign_id=campaign_id,
             campaign_name=campaign_name,
             kind=OutboundKind.INVITATION,
             ai_draft="(Invitation LinkedIn sans note)",
+            status=initial_status,
         )
         logger.info(
             "EKOALU: invitation pour %s capturee en file de validation (pas envoyee)",
@@ -90,25 +126,43 @@ def apply_outbound_validation_patch() -> None:
         return ProfileState.QUALIFIED
 
     def patched_send_raw_message(session, profile, message):
+        from ekoalu.company_validation.config import is_company_validation_enabled
+        from ekoalu.company_validation.models import ApprovedCompany
         from ekoalu.outbound_validation.config import is_approval_required
-        from ekoalu.outbound_validation.models import OutboundKind, PendingOutbound
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
 
         if not is_approval_required():
             return original_send_raw_message(session, profile, message)
 
         public_id = profile.get("public_identifier", "")
         urn = profile.get("urn", "")
+        company = profile.get("company", "") or profile.get("company_name", "")
         campaign = getattr(session, "campaign", None)
         campaign_id = getattr(campaign, "pk", None)
         campaign_name = getattr(campaign, "name", "") if campaign else ""
 
+        # Vérif entreprise
+        initial_status = OutboundStatus.PENDING
+        if is_company_validation_enabled() and company:
+            if ApprovedCompany.is_rejected(company):
+                logger.info(
+                    "EKOALU: message pour %s SKIP - entreprise '%s' refusee",
+                    public_id, company,
+                )
+                return False
+            if not ApprovedCompany.is_approved(company):
+                ApprovedCompany.find_or_create_pending(company)
+                initial_status = OutboundStatus.BLOCKED_COMPANY
+
         PendingOutbound.objects.create(
             prospect_public_id=public_id,
             prospect_urn=urn,
+            prospect_company=company,
             campaign_id=campaign_id,
             campaign_name=campaign_name,
             kind=OutboundKind.FOLLOW_UP,
             ai_draft=message,
+            status=initial_status,
         )
         logger.info(
             "EKOALU: message pour %s capture en file de validation (pas envoye)",
