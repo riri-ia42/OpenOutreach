@@ -68,14 +68,34 @@
     <!-- Édition + actions -->
     <form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
         {% csrf_token %}
-        <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Édition (envoi final)</h2>
-        <textarea name="final_content" rows="6"
-                  placeholder="Laisser vide pour envoyer le brouillon IA tel quel"
-                  class="w-full border border-gray-300 rounded p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent">{{ outbound.final_content }}</textarea>
-        <p class="text-xs text-gray-500">
-            Si vide → on envoie le brouillon IA. Sinon → on envoie le contenu édité.
-            {% if outbound.kind == 'invitation' %}<span class="text-orange-600">⚠ Limite LinkedIn invitation : 300 caractères max.</span>{% endif %}
+        <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+            ✏️ Édite ici (envoi final)
+        </h2>
+        <p class="text-xs text-gray-600 -mt-2">
+            Le brouillon IA est pré-rempli ci-dessous. Modifie-le librement.
+            Quand tu approuves, c'est <strong>ce texte</strong> qui est envoyé.
         </p>
+        <textarea name="final_content" rows="5"
+                  oninput="document.getElementById('charcount').textContent = this.value.length"
+                  class="w-full border-2 border-blue-300 rounded p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500">{% if outbound.final_content %}{{ outbound.final_content }}{% else %}{{ outbound.ai_draft }}{% endif %}</textarea>
+        <p class="text-xs text-gray-500">
+            <span id="charcount">{% if outbound.final_content %}{{ outbound.final_content|length }}{% else %}{{ outbound.ai_draft|length }}{% endif %}</span> caractères
+            {% if outbound.kind == 'invitation' %}<span class="text-orange-600 ml-2">⚠ Limite invitation LinkedIn : 300 max</span>{% endif %}
+        </p>
+
+        <!-- Champ explication apprentissage -->
+        <div class="border-t border-gray-200 pt-3">
+            <label for="learn_note" class="block text-xs font-medium text-gray-700 mb-1">
+                💡 Pourquoi cette modif ? <span class="text-gray-400">(optionnel — aide Claude à apprendre)</span>
+            </label>
+            <input type="text" name="learn_note" id="learn_note" maxlength="300"
+                   placeholder="ex: trop formel, ajouter mention chantier, raccourcir, ton plus direct..."
+                   class="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            <p class="text-xs text-gray-500 mt-1">
+                Ta correction + cette note sont sauvegardées comme exemple d'apprentissage
+                pour les prochaines générations.
+            </p>
+        </div>
 
         {% if is_pending %}
         <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-200">

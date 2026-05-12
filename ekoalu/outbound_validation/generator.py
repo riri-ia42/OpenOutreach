@@ -82,6 +82,8 @@ def _build_few_shot_examples(persona_slug: str = "", limit: int = 10) -> str:
         lines.append("---")
         lines.append(f"AI a propose : {pr.ai_draft[:300]}")
         lines.append(f"Richard a envoye : {pr.final_sent[:300]}")
+        if ex.explanation:
+            lines.append(f"Raison correction : {ex.explanation}")
     return "\n".join(lines)
 
 

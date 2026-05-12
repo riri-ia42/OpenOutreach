@@ -78,6 +78,10 @@ class CorrectionExample(models.Model):
         default=list,
         help_text="Liste de lignes diff unifiées (debug)",
     )
+    explanation = models.CharField(
+        max_length=300, blank=True, default="",
+        help_text="Note Richard expliquant pourquoi cette correction (aide apprentissage Claude)",
+    )
     used_in_prompt = models.BooleanField(
         default=False,
         db_index=True,
@@ -105,6 +109,7 @@ class CorrectionExample(models.Model):
         cls,
         pending: PendingReply,
         persona_slug: str = "",
+        explanation: str = "",
     ) -> CorrectionExample:
         """Crée un CorrectionExample à partir d un PendingReply envoyé."""
         ratio = cls.compute_similarity_ratio(pending.ai_draft, pending.final_sent)
@@ -121,4 +126,5 @@ class CorrectionExample(models.Model):
             persona_slug=persona_slug,
             similarity_ratio=ratio,
             diff_lines=diff,
+            explanation=explanation,
         )
