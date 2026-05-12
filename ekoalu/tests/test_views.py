@@ -202,6 +202,88 @@ class TestLeadsAddView:
 
 
 @pytest.mark.django_db
+class TestLeadDetailView:
+    def test_lead_detail_404(self, client_logged):
+        r = client_logged.get(reverse("ekoalu:lead_detail", args=["inexistant-slug"]))
+        assert r.status_code == 404
+
+    def test_lead_detail_accessible(self, client_logged):
+        from crm.models import Lead
+        Lead.objects.create(
+            public_identifier="test-detail-slug",
+            linkedin_url="https://www.linkedin.com/in/test-detail-slug/",
+        )
+        r = client_logged.get(reverse("ekoalu:lead_detail", args=["test-detail-slug"]))
+        assert r.status_code == 200
+        assert b"test-detail-slug" in r.content
+
+    def test_lead_detail_disqualify(self, client_logged):
+        from crm.models import Lead
+        Lead.objects.create(
+            public_identifier="test-disq",
+            linkedin_url="https://www.linkedin.com/in/test-disq/",
+        )
+        r = client_logged.post(
+            reverse("ekoalu:lead_detail", args=["test-disq"]),
+            data={"action": "disqualify"},
+        )
+        assert r.status_code in (302, 303)
+        lead = Lead.objects.get(public_identifier="test-disq")
+        assert lead.disqualified is True
+
+    def test_lead_detail_requalify(self, client_logged):
+        from crm.models import Lead
+        Lead.objects.create(
+            public_identifier="test-req",
+            linkedin_url="https://www.linkedin.com/in/test-req/",
+            disqualified=True,
+        )
+        r = client_logged.post(
+            reverse("ekoalu:lead_detail", args=["test-req"]),
+            data={"action": "requalify"},
+        )
+        assert r.status_code in (302, 303)
+        lead = Lead.objects.get(public_identifier="test-req")
+        assert lead.disqualified is False
+
+
+@pytest.mark.django_db
+class TestCompaniesView:
+    def test_companies_list_accessible_vide(self, client_logged):
+        r = client_logged.get(reverse("ekoalu:companies_list"))
+        assert r.status_code == 200
+
+    def test_companies_list_avec_deals(self, client_logged):
+        from crm.models import Lead, Deal
+        from linkedin.models import Campaign
+        lead = Lead.objects.create(
+            public_identifier="companies-test",
+            linkedin_url="https://www.linkedin.com/in/companies-test/",
+        )
+        camp = Campaign.objects.create(name="EKOALU - test companies")
+        Deal.objects.create(
+            lead=lead,
+            campaign=camp,
+            state="Qualified",
+            profile_summary=[
+                {"memory": "Company: BTP Lyon SAS"},
+                {"memory": "Works in tertiary construction"},
+            ],
+        )
+        r = client_logged.get(reverse("ekoalu:companies_list"))
+        assert r.status_code == 200
+        assert b"BTP Lyon SAS" in r.content
+
+
+@pytest.mark.django_db
+class TestInboxView:
+    def test_inbox_accessible(self, client_logged):
+        r = client_logged.get(reverse("ekoalu:inbox"))
+        assert r.status_code == 200
+        assert b"Inbox" in r.content
+
+
+@pytest.mark.django_db
 class TestOutboundViewsExtra:
     def test_outbound_edit_then_approve(self, client_logged):
         from ekoalu.outbound_validation.models import (

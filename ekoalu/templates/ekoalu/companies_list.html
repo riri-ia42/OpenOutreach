@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sociétés — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <div>
+            <h1 class="text-xl font-bold text-gray-900">Sociétés ({{ total_companies }})</h1>
+            <p class="text-sm text-gray-500">Agrégation des prospects par société employeuse</p>
+        </div>
+        <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
+    </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    {% if companies %}
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
+        {% for c in companies %}
+        <div class="p-4 hover:bg-gray-50">
+            <div class="flex items-center justify-between">
+                <div class="flex-1">
+                    <h3 class="font-medium text-gray-900">{{ c.name }}</h3>
+                    <div class="flex flex-wrap gap-1 mt-2">
+                        {% for state, n in c.states.items %}
+                        <span class="text-xs px-2 py-0.5 rounded-full
+                            {% if state == 'Connected' %}bg-green-100 text-green-800
+                            {% elif state == 'Pending' %}bg-orange-100 text-orange-800
+                            {% elif state == 'Failed' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-700{% endif %}">
+                            {{ state }}: {{ n }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-2xl font-bold text-gray-900">{{ c.deals|length }}</div>
+                    <div class="text-xs text-gray-500">prospect{{ c.deals|length|pluralize }}</div>
+                </div>
+            </div>
+            <details class="mt-3">
+                <summary class="text-xs text-blue-600 hover:underline cursor-pointer">Voir les prospects</summary>
+                <ul class="mt-2 space-y-1 pl-3 border-l-2 border-gray-200">
+                    {% for d in c.deals %}
+                    <li class="text-sm">
+                        <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}" class="text-blue-600 hover:underline">
+                            {{ d.lead.public_identifier }}
+                        </a>
+                        <span class="text-xs text-gray-500">— {{ d.campaign.name|cut:"EKOALU - " }} · {{ d.state }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg shadow-sm p-8 border border-gray-200 text-center text-gray-500">
+        <p class="text-sm">Aucune société identifiée pour l'instant.</p>
+        <p class="text-xs mt-2">Les sociétés apparaissent automatiquement quand le daemon scrape et résume les profils des prospects.</p>
+    </div>
+    {% endif %}
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">EKOALU · sociétés</footer>
+
+</body>
+</html>

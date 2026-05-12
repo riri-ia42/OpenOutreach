@@ -165,6 +165,179 @@ def dashboard(request):
 
 
 @staff_member_required
+def lead_detail(request, slug: str):
+    """Détail d'un prospect : profil + scoring + timeline + actions."""
+    from chat.models import ChatMessage
+    from crm.models import Deal, Lead
+    from django.contrib.contenttypes.models import ContentType
+
+    lead = get_object_or_404(Lead, public_identifier=slug)
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        if action == "disqualify":
+            lead.disqualified = True
+            lead.save()
+            django_messages.warning(request, "Prospect disqualifié (exclusion permanente).")
+            return redirect("ekoalu:lead_detail", slug=slug)
+        elif action == "requalify":
+            lead.disqualified = False
+            lead.save()
+            django_messages.success(request, "Prospect requalifié.")
+            return redirect("ekoalu:lead_detail", slug=slug)
+
+    deals = Deal.objects.filter(lead=lead).select_related("campaign").order_by("-creation_date")
+
+    # Conversations (ChatMessage via GenericForeignKey)
+    lead_ct = ContentType.objects.get_for_model(Lead)
+    chat_messages = ChatMessage.objects.filter(
+        content_type=lead_ct, object_id=lead.pk,
+    ).order_by("creation_date")[:50]
+
+    # Outbound liés
+    pending_outbound = PendingOutbound.objects.filter(
+        prospect_public_id=slug,
+    ).order_by("-created_at")[:20]
+
+    # Compose la timeline
+    timeline_events = []
+    timeline_events.append({
+        "kind": "lead_created",
+        "label": "Prospect créé",
+        "date": lead.creation_date,
+    })
+    for d in deals:
+        timeline_events.append({
+            "kind": "deal_state",
+            "label": f"{d.campaign.name} → {d.state}",
+            "date": d.update_date or d.creation_date,
+            "deal": d,
+        })
+    for po in pending_outbound:
+        timeline_events.append({
+            "kind": "outbound",
+            "label": f"{po.get_kind_display()} ({po.get_status_display()})",
+            "date": po.created_at,
+            "outbound": po,
+        })
+    for cm in chat_messages:
+        timeline_events.append({
+            "kind": "chat",
+            "label": ("→ envoyé" if cm.is_outgoing else "← reçu"),
+            "date": cm.creation_date,
+            "chat": cm,
+        })
+    timeline_events.sort(key=lambda e: e["date"] or timezone.now(), reverse=True)
+
+    return render(request, "ekoalu/lead_detail.html", {
+        "lead": lead,
+        "linkedin_url": f"https://www.linkedin.com/in/{slug}/",
+        "deals": deals,
+        "chat_messages": chat_messages,
+        "pending_outbound": pending_outbound,
+        "timeline_events": timeline_events[:30],
+        "has_embedding": lead.embedding is not None,
+    })
+
+
+@staff_member_required
+def companies_list(request):
+    """Vue agrégée par société (basée sur Deal.profile_summary)."""
+    from crm.models import Deal
+
+    # Extrait le nom de société depuis profile_summary (mem0 facts) si présent
+    companies: dict[str, dict] = {}
+    deals = Deal.objects.select_related("lead", "campaign").exclude(profile_summary=None)
+    for deal in deals:
+        company = _extract_company_from_summary(deal.profile_summary)
+        if not company:
+            continue
+        key = company.lower().strip()
+        if key not in companies:
+            companies[key] = {
+                "name": company,
+                "deals": [],
+                "states": {},
+            }
+        companies[key]["deals"].append(deal)
+        companies[key]["states"][deal.state] = companies[key]["states"].get(deal.state, 0) + 1
+
+    # Tri par nb de prospects desc
+    companies_sorted = sorted(
+        companies.values(), key=lambda c: len(c["deals"]), reverse=True,
+    )
+
+    return render(request, "ekoalu/companies_list.html", {
+        "companies": companies_sorted,
+        "total_companies": len(companies_sorted),
+    })
+
+
+def _extract_company_from_summary(profile_summary):
+    """Extrait le nom de société depuis profile_summary (liste de facts mem0)."""
+    if not profile_summary or not isinstance(profile_summary, list):
+        return None
+    for fact in profile_summary:
+        if not isinstance(fact, dict):
+            continue
+        text = fact.get("memory") or fact.get("text") or fact.get("fact") or ""
+        text_lower = text.lower()
+        # Heuristique simple : facts qui contiennent "company:", "works at", "entreprise"
+        if any(kw in text_lower for kw in ["company:", "works at ", "entreprise :", "société :"]):
+            # Extraction du nom après le marqueur
+            for sep in [":", " at ", "chez "]:
+                if sep in text_lower:
+                    return text.split(sep, 1)[1].strip().rstrip(".,;").split("\n")[0]
+    return None
+
+
+@staff_member_required
+def inbox(request):
+    """Vue inbox : conversations en cours + brouillons de réponse."""
+    from chat.models import ChatMessage
+    from crm.models import Lead
+    from django.contrib.contenttypes.models import ContentType
+
+    # Brouillons de réponse en attente (PendingReply)
+    pending_replies = PendingReply.objects.filter(
+        status=PendingReply.Status.PENDING,
+    ).order_by("-created_at")[:20]
+
+    # Conversations actives : derniers messages reçus (is_outgoing=False)
+    lead_ct = ContentType.objects.get_for_model(Lead)
+    recent_inbound = (
+        ChatMessage.objects
+        .filter(content_type=lead_ct, is_outgoing=False)
+        .select_related()
+        .order_by("-creation_date")[:30]
+    )
+
+    # Regroupe par lead pour avoir des "conversations"
+    conversations = {}
+    for msg in recent_inbound:
+        lead_pk = msg.object_id
+        if lead_pk not in conversations:
+            try:
+                lead = Lead.objects.get(pk=lead_pk)
+            except Lead.DoesNotExist:
+                continue
+            conversations[lead_pk] = {
+                "lead": lead,
+                "last_message": msg,
+                "messages_count": 0,
+            }
+        conversations[lead_pk]["messages_count"] += 1
+
+    conversations_list = list(conversations.values())
+
+    return render(request, "ekoalu/inbox.html", {
+        "pending_replies": pending_replies,
+        "pending_count": pending_replies.count(),
+        "conversations": conversations_list,
+    })
+
+
+@staff_member_required
 def leads_add(request):
     """Formulaire d'ajout de prospects (seeds) à une Campaign."""
     from linkedin.models import Campaign

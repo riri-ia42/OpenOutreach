@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inbox — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-gray-900">Inbox conversations</h1>
+        <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
+    </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+    <!-- Brouillons en attente -->
+    {% if pending_count > 0 %}
+    <section>
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+            Brouillons de réponse en attente ({{ pending_count }})
+        </h2>
+        <div class="bg-white rounded-lg shadow-sm border border-yellow-200 divide-y divide-gray-200">
+            {% for pr in pending_replies %}
+            <div class="p-4 hover:bg-yellow-50">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <a href="{% url 'ekoalu:lead_detail' pr.prospect_public_id %}"
+                           class="font-medium text-gray-900 hover:text-blue-600">{{ pr.prospect_public_id }}</a>
+                        <span class="text-xs px-2 py-0.5 rounded-full
+                            {% if pr.intent == 'rdv_request' %}bg-green-100 text-green-800
+                            {% elif pr.intent == 'technical_question' %}bg-blue-100 text-blue-800
+                            {% elif pr.intent == 'objection' %}bg-yellow-100 text-yellow-800
+                            {% elif pr.intent == 'opt_out' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-700{% endif %}">{{ pr.intent }}</span>
+                    </div>
+                    <a href="/admin/ekoalu/pendingreply/{{ pr.pk }}/change/"
+                       class="text-xs text-blue-600 hover:underline">Éditer →</a>
+                </div>
+                <div class="text-sm space-y-1">
+                    <p><span class="font-medium text-gray-700">Reçu :</span> {{ pr.inbound_message|truncatechars:180 }}</p>
+                    <p><span class="font-medium text-gray-700">Brouillon IA :</span> {{ pr.ai_draft|truncatechars:180 }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Conversations actives -->
+    <section>
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+            Conversations récentes ({{ conversations|length }})
+        </h2>
+        {% if conversations %}
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
+            {% for c in conversations %}
+            <a href="{% url 'ekoalu:lead_detail' c.lead.public_identifier %}"
+               class="block p-4 hover:bg-gray-50">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="font-medium text-gray-900">{{ c.lead.public_identifier }}</span>
+                    <span class="text-xs text-gray-400">{{ c.last_message.creation_date|date:"d/m H:i" }}</span>
+                </div>
+                <p class="text-sm text-gray-600">{{ c.last_message.content|truncatechars:200 }}</p>
+                <p class="text-xs text-gray-400 mt-1">{{ c.messages_count }} message{{ c.messages_count|pluralize }} reçu{{ c.messages_count|pluralize }}</p>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-white rounded-lg shadow-sm p-8 border border-gray-200 text-center text-gray-500">
+            <p class="text-sm">Aucune conversation pour l'instant.</p>
+            <p class="text-xs mt-2">Les conversations apparaîtront ici quand des prospects auront accepté ta connexion et répondu.</p>
+        </div>
+        {% endif %}
+    </section>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">EKOALU · inbox</footer>
+
+</body>
+</html>
