@@ -21,10 +21,16 @@ class EkoaluConfig(AppConfig):
         """
         # Import tardif pour éviter les imports circulaires Django startup
         from ekoalu.human_scheduler.patch import apply_human_scheduler_patch
+        from ekoalu.outbound_validation.patch import apply_outbound_validation_patch
 
         try:
             apply_human_scheduler_patch()
             logger.info("EKOALU human_scheduler patch applied")
         except Exception as e:
-            logger.error("Failed to apply EKOALU patches: %s", e, exc_info=True)
-            # On ne lève pas — Django doit pouvoir démarrer pour migrations etc.
+            logger.error("Failed to apply human_scheduler patch: %s", e, exc_info=True)
+
+        try:
+            apply_outbound_validation_patch()
+            logger.info("EKOALU outbound_validation patch applied")
+        except Exception as e:
+            logger.error("Failed to apply outbound_validation patch: %s", e, exc_info=True)

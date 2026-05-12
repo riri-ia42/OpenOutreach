@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Message #{{ outbound.pk }} — EKOALU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
+        <div>
+            <h1 class="text-xl font-bold text-gray-900">Message #{{ outbound.pk }}</h1>
+            <p class="text-sm text-gray-500">
+                <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">{{ outbound.get_kind_display }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full
+                    {% if outbound.status == 'pending' %}bg-yellow-100 text-yellow-800
+                    {% elif outbound.status == 'approved' %}bg-blue-100 text-blue-800
+                    {% elif outbound.status == 'sent' %}bg-green-100 text-green-800
+                    {% else %}bg-gray-200 text-gray-700{% endif %}">
+                    {{ outbound.get_status_display }}
+                </span>
+                · Créé le {{ outbound.created_at|date:"d/m/Y à H:i" }}
+            </p>
+        </div>
+        <a href="{% url 'ekoalu:outbound_list' %}" class="text-sm text-blue-600 hover:underline">← Retour à la liste</a>
+    </div>
+</header>
+
+<main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="rounded-lg p-4 {% if message.tags == 'success' %}bg-green-100 text-green-800{% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <!-- Infos prospect -->
+    <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Prospect</h2>
+        <div class="space-y-2 text-sm">
+            <div>
+                <span class="text-gray-500">Slug :</span>
+                <a href="{{ linkedin_url }}" target="_blank" class="font-medium text-blue-600 hover:underline">
+                    {{ outbound.prospect_public_id }} ↗
+                </a>
+            </div>
+            {% if outbound.campaign_name %}
+            <div>
+                <span class="text-gray-500">Campaign :</span>
+                <span class="font-medium text-gray-900">{{ outbound.campaign_name }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Brouillon IA (read-only) -->
+    <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Brouillon IA (Claude)</h2>
+        <div class="bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap font-mono">{{ outbound.ai_draft }}</div>
+        <p class="text-xs text-gray-400 mt-2">{{ outbound.ai_draft|length }} caractères</p>
+    </div>
+
+    <!-- Édition + actions -->
+    <form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
+        {% csrf_token %}
+        <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Édition (envoi final)</h2>
+        <textarea name="final_content" rows="6"
+                  placeholder="Laisser vide pour envoyer le brouillon IA tel quel"
+                  class="w-full border border-gray-300 rounded p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent">{{ outbound.final_content }}</textarea>
+        <p class="text-xs text-gray-500">
+            Si vide → on envoie le brouillon IA. Sinon → on envoie le contenu édité.
+            {% if outbound.kind == 'invitation' %}<span class="text-orange-600">⚠ Limite LinkedIn invitation : 300 caractères max.</span>{% endif %}
+        </p>
+
+        {% if is_pending %}
+        <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-200">
+            <button type="submit" name="action" value="approve"
+                    class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                ✓ Approuver (envoyer)
+            </button>
+            <button type="submit" name="action" value="save_draft"
+                    class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
+                Sauvegarder brouillon
+            </button>
+            <button type="submit" name="action" value="mark_sent"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                Marquer envoyé (manuel)
+            </button>
+            <details class="ml-auto">
+                <summary class="px-4 py-2 bg-red-50 text-red-700 text-sm rounded hover:bg-red-100 cursor-pointer list-none">
+                    ✗ Refuser
+                </summary>
+                <div class="absolute right-0 mt-2 bg-white border border-gray-200 rounded shadow-lg p-3 z-10 min-w-[300px]">
+                    <input type="text" name="rejection_reason" placeholder="Raison (optionnel)"
+                           class="w-full border border-gray-300 rounded p-2 text-sm mb-2">
+                    <button type="submit" name="action" value="reject"
+                            class="w-full px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                        Confirmer refus
+                    </button>
+                </div>
+            </details>
+        </div>
+        {% elif is_approved %}
+        <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-200">
+            <button type="submit" name="action" value="mark_sent"
+                    class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                Marquer envoyé manuellement
+            </button>
+            <p class="text-xs text-gray-500 self-center">Approuvé le {{ outbound.approved_at|date:"d/m H:i" }} — sera envoyé au prochain cycle daemon</p>
+        </div>
+        {% else %}
+        <div class="text-sm text-gray-500 pt-2 border-t border-gray-200">
+            Pas d'action possible (statut : {{ outbound.get_status_display }})
+        </div>
+        {% endif %}
+    </form>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">
+    EKOALU · validation message sortant
+</footer>
+
+</body>
+</html>

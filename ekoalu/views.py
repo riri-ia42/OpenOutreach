@@ -6,13 +6,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from django.contrib import messages as django_messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Count, Q
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from ekoalu import conf
 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+from ekoalu.outbound_validation.config import get_approval_mode
+from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
 from ekoalu.personas import PERSONAS
 
 
@@ -87,6 +91,17 @@ def dashboard(request):
         status=PendingReply.Status.PENDING,
     ).count()
 
+    # ---- Pending outbound messages (validation avant envoi) ----
+    pending_outbound = PendingOutbound.objects.filter(
+        status=OutboundStatus.PENDING,
+    ).order_by("-created_at")[:5]
+    pending_outbound_count = PendingOutbound.objects.filter(
+        status=OutboundStatus.PENDING,
+    ).count()
+    approved_outbound_count = PendingOutbound.objects.filter(
+        status=OutboundStatus.APPROVED,
+    ).count()
+
     # ---- Tasks en queue ----
     tasks_pending = Task.objects.filter(status="pending").count()
     tasks_running = Task.objects.filter(status="running").count()
@@ -124,6 +139,10 @@ def dashboard(request):
         },
         "pending_replies": pending_replies,
         "pending_count": pending_count,
+        "pending_outbound": pending_outbound,
+        "pending_outbound_count": pending_outbound_count,
+        "approved_outbound_count": approved_outbound_count,
+        "approval_mode": get_approval_mode().value,
         "tasks": {
             "pending": tasks_pending,
             "running": tasks_running,
@@ -143,3 +162,79 @@ def dashboard(request):
         },
     }
     return render(request, "ekoalu/dashboard.html", context)
+
+
+@staff_member_required
+def outbound_list(request):
+    """Liste des messages sortants à valider."""
+    status_filter = request.GET.get("status", "pending")
+    kind_filter = request.GET.get("kind", "")
+
+    queryset = PendingOutbound.objects.all().order_by("-created_at")
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+    if kind_filter:
+        queryset = queryset.filter(kind=kind_filter)
+
+    counts = {
+        "pending": PendingOutbound.objects.filter(status=OutboundStatus.PENDING).count(),
+        "approved": PendingOutbound.objects.filter(status=OutboundStatus.APPROVED).count(),
+        "sent": PendingOutbound.objects.filter(status=OutboundStatus.SENT).count(),
+        "rejected": PendingOutbound.objects.filter(status=OutboundStatus.REJECTED).count(),
+    }
+
+    context = {
+        "outbound_list": queryset[:100],
+        "counts": counts,
+        "status_filter": status_filter,
+        "kind_filter": kind_filter,
+        "approval_mode": get_approval_mode().value,
+        "now": timezone.localtime(),
+    }
+    return render(request, "ekoalu/outbound_list.html", context)
+
+
+@staff_member_required
+def outbound_detail(request, pk: int):
+    """Détail d'un message sortant + édition + actions."""
+    outbound = get_object_or_404(PendingOutbound, pk=pk)
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        final_content = request.POST.get("final_content", "").strip()
+
+        if action == "approve":
+            outbound.final_content = final_content
+            outbound.status = OutboundStatus.APPROVED
+            outbound.approved_at = timezone.now()
+            outbound.save()
+            django_messages.success(request, "Message approuvé. Il sera envoyé au prochain cycle.")
+            return redirect("ekoalu:outbound_list")
+
+        elif action == "reject":
+            outbound.status = OutboundStatus.REJECTED
+            outbound.rejection_reason = request.POST.get("rejection_reason", "")
+            outbound.save()
+            django_messages.warning(request, "Message refusé.")
+            return redirect("ekoalu:outbound_list")
+
+        elif action == "save_draft":
+            outbound.final_content = final_content
+            outbound.save()
+            django_messages.info(request, "Brouillon sauvegardé (statut inchangé).")
+            return redirect("ekoalu:outbound_detail", pk=pk)
+
+        elif action == "mark_sent":
+            outbound.status = OutboundStatus.SENT
+            outbound.sent_at = timezone.now()
+            outbound.save()
+            django_messages.success(request, "Marqué comme envoyé manuellement.")
+            return redirect("ekoalu:outbound_list")
+
+    context = {
+        "outbound": outbound,
+        "linkedin_url": f"https://www.linkedin.com/in/{outbound.prospect_public_id}/",
+        "is_pending": outbound.status == OutboundStatus.PENDING,
+        "is_approved": outbound.status == OutboundStatus.APPROVED,
+    }
+    return render(request, "ekoalu/outbound_detail.html", context)

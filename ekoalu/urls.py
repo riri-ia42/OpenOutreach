@@ -9,4 +9,6 @@ app_name = "ekoalu"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path("messages/", views.outbound_list, name="outbound_list"),
+    path("messages/<int:pk>/", views.outbound_detail, name="outbound_detail"),
 ]
