@@ -733,6 +733,26 @@ def outbound_detail(request, pk: int):
             outbound.status = OutboundStatus.APPROVED
             outbound.approved_at = timezone.now()
             outbound.save()
+
+            # Si Richard a edite (final != draft), creer CorrectionExample pour apprentissage
+            if final_content.strip() and final_content.strip() != outbound.ai_draft.strip():
+                try:
+                    from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+                    # Creer un PendingReply minimal qui sert de container
+                    pr = PendingReply.objects.create(
+                        prospect_public_id=outbound.prospect_public_id,
+                        campaign_id=outbound.campaign_id,
+                        inbound_message="(invitation outbound)",
+                        ai_draft=outbound.ai_draft,
+                        final_sent=final_content.strip(),
+                        status=PendingReply.Status.SENT,
+                        sent_at=timezone.now(),
+                    )
+                    CorrectionExample.from_pending(pr, persona_slug="invitation")
+                except Exception as e:
+                    import logging
+                    logging.exception("CorrectionExample creation failed: %s", e)
+
             django_messages.success(request, "Message approuvé. Il sera envoyé au prochain cycle.")
             return redirect("ekoalu:outbound_list")
 

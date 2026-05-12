@@ -59,10 +59,48 @@ def apply_outbound_validation_patch() -> None:
     _original_send_connection_request = original_send_connection
     _original_send_raw_message = original_send_raw_message
 
+    def _enrich_from_lead(public_id):
+        """Récupère company + headline + summary depuis le Lead+Deal en DB."""
+        company = ""
+        headline = ""
+        summary = ""
+        try:
+            from crm.models import Deal, Lead
+            lead = Lead.objects.filter(public_identifier=public_id).first()
+            if not lead:
+                return company, headline, summary
+            deal = Deal.objects.filter(lead=lead).select_related("campaign").first()
+            if deal and deal.profile_summary:
+                facts_text = []
+                for fact in deal.profile_summary:
+                    if isinstance(fact, dict):
+                        f = fact.get("memory") or fact.get("text") or ""
+                    else:
+                        f = str(fact)
+                    if f:
+                        facts_text.append(f)
+                summary = " | ".join(facts_text[:10])
+                # Try extract company from facts
+                for f in facts_text:
+                    f_lower = f.lower()
+                    for kw in ["company:", "works at ", "entreprise :", "société :", "chez "]:
+                        if kw in f_lower:
+                            idx = f_lower.find(kw) + len(kw)
+                            company = f[idx:].strip(".,;\n").split("\n")[0][:120]
+                            break
+                    if company:
+                        break
+            if deal and not summary:
+                summary = (deal.reason or "")[:500]
+        except Exception as e:
+            logger.warning("Cannot enrich lead %s: %s", public_id, e)
+        return company, headline, summary
+
     def patched_send_connection_request(session, profile):
         from ekoalu.company_validation.config import is_company_validation_enabled
         from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
         from ekoalu.outbound_validation.config import is_approval_required
+        from ekoalu.outbound_validation.generator import generate_invitation_note
         from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
 
         if not is_approval_required():
@@ -72,9 +110,29 @@ def apply_outbound_validation_patch() -> None:
         public_id = profile.get("public_identifier", "")
         urn = profile.get("urn", "")
         company = profile.get("company", "") or profile.get("company_name", "")
+        headline = profile.get("headline", "")
+        summary = ""
+
+        # Enrichissement depuis Lead/Deal si pas dans profile dict
+        if not company or not summary:
+            ec, eh, es = _enrich_from_lead(public_id)
+            company = company or ec
+            headline = headline or eh
+            summary = summary or es
+
         campaign = getattr(session, "campaign", None)
         campaign_id = getattr(campaign, "pk", None)
         campaign_name = getattr(campaign, "name", "") if campaign else ""
+
+        # Generer la note via Claude
+        ai_draft = generate_invitation_note(
+            prospect_public_id=public_id,
+            prospect_company=company,
+            prospect_headline=headline,
+            prospect_summary=summary,
+        )
+        if not ai_draft:
+            ai_draft = "(Invitation sans note — generation Claude echouee)"
 
         # Vérif entreprise (si validation entreprise activée)
         initial_status = OutboundStatus.PENDING
@@ -92,7 +150,7 @@ def apply_outbound_validation_patch() -> None:
                     campaign_id=campaign_id,
                     campaign_name=campaign_name,
                     kind=OutboundKind.INVITATION,
-                    ai_draft="(Invitation LinkedIn sans note)",
+                    ai_draft=ai_draft,
                     status=OutboundStatus.REJECTED,
                     rejection_reason=f"Entreprise refusee: {company}",
                 )
