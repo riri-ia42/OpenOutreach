@@ -27,6 +27,7 @@ def _resolve_profile_dict(po: PendingOutbound) -> dict:
     return {
         "public_identifier": po.prospect_public_id,
         "urn": po.prospect_urn,
+        "url": f"https://www.linkedin.com/in/{po.prospect_public_id}/",
     }
 
 

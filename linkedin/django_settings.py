@@ -87,7 +87,7 @@ EMAIL_SUBJECT_PREFIX = "CRM: "
 
 LANGUAGE_CODE = "en"
 LANGUAGES = [("en", "English")]
-TIME_ZONE = "UTC"
+TIME_ZONE = "Europe/Paris"
 USE_I18N = True
 USE_TZ = True
 

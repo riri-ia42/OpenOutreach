@@ -11,8 +11,8 @@ import os
 # Format : (heure_début, heure_fin) en heures décimales locales
 # ----------------------------------------------------------------------
 ACTIVE_WINDOWS: tuple[tuple[float, float], ...] = (
-    (8.5, 12.0),   # matin : 8h30-12h00
-    (14.0, 18.5),  # après-midi : 14h00-18h30
+    (7.5, 12.0),   # matin : 7h30-12h00 (BTP démarre tôt)
+    (14.0, 20.0),  # après-midi : 14h00-20h00 (BTP débauche tard)
 )
 
 # Pondération par jour de semaine (0=lundi, 6=dimanche)

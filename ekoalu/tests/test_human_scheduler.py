@@ -20,12 +20,12 @@ def _dt(year=2026, month=5, day=11, hour=10, minute=0):
 
 
 class TestActiveWindows:
-    def test_8h_pas_actif_avant_8h30(self):
-        assert not windows.is_in_active_window(_dt(hour=8, minute=0))
-        assert not windows.is_in_active_window(_dt(hour=8, minute=29))
+    def test_7h_pas_actif_avant_7h30(self):
+        assert not windows.is_in_active_window(_dt(hour=7, minute=0))
+        assert not windows.is_in_active_window(_dt(hour=7, minute=29))
 
-    def test_8h30_est_actif(self):
-        assert windows.is_in_active_window(_dt(hour=8, minute=30))
+    def test_7h30_est_actif(self):
+        assert windows.is_in_active_window(_dt(hour=7, minute=30))
 
     def test_10h_est_actif_matin(self):
         assert windows.is_in_active_window(_dt(hour=10))
@@ -42,11 +42,11 @@ class TestActiveWindows:
     def test_14h_est_actif_apres_midi(self):
         assert windows.is_in_active_window(_dt(hour=14))
 
-    def test_18h29_est_actif(self):
-        assert windows.is_in_active_window(_dt(hour=18, minute=29))
+    def test_19h59_est_actif(self):
+        assert windows.is_in_active_window(_dt(hour=19, minute=59))
 
-    def test_18h30_pas_actif_fin_journee(self):
-        assert not windows.is_in_active_window(_dt(hour=18, minute=30))
+    def test_20h00_pas_actif_fin_journee(self):
+        assert not windows.is_in_active_window(_dt(hour=20, minute=0))
 
     def test_22h_pas_actif_soiree(self):
         assert not windows.is_in_active_window(_dt(hour=22))
@@ -97,11 +97,11 @@ class TestWeekdayWeights:
 
 
 class TestNextActiveWindow:
-    def test_avant_8h30_lundi_retourne_8h30_meme_jour(self):
-        now = _dt(year=2026, month=5, day=11, hour=7, minute=0)
+    def test_avant_7h30_lundi_retourne_7h30_meme_jour(self):
+        now = _dt(year=2026, month=5, day=11, hour=6, minute=0)
         nxt = windows.next_active_window_start(now)
         assert nxt.day == 11
-        assert nxt.hour == 8
+        assert nxt.hour == 7
         assert nxt.minute == 30
 
     def test_pendant_pause_dejeuner_retourne_14h(self):
@@ -111,19 +111,19 @@ class TestNextActiveWindow:
         assert nxt.hour == 14
         assert nxt.minute == 0
 
-    def test_apres_18h30_retourne_demain_8h30(self):
-        now = _dt(year=2026, month=5, day=11, hour=19, minute=0)
+    def test_apres_20h_retourne_demain_7h30(self):
+        now = _dt(year=2026, month=5, day=11, hour=20, minute=30)
         nxt = windows.next_active_window_start(now)
         assert nxt.day == 12
-        assert nxt.hour == 8
+        assert nxt.hour == 7
         assert nxt.minute == 30
 
-    def test_dimanche_retourne_lundi_8h30(self):
-        # Dimanche 2026-05-17 → lundi 2026-05-18 8h30
+    def test_dimanche_retourne_lundi_7h30(self):
+        # Dimanche 2026-05-17 → lundi 2026-05-18 7h30
         now = _dt(year=2026, month=5, day=17, hour=10)
         nxt = windows.next_active_window_start(now)
         assert nxt.day == 18  # lundi suivant
-        assert nxt.hour == 8
+        assert nxt.hour == 7
         assert nxt.minute == 30
 
 
@@ -153,8 +153,8 @@ class TestCadenceWeekly:
 class TestConfDefaults:
     def test_active_windows_couvrent_matin_et_apres_midi(self):
         assert len(conf.ACTIVE_WINDOWS) == 2
-        assert conf.ACTIVE_WINDOWS[0] == (8.5, 12.0)
-        assert conf.ACTIVE_WINDOWS[1] == (14.0, 18.5)
+        assert conf.ACTIVE_WINDOWS[0] == (7.5, 12.0)
+        assert conf.ACTIVE_WINDOWS[1] == (14.0, 20.0)
 
     def test_volume_hebdo_target_par_defaut_60(self):
         assert conf.WEEKLY_INVITE_TARGET == 60
