@@ -338,6 +338,15 @@ def run_daemon(session):
             rhythm.reset()
             continue
 
+        # EKOALU — drain de la queue PendingOutbound approved (1 message
+        # par tour pour ne pas bloquer le reste du daemon). Respecte les
+        # plages horaires + delais EKOALU via process_approved_queue.
+        try:
+            from ekoalu.outbound_validation.sender import process_approved_queue
+            process_approved_queue(session, max_messages=1)
+        except Exception:
+            logger.exception("EKOALU drain approved queue failed")
+
         task = Task.objects.claim_next()
         if task is None:
             # Nothing ready — reconcile the queue from CRM state. Any deal
