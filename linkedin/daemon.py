@@ -289,14 +289,16 @@ def seconds_until_active() -> float:
 
 
 def run_daemon(session):
+    from django.apps import apps
     from linkedin.ml.hub import fetch_kit
     from linkedin.setup.freemium import import_freemium_campaign
     from linkedin.models import Campaign
 
     cfg = CAMPAIGN_CONFIG
 
-    # Load kit model for freemium campaigns
-    kit = fetch_kit()
+    # EKOALU : Freemium upstream desactive (pool de prospects generiques
+    # hors-ICP). L'app `ekoalu` apporte ses propres campagnes ciblees.
+    kit = None if apps.is_installed("ekoalu") else fetch_kit()
     if kit:
         freemium_campaign = import_freemium_campaign(kit["config"])
         if freemium_campaign:
