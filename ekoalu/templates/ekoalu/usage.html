@@ -1,0 +1,151 @@
+{% extends "ekoalu/base.html" %}
+
+{% block title %}Consommation Claude — EKOALU{% endblock %}
+
+{% block content %}
+
+<div>
+    <h1 class="text-xl font-bold text-gray-900">Consommation Claude API</h1>
+    <p class="text-sm text-gray-500">Tokens et coût détaillés par modèle et contexte</p>
+</div>
+
+<!-- KPIs -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+        <div class="text-xs text-gray-500 uppercase">Aujourd'hui</div>
+        <div class="text-2xl font-bold text-blue-700 mt-1">${{ claude_cost_today_usd|floatformat:3 }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+        <div class="text-xs text-gray-500 uppercase">Ce mois</div>
+        <div class="text-2xl font-bold text-blue-700 mt-1">${{ claude_cost_month_usd|floatformat:2 }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+        <div class="text-xs text-gray-500 uppercase">Cumul total</div>
+        <div class="text-2xl font-bold text-gray-900 mt-1">${{ total_all.s|default:0|floatformat:2 }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+        <div class="text-xs text-gray-500 uppercase">Nb appels total</div>
+        <div class="text-2xl font-bold text-gray-900 mt-1">{{ total_all.n|default:0 }}</div>
+    </div>
+</div>
+
+<!-- Today / Month breakdown -->
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-2 border-b bg-gray-50 text-sm font-semibold text-gray-700">Aujourd'hui par contexte</div>
+        <table class="min-w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr class="text-xs text-gray-500 uppercase">
+                    <th class="px-3 py-2 text-left">Modèle</th>
+                    <th class="px-3 py-2 text-left">Contexte</th>
+                    <th class="px-3 py-2 text-right">Appels</th>
+                    <th class="px-3 py-2 text-right">In/Out tokens</th>
+                    <th class="px-3 py-2 text-right">Coût</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y">
+                {% for r in today_rows %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-3 py-1.5 text-xs font-mono">{{ r.model|truncatechars:20 }}</td>
+                    <td class="px-3 py-1.5 text-xs">{{ r.context|default:"-" }}</td>
+                    <td class="px-3 py-1.5 text-right">{{ r.n }}</td>
+                    <td class="px-3 py-1.5 text-right text-xs text-gray-600">{{ r.in_t }} / {{ r.out_t }}</td>
+                    <td class="px-3 py-1.5 text-right font-medium">${{ r.cost|floatformat:4 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-3 py-8 text-center text-gray-400 text-sm">Aucun appel aujourd'hui</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-2 border-b bg-gray-50 text-sm font-semibold text-gray-700">Ce mois par contexte</div>
+        <table class="min-w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr class="text-xs text-gray-500 uppercase">
+                    <th class="px-3 py-2 text-left">Modèle</th>
+                    <th class="px-3 py-2 text-left">Contexte</th>
+                    <th class="px-3 py-2 text-right">Appels</th>
+                    <th class="px-3 py-2 text-right">In/Out tokens</th>
+                    <th class="px-3 py-2 text-right">Coût</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y">
+                {% for r in month_rows %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-3 py-1.5 text-xs font-mono">{{ r.model|truncatechars:20 }}</td>
+                    <td class="px-3 py-1.5 text-xs">{{ r.context|default:"-" }}</td>
+                    <td class="px-3 py-1.5 text-right">{{ r.n }}</td>
+                    <td class="px-3 py-1.5 text-right text-xs text-gray-600">{{ r.in_t }} / {{ r.out_t }}</td>
+                    <td class="px-3 py-1.5 text-right font-medium">${{ r.cost|floatformat:4 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-3 py-8 text-center text-gray-400 text-sm">Aucun appel ce mois</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Daily 30j -->
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-4 py-2 border-b bg-gray-50 text-sm font-semibold text-gray-700">Historique 30 jours</div>
+    <table class="min-w-full text-sm">
+        <thead class="bg-gray-50">
+            <tr class="text-xs text-gray-500 uppercase">
+                <th class="px-3 py-2 text-left">Jour</th>
+                <th class="px-3 py-2 text-right">Appels</th>
+                <th class="px-3 py-2 text-right">Input tokens</th>
+                <th class="px-3 py-2 text-right">Output tokens</th>
+                <th class="px-3 py-2 text-right">Coût USD</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for d in daily %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-3 py-1.5 font-mono text-xs">{{ d.day }}</td>
+                <td class="px-3 py-1.5 text-right">{{ d.n }}</td>
+                <td class="px-3 py-1.5 text-right text-xs text-gray-600">{{ d.in_t }}</td>
+                <td class="px-3 py-1.5 text-right text-xs text-gray-600">{{ d.out_t }}</td>
+                <td class="px-3 py-1.5 text-right font-medium">${{ d.cost|floatformat:4 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="px-3 py-8 text-center text-gray-400 text-sm">Aucun historique</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<!-- Derniers appels -->
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-4 py-2 border-b bg-gray-50 text-sm font-semibold text-gray-700">30 derniers appels</div>
+    <table class="min-w-full text-sm">
+        <thead class="bg-gray-50">
+            <tr class="text-xs text-gray-500 uppercase">
+                <th class="px-3 py-2 text-left">Date</th>
+                <th class="px-3 py-2 text-left">Modèle</th>
+                <th class="px-3 py-2 text-left">Contexte</th>
+                <th class="px-3 py-2 text-right">In/Out</th>
+                <th class="px-3 py-2 text-right">Durée</th>
+                <th class="px-3 py-2 text-right">Coût</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for r in recent %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-3 py-1.5 text-xs">{{ r.timestamp|date:"d/m H:i:s" }}</td>
+                <td class="px-3 py-1.5 text-xs font-mono">{{ r.model|truncatechars:18 }}</td>
+                <td class="px-3 py-1.5 text-xs">{{ r.context|default:"-" }}</td>
+                <td class="px-3 py-1.5 text-right text-xs text-gray-600">{{ r.input_tokens }} / {{ r.output_tokens }}</td>
+                <td class="px-3 py-1.5 text-right text-xs text-gray-500">{{ r.duration_ms }} ms</td>
+                <td class="px-3 py-1.5 text-right font-medium">${{ r.cost_usd|floatformat:4 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="px-3 py-8 text-center text-gray-400 text-sm">Aucun appel enregistré pour l'instant. Les appels Claude futurs apparaîtront ici.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+{% endblock %}

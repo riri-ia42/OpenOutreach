@@ -19,4 +19,5 @@ urlpatterns = [
     path("inbox/", views.inbox, name="inbox"),
     path("companies-validation/", views.companies_validation, name="companies_validation"),
     path("deals/", views.deals_filtered, name="deals_filtered"),
+    path("usage/", views.usage, name="usage"),
 ]

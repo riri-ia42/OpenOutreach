@@ -59,6 +59,11 @@
                 </div>
             </div>
             {% endif %}
+
+            <!-- Cout Claude API (D) -->
+            <a href="/ekoalu/usage/" class="px-2 py-1 bg-blue-50 text-blue-800 rounded-full text-xs font-medium hover:bg-blue-100" title="Detail consommation IA">
+                💰 {{ claude_cost_today_usd|floatformat:3 }}$/j · {{ claude_cost_month_usd|floatformat:2 }}$/mois
+            </a>
         </div>
 
         <nav class="flex items-center gap-3 flex-wrap text-sm">

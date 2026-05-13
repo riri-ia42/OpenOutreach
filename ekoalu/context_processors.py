@@ -21,6 +21,10 @@ def ekoalu_globals(request):
     if not user or not user.is_staff:
         return {}
 
+    from datetime import datetime, time
+
+    from django.db.models import Sum
+
     from ekoalu import conf
     from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
     from ekoalu.human_scheduler import is_action_allowed_now
@@ -31,6 +35,7 @@ def ekoalu_globals(request):
         next_active_window_start,
     )
     from ekoalu.inbox_assist.models import PendingReply
+    from ekoalu.llm_usage.models import ClaudeUsageLog
     from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
     from linkedin.models import LinkedInProfile
 
@@ -48,6 +53,22 @@ def ekoalu_globals(request):
             reason = "Action bloquee"
 
     profile = LinkedInProfile.objects.filter(active=True).first()
+
+    # Couts Claude API (D)
+    start_of_day = timezone.make_aware(
+        datetime.combine(now.date(), time.min),
+        timezone.get_current_timezone(),
+    )
+    start_of_month = timezone.make_aware(
+        datetime.combine(now.date().replace(day=1), time.min),
+        timezone.get_current_timezone(),
+    )
+    cost_today = ClaudeUsageLog.objects.filter(
+        timestamp__gte=start_of_day,
+    ).aggregate(s=Sum("cost_usd"))["s"] or 0.0
+    cost_month = ClaudeUsageLog.objects.filter(
+        timestamp__gte=start_of_month,
+    ).aggregate(s=Sum("cost_usd"))["s"] or 0.0
 
     return {
         "daemon_status": {
@@ -73,4 +94,6 @@ def ekoalu_globals(request):
             "weekly_cap": conf.WEEKLY_INVITE_HARD_CAP,
             "daily_cap": conf.DAILY_INVITE_CAP,
         },
+        "claude_cost_today_usd": cost_today,
+        "claude_cost_month_usd": cost_month,
     }

@@ -844,8 +844,53 @@ _STATE_FILTER_MAP = {
 
 @staff_member_required
 def deals_filtered(request):
-    """Liste de Deals filtrés par état (drill-down depuis dashboard)."""
+    """Liste Deals filtres par etat + actions requalify/confirm_reject sur disqualifies (F)."""
     from crm.models import Deal
+    from ekoalu.qualification_feedback.models import QualificationFeedback
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        deal_id = request.POST.get("deal_id")
+        explanation = (request.POST.get("explanation") or "").strip()
+        deal = Deal.objects.filter(pk=deal_id).select_related("lead", "campaign").first()
+        if not deal:
+            django_messages.error(request, "Deal introuvable.")
+            return redirect(request.path + "?" + request.GET.urlencode())
+        if not explanation:
+            django_messages.error(request, "Une explication est obligatoire pour l'apprentissage.")
+            return redirect(request.path + "?" + request.GET.urlencode())
+
+        if action == "requalify":
+            QualificationFeedback.objects.create(
+                prospect_public_id=deal.lead.public_identifier,
+                campaign_id=deal.campaign_id,
+                campaign_name=deal.campaign.name if deal.campaign else "",
+                claude_reason=deal.reason or "",
+                richard_explanation=explanation,
+                kind=QualificationFeedback.Kind.REQUALIFY,
+            )
+            deal.state = "Qualified"
+            deal.outcome = ""
+            deal.save()
+            django_messages.success(
+                request,
+                f"{deal.lead.public_identifier} remis en file Qualified. "
+                "Claude apprendra de cette correction.",
+            )
+        elif action == "confirm_reject":
+            QualificationFeedback.objects.create(
+                prospect_public_id=deal.lead.public_identifier,
+                campaign_id=deal.campaign_id,
+                campaign_name=deal.campaign.name if deal.campaign else "",
+                claude_reason=deal.reason or "",
+                richard_explanation=explanation,
+                kind=QualificationFeedback.Kind.CONFIRM_REJECT,
+            )
+            django_messages.success(
+                request,
+                "Decision Claude confirmee, feedback enregistre pour apprentissage.",
+            )
+        return redirect(request.path + "?" + request.GET.urlencode())
 
     state = request.GET.get("state", "qualified")
     cfg = _STATE_FILTER_MAP.get(state, _STATE_FILTER_MAP["qualified"])
@@ -859,11 +904,92 @@ def deals_filtered(request):
         .order_by("-update_date")
     )
 
+    feedback_slugs = set()
+    if state == "disqualified":
+        feedback_slugs = set(
+            QualificationFeedback.objects
+            .filter(prospect_public_id__in=qs.values_list("lead__public_identifier", flat=True))
+            .values_list("prospect_public_id", flat=True)
+        )
+
     context = {
         "state_filter": state,
         "title": cfg["title"],
         "deals": qs[:200],
         "total": qs.count(),
         "state_filter_map": _STATE_FILTER_MAP,
+        "already_feedback_slugs": feedback_slugs,
     }
     return render(request, "ekoalu/deals_filtered.html", context)
+
+
+# ---- D : page detail consommation Claude API --------------------------
+
+@staff_member_required
+def usage(request):
+    """Page detail consommation Claude API (tokens + cout)."""
+    from datetime import datetime, time as dtime, timedelta
+
+    from django.db.models import Count, Sum
+
+    from ekoalu.llm_usage.models import ClaudeUsageLog
+
+    now = timezone.localtime()
+    start_of_day = timezone.make_aware(
+        datetime.combine(now.date(), dtime.min),
+        timezone.get_current_timezone(),
+    )
+    start_of_month = timezone.make_aware(
+        datetime.combine(now.date().replace(day=1), dtime.min),
+        timezone.get_current_timezone(),
+    )
+    last_30 = now - timedelta(days=30)
+
+    today_rows = (
+        ClaudeUsageLog.objects.filter(timestamp__gte=start_of_day)
+        .values("model", "context")
+        .annotate(
+            n=Count("id"),
+            in_t=Sum("input_tokens"),
+            out_t=Sum("output_tokens"),
+            cost=Sum("cost_usd"),
+        )
+        .order_by("-cost")
+    )
+    month_rows = (
+        ClaudeUsageLog.objects.filter(timestamp__gte=start_of_month)
+        .values("model", "context")
+        .annotate(
+            n=Count("id"),
+            in_t=Sum("input_tokens"),
+            out_t=Sum("output_tokens"),
+            cost=Sum("cost_usd"),
+        )
+        .order_by("-cost")
+    )
+
+    daily = (
+        ClaudeUsageLog.objects.filter(timestamp__gte=last_30)
+        .extra(select={"day": "DATE(timestamp)"})
+        .values("day")
+        .annotate(
+            n=Count("id"),
+            in_t=Sum("input_tokens"),
+            out_t=Sum("output_tokens"),
+            cost=Sum("cost_usd"),
+        )
+        .order_by("-day")
+    )
+
+    total_all = ClaudeUsageLog.objects.aggregate(
+        s=Sum("cost_usd"), n=Count("id"),
+    )
+    recent = ClaudeUsageLog.objects.order_by("-timestamp")[:30]
+
+    return render(request, "ekoalu/usage.html", {
+        "today_rows": list(today_rows),
+        "month_rows": list(month_rows),
+        "daily": list(daily),
+        "total_all": total_all,
+        "recent": recent,
+    })
