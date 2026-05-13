@@ -938,6 +938,8 @@ def deals_filtered(request):
     from ekoalu.qualification_feedback.models import QualificationFeedback
 
     if request.method == "POST":
+        from linkedin.models import Campaign
+
         action = request.POST.get("action", "")
         deal_id = request.POST.get("deal_id")
         explanation = (request.POST.get("explanation") or "").strip()
@@ -950,22 +952,51 @@ def deals_filtered(request):
             return redirect(request.path + "?" + request.GET.urlencode())
 
         if action == "requalify":
+            target_id = request.POST.get("target_campaign_id") or str(deal.campaign_id)
+            target = Campaign.objects.filter(pk=target_id).first()
             QualificationFeedback.objects.create(
                 prospect_public_id=deal.lead.public_identifier,
-                campaign_id=deal.campaign_id,
-                campaign_name=deal.campaign.name if deal.campaign else "",
+                campaign_id=target.pk if target else deal.campaign_id,
+                campaign_name=target.name if target else (deal.campaign.name if deal.campaign else ""),
                 claude_reason=deal.reason or "",
                 richard_explanation=explanation,
                 kind=QualificationFeedback.Kind.REQUALIFY,
             )
-            deal.state = "Qualified"
-            deal.outcome = ""
-            deal.save()
-            django_messages.success(
-                request,
-                f"{deal.lead.public_identifier} remis en file Qualified. "
-                "Claude apprendra de cette correction.",
-            )
+            if target and target.pk != deal.campaign_id:
+                # Reaffectation : on cree un Deal Qualified sur la campagne cible,
+                # on laisse le Failed historique sur l'ancienne.
+                existing = Deal.objects.filter(lead=deal.lead, campaign=target).first()
+                if existing and existing.state != "Failed":
+                    django_messages.warning(
+                        request,
+                        f"Le prospect a deja un Deal {existing.state} dans « {target.name} » — pas de double creation.",
+                    )
+                else:
+                    if existing:
+                        existing.state = "Qualified"
+                        existing.outcome = ""
+                        existing.reason = f"Reaffecte depuis « {deal.campaign.name} » : {explanation[:300]}"
+                        existing.save()
+                    else:
+                        Deal.objects.create(
+                            lead=deal.lead, campaign=target, state="Qualified",
+                            reason=f"Reaffecte depuis « {deal.campaign.name} » : {explanation[:300]}",
+                        )
+                    django_messages.success(
+                        request,
+                        f"{deal.lead.public_identifier} reaffecte sur « {target.name} » en Qualified. "
+                        "Claude apprendra de cette correction.",
+                    )
+            else:
+                # Meme campagne : on requalifie le Deal courant.
+                deal.state = "Qualified"
+                deal.outcome = ""
+                deal.save()
+                django_messages.success(
+                    request,
+                    f"{deal.lead.public_identifier} remis en file Qualified sur la meme campagne. "
+                    "Claude apprendra de cette correction.",
+                )
         elif action == "confirm_reject":
             QualificationFeedback.objects.create(
                 prospect_public_id=deal.lead.public_identifier,
@@ -994,11 +1025,16 @@ def deals_filtered(request):
     )
 
     feedback_slugs = set()
+    all_ekoalu_campaigns = []
     if state == "disqualified":
         feedback_slugs = set(
             QualificationFeedback.objects
             .filter(prospect_public_id__in=qs.values_list("lead__public_identifier", flat=True))
             .values_list("prospect_public_id", flat=True)
+        )
+        from linkedin.models import Campaign
+        all_ekoalu_campaigns = list(
+            Campaign.objects.filter(name__startswith="EKOALU - ").order_by("name")
         )
 
     context = {
@@ -1008,6 +1044,7 @@ def deals_filtered(request):
         "total": qs.count(),
         "state_filter_map": _STATE_FILTER_MAP,
         "already_feedback_slugs": feedback_slugs,
+        "all_ekoalu_campaigns": all_ekoalu_campaigns,
     }
     return render(request, "ekoalu/deals_filtered.html", context)
 
