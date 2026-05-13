@@ -1028,6 +1028,7 @@ def deals_filtered(request):
     )
 
     feedback_slugs = set()
+    handled_elsewhere_slugs = set()
     all_ekoalu_campaigns = []
     nb_reviewed = 0
     show_reviewed = request.GET.get("reviewed") == "1"
@@ -1037,10 +1038,22 @@ def deals_filtered(request):
             .filter(prospect_public_id__in=qs.values_list("lead__public_identifier", flat=True))
             .values_list("prospect_public_id", flat=True)
         )
-        nb_reviewed = len(feedback_slugs)
-        # Par defaut on cache les deja revus pour focus sur ceux a traiter (apprentissage)
-        if not show_reviewed and feedback_slugs:
-            qs = qs.exclude(lead__public_identifier__in=feedback_slugs)
+        # Prospects deja repris ailleurs : ont un Deal actif (non-Failed) dans
+        # une autre campagne EKOALU → reaffectes via la fiche lead, plus a traiter.
+        handled_elsewhere_slugs = set(
+            Deal.objects
+            .filter(
+                lead__public_identifier__in=qs.values_list("lead__public_identifier", flat=True),
+                campaign__name__startswith="EKOALU - ",
+            )
+            .exclude(state="Failed")
+            .values_list("lead__public_identifier", flat=True)
+        )
+        reviewed_set = feedback_slugs | handled_elsewhere_slugs
+        nb_reviewed = len(reviewed_set)
+        # Par defaut on cache les traites pour focus sur ceux qui restent
+        if not show_reviewed and reviewed_set:
+            qs = qs.exclude(lead__public_identifier__in=reviewed_set)
         from linkedin.models import Campaign
         all_ekoalu_campaigns = list(
             Campaign.objects.filter(name__startswith="EKOALU - ").order_by("name")
@@ -1053,6 +1066,7 @@ def deals_filtered(request):
         "total": qs.count(),
         "state_filter_map": _STATE_FILTER_MAP,
         "already_feedback_slugs": feedback_slugs,
+        "handled_elsewhere_slugs": handled_elsewhere_slugs,
         "all_ekoalu_campaigns": all_ekoalu_campaigns,
         "nb_reviewed": nb_reviewed,
         "show_reviewed": show_reviewed,
