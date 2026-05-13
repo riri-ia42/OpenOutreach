@@ -568,15 +568,63 @@ def leads_add(request):
 
 @staff_member_required
 def campaigns_list(request):
-    """Liste des Campaigns EKOALU avec stats live."""
+    """Liste des Campaigns EKOALU avec stats + actions activate/deactivate/create."""
     from crm.models import Deal
-    from linkedin.models import Campaign
+    from linkedin.models import Campaign, LinkedInProfile
+
+    profile = LinkedInProfile.objects.filter(active=True).first()
+    active_user = profile.user if profile else None
+
+    # POST : actions de gestion
+    if request.method == "POST" and active_user:
+        action = request.POST.get("action", "")
+        if action in ("activate", "deactivate"):
+            cid = request.POST.get("campaign_id")
+            campaign = Campaign.objects.filter(pk=cid).first()
+            if campaign:
+                if action == "activate":
+                    campaign.users.add(active_user)
+                    django_messages.success(request, f"Campagne « {campaign.name} » activée.")
+                else:
+                    campaign.users.remove(active_user)
+                    django_messages.success(request, f"Campagne « {campaign.name} » mise en pause.")
+            return redirect("ekoalu:campaigns_list")
+        if action == "create":
+            name = (request.POST.get("name") or "").strip()
+            objective = (request.POST.get("objective") or "").strip()
+            product_docs = (request.POST.get("product_docs") or "").strip()
+            if not (name and objective and product_docs):
+                django_messages.error(request, "Tous les champs sont requis.")
+                return redirect("ekoalu:campaigns_list")
+            full_name = name if name.startswith("EKOALU - ") else f"EKOALU - {name}"
+            campaign, created = Campaign.objects.get_or_create(
+                name=full_name,
+                defaults={
+                    "campaign_objective": objective,
+                    "product_docs": product_docs,
+                    "booking_link": conf.CALENDAR_BOOKING_URL,
+                    "action_fraction": 1.0,
+                    "is_freemium": False,
+                },
+            )
+            if not created:
+                django_messages.warning(request, f"Une campagne « {full_name} » existe déjà.")
+            else:
+                campaign.users.add(active_user)
+                django_messages.success(request, f"Campagne « {full_name} » créée et activée.")
+            return redirect("ekoalu:campaigns_list")
 
     only_ekoalu = request.GET.get("scope", "ekoalu") == "ekoalu"
     queryset = Campaign.objects.all()
     if only_ekoalu:
         queryset = queryset.filter(name__startswith="EKOALU - ")
     queryset = queryset.order_by("pk")
+
+    active_campaign_ids = set()
+    if active_user:
+        active_campaign_ids = set(
+            active_user.campaigns.values_list("pk", flat=True),
+        )
 
     campaigns_data = []
     for campaign in queryset:
@@ -585,14 +633,12 @@ def campaigns_list(request):
         for d in deals.values("state").annotate(n=Count("id")):
             state_counts[d["state"]] = d["n"]
 
-        # Identifier persona
         persona_slug = None
         for p in PERSONAS.values():
             if p.label in campaign.name:
                 persona_slug = p.slug
                 break
 
-        # Compter PendingOutbound liés
         pending_out = PendingOutbound.objects.filter(
             campaign_id=campaign.pk,
             status=OutboundStatus.PENDING,
@@ -616,7 +662,7 @@ def campaigns_list(request):
             "total": sum(state_counts.values()),
             "pending_out": pending_out,
             "approved_out": approved_out,
-            "is_active": campaign.action_fraction > 0 and not campaign.is_freemium,
+            "is_active": campaign.pk in active_campaign_ids and not campaign.is_freemium,
         })
 
     return render(request, "ekoalu/campaigns_list.html", {
@@ -783,3 +829,41 @@ def outbound_detail(request, pk: int):
         "is_approved": outbound.status == OutboundStatus.APPROVED,
     }
     return render(request, "ekoalu/outbound_detail.html", context)
+
+
+# ---- A : drill-down depuis le dashboard --------------------------------
+
+_STATE_FILTER_MAP = {
+    "qualified":    {"states": ["Qualified"],                     "title": "Qualifiés"},
+    "ready":        {"states": ["Ready_to_connect"],              "title": "Prêts à inviter"},
+    "pending":      {"states": ["Pending"],                       "title": "Invités (en attente)"},
+    "connected":    {"states": ["Connected", "Completed"],        "title": "Connectés"},
+    "disqualified": {"states": ["Failed"],                        "title": "Disqualifiés / Échec"},
+}
+
+
+@staff_member_required
+def deals_filtered(request):
+    """Liste de Deals filtrés par état (drill-down depuis dashboard)."""
+    from crm.models import Deal
+
+    state = request.GET.get("state", "qualified")
+    cfg = _STATE_FILTER_MAP.get(state, _STATE_FILTER_MAP["qualified"])
+
+    qs = (
+        Deal.objects.filter(
+            campaign__name__startswith="EKOALU - ",
+            state__in=cfg["states"],
+        )
+        .select_related("lead", "campaign")
+        .order_by("-update_date")
+    )
+
+    context = {
+        "state_filter": state,
+        "title": cfg["title"],
+        "deals": qs[:200],
+        "total": qs.count(),
+        "state_filter_map": _STATE_FILTER_MAP,
+    }
+    return render(request, "ekoalu/deals_filtered.html", context)

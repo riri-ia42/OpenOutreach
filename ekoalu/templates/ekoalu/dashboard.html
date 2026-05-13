@@ -1,110 +1,49 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="60">
-    <title>EKOALU — Dashboard prospection</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .pulse { animation: pulse 2s ease-in-out infinite; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-    </style>
-</head>
-<body class="bg-gray-50 min-h-screen">
+{% extends "ekoalu/base.html" %}
 
-<header class="bg-white shadow-sm border-b">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900">EKOALU — Prospection</h1>
-            <p class="text-sm text-gray-500">{{ now|date:"l j F Y, H:i" }} · Chasselay (69)</p>
-        </div>
-        <div class="flex items-center gap-4">
-            {% if profile %}
-                {% if profile.active %}
-                    <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                        ● Compte actif : {{ profile.linkedin_username }}
-                    </span>
-                {% else %}
-                    <span class="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
-                        ○ Compte désactivé (kill switch)
-                    </span>
-                {% endif %}
-            {% else %}
-                <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
-                    Aucun compte LinkedIn configuré
-                </span>
-            {% endif %}
-            <a href="/ekoalu/campaigns/" class="text-sm text-blue-600 hover:underline">Campagnes</a>
-            <a href="/ekoalu/companies-validation/" class="relative text-sm text-blue-600 hover:underline">
-                Entreprises ✓
-                {% if companies_pending_count > 0 %}
-                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ companies_pending_count }}</span>
-                {% endif %}
-            </a>
-            <a href="/ekoalu/messages/" class="relative text-sm text-blue-600 hover:underline">
-                Messages
-                {% if pending_outbound_count > 0 %}
-                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ pending_outbound_count }}</span>
-                {% endif %}
-            </a>
-            <a href="/ekoalu/inbox/" class="relative text-sm text-blue-600 hover:underline">
-                Inbox
-                {% if pending_count > 0 %}
-                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ pending_count }}</span>
-                {% endif %}
-            </a>
-            <a href="/ekoalu/companies/" class="text-sm text-blue-600 hover:underline">Sociétés</a>
-            <a href="/ekoalu/leads/add/" class="text-sm text-blue-600 hover:underline">+ Prospects</a>
-            <a href="/admin/" class="text-sm text-blue-600 hover:underline">Admin</a>
+{% block title %}EKOALU — Dashboard prospection{% endblock %}
+
+{% block extra_head %}<meta http-equiv="refresh" content="60">{% endblock %}
+
+{% block content %}
+
+<!-- KPIs globaux (A : cliquables) -->
+<section>
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Vue d'ensemble</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <a href="{% url 'ekoalu:deals_filtered' %}?state=qualified" class="block bg-white rounded-lg shadow-sm p-4 border border-gray-200 hover:bg-gray-50 hover:border-gray-300">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Qualifiés</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1">{{ kpis.total_qualified }}</div>
+            <div class="text-xs text-gray-400 mt-1">en file</div>
+        </a>
+        <a href="{% url 'ekoalu:deals_filtered' %}?state=ready" class="block bg-white rounded-lg shadow-sm p-4 border border-gray-200 hover:bg-yellow-50 hover:border-yellow-300">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Prêts</div>
+            <div class="text-2xl font-bold text-yellow-600 mt-1">{{ kpis.total_ready }}</div>
+            <div class="text-xs text-gray-400 mt-1">ready_to_connect</div>
+        </a>
+        <a href="{% url 'ekoalu:deals_filtered' %}?state=pending" class="block bg-white rounded-lg shadow-sm p-4 border border-gray-200 hover:bg-orange-50 hover:border-orange-300">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Invités</div>
+            <div class="text-2xl font-bold text-orange-600 mt-1">{{ kpis.total_pending }}</div>
+            <div class="text-xs text-gray-400 mt-1">pending</div>
+        </a>
+        <a href="{% url 'ekoalu:deals_filtered' %}?state=connected" class="block bg-white rounded-lg shadow-sm p-4 border border-gray-200 hover:bg-green-50 hover:border-green-300">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Connectés</div>
+            <div class="text-2xl font-bold text-green-600 mt-1">{{ kpis.total_connected }}</div>
+            <div class="text-xs text-gray-400 mt-1">connected</div>
+        </a>
+        <a href="{% url 'ekoalu:deals_filtered' %}?state=disqualified" class="block bg-white rounded-lg shadow-sm p-4 border border-gray-200 hover:bg-gray-100 hover:border-gray-300">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Disqualifiés</div>
+            <div class="text-2xl font-bold text-gray-500 mt-1">{{ kpis.total_disqualified }}</div>
+            <div class="text-xs text-gray-400 mt-1">hors cible</div>
+        </a>
+        <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Taux accept.</div>
+            <div class="text-2xl font-bold {% if kpis.accept_rate >= 30 %}text-green-600{% elif kpis.accept_rate >= 20 %}text-yellow-600{% elif kpis.accept_rate %}text-red-600{% else %}text-gray-400{% endif %} mt-1">
+                {% if kpis.accept_rate is not None %}{{ kpis.accept_rate }}%{% else %}—{% endif %}
+            </div>
+            <div class="text-xs text-gray-400 mt-1">cible &gt; 30%</div>
         </div>
     </div>
-</header>
-
-<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-
-    <!-- KPIs globaux -->
-    <section>
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Vue d'ensemble</h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase tracking-wide">Qualifiés</div>
-                <div class="text-2xl font-bold text-gray-900 mt-1">{{ kpis.total_qualified }}</div>
-                <div class="text-xs text-gray-400 mt-1">en file</div>
-            </div>
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase tracking-wide">Prêts</div>
-                <div class="text-2xl font-bold text-yellow-600 mt-1">{{ kpis.total_ready }}</div>
-                <div class="text-xs text-gray-400 mt-1">ready_to_connect</div>
-            </div>
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase tracking-wide">Invités</div>
-                <div class="text-2xl font-bold text-orange-600 mt-1">{{ kpis.total_pending }}</div>
-                <div class="text-xs text-gray-400 mt-1">pending</div>
-            </div>
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase tracking-wide">Connectés</div>
-                <div class="text-2xl font-bold text-green-600 mt-1">{{ kpis.total_connected }}</div>
-                <div class="text-xs text-gray-400 mt-1">connected</div>
-            </div>
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase tracking-wide">Disqualifiés</div>
-                <div class="text-2xl font-bold text-gray-500 mt-1">{{ kpis.total_disqualified }}</div>
-                <div class="text-xs text-gray-400 mt-1">hors cible</div>
-            </div>
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase tracking-wide">Taux accept.</div>
-                <div class="text-2xl font-bold {% if kpis.accept_rate >= 30 %}text-green-600{% elif kpis.accept_rate >= 20 %}text-yellow-600{% elif kpis.accept_rate %}text-red-600{% else %}text-gray-400{% endif %} mt-1">
-                    {% if kpis.accept_rate is not None %}{{ kpis.accept_rate }}%{% else %}—{% endif %}
-                </div>
-                <div class="text-xs text-gray-400 mt-1">cible &gt; 30%</div>
-            </div>
-        </div>
-    </section>
+</section>
 
     <!-- Messages sortants en attente de validation -->
     {% if pending_outbound_count > 0 or approved_outbound_count > 0 %}
@@ -299,11 +238,4 @@
         </div>
     </section>
 
-</main>
-
-<footer class="text-center text-xs text-gray-400 py-6">
-    EKOALU · prospection-ia · fork OpenOutreach + extensions ekoalu/
-</footer>
-
-</body>
-</html>
+{% endblock %}

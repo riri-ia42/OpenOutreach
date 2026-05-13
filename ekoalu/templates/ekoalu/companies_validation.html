@@ -1,44 +1,22 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Validation entreprises — EKOALU</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
-</head>
-<body class="bg-gray-50 min-h-screen">
+{% extends "ekoalu/base.html" %}
 
-<header class="bg-white shadow-sm border-b">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <h1 class="text-xl font-bold text-gray-900">Validation entreprises</h1>
-            <p class="text-sm text-gray-500">
-                Approuve les sociétés que tu autorises l'outil à prospecter.
-                <span class="ml-2">Mode :
-                {% if validation_enabled %}
-                    <span class="text-green-700 font-medium">validation requise</span>
-                {% else %}
-                    <span class="text-orange-700 font-medium">100% auto (validation skip)</span>
-                {% endif %}
-                </span>
-            </p>
-        </div>
-        <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
-    </div>
-</header>
+{% block title %}Validation entreprises — EKOALU{% endblock %}
 
-<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+{% block content %}
 
-    {% if messages %}
-        {% for message in messages %}
-        <div class="rounded-lg p-3 text-sm
-            {% if message.tags == 'success' %}bg-green-100 text-green-800
-            {% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800
-            {% elif message.tags == 'error' %}bg-red-100 text-red-800
-            {% else %}bg-blue-100 text-blue-800{% endif %}">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
+<div>
+    <h1 class="text-xl font-bold text-gray-900">Validation entreprises</h1>
+    <p class="text-sm text-gray-500">
+        Approuve les sociétés que tu autorises l'outil à prospecter.
+        <span class="ml-2">Mode :
+        {% if validation_enabled %}
+            <span class="text-green-700 font-medium">validation requise</span>
+        {% else %}
+            <span class="text-orange-700 font-medium">100% auto (validation skip)</span>
+        {% endif %}
+        </span>
+    </p>
+</div>
 
     {% if nb_blocked > 0 %}
     <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-900">
@@ -216,16 +194,11 @@
     </section>
     {% endif %}
 
-    <!-- Mode auto -->
-    <section class="bg-gray-100 rounded-lg p-4 text-xs text-gray-600">
-        <strong>Mode 100% auto</strong> : pour skip cette validation entreprise, définis dans
-        <code class="bg-white px-1 rounded">.env.production</code> :
-        <code class="bg-white px-1 rounded">EKOALU_COMPANY_VALIDATION=off</code>
-    </section>
+<!-- Mode auto -->
+<section class="bg-gray-100 rounded-lg p-4 text-xs text-gray-600">
+    <strong>Mode 100% auto</strong> : pour skip cette validation entreprise, définis dans
+    <code class="bg-white px-1 rounded">.env.production</code> :
+    <code class="bg-white px-1 rounded">EKOALU_COMPANY_VALIDATION=off</code>
+</section>
 
-</main>
-
-<footer class="text-center text-xs text-gray-400 py-6">EKOALU · validation entreprises</footer>
-
-</body>
-</html>
+{% endblock %}

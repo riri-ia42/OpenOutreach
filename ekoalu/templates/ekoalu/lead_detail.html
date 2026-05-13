@@ -1,156 +1,133 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ lead.public_identifier }} — EKOALU</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }</style>
-</head>
-<body class="bg-gray-50 min-h-screen">
+{% extends "ekoalu/base.html" %}
 
-<header class="bg-white shadow-sm border-b">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
-        <div>
-            <h1 class="text-xl font-bold text-gray-900">
-                {{ lead.public_identifier }}
-                {% if lead.disqualified %}
-                <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 ml-2">disqualifié</span>
-                {% endif %}
-            </h1>
-            <a href="{{ linkedin_url }}" target="_blank" class="text-sm text-blue-600 hover:underline">{{ linkedin_url }} ↗</a>
-        </div>
-        <a href="/ekoalu/" class="text-sm text-blue-600 hover:underline">← Dashboard</a>
-    </div>
-</header>
+{% block title %}{{ lead.public_identifier }} — EKOALU{% endblock %}
 
-<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+{% block content %}
 
-    {% if messages %}
-        {% for message in messages %}
-        <div class="rounded-lg p-3 text-sm {% if message.tags == 'success' %}bg-green-100 text-green-800{% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800{% else %}bg-blue-100 text-blue-800{% endif %}">
-            {{ message }}
-        </div>
-        {% endfor %}
-    {% endif %}
-
-    <!-- Infos lead + actions -->
-    <section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Prospect</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-                <div class="text-xs text-gray-500">Slug</div>
-                <div class="font-mono">{{ lead.public_identifier }}</div>
-            </div>
-            <div>
-                <div class="text-xs text-gray-500">URN</div>
-                <div class="font-mono text-xs">{{ lead.urn|default:"(pas encore scrapé)" }}</div>
-            </div>
-            <div>
-                <div class="text-xs text-gray-500">Embedding ML</div>
-                <div>{% if has_embedding %}<span class="text-green-700">✓ calculé (384-dim)</span>{% else %}<span class="text-gray-400">— pas encore</span>{% endif %}</div>
-            </div>
-            <div>
-                <div class="text-xs text-gray-500">Créé</div>
-                <div>{{ lead.creation_date|date:"d/m/Y H:i" }}</div>
-            </div>
-            <div>
-                <div class="text-xs text-gray-500">Maj</div>
-                <div>{{ lead.update_date|date:"d/m/Y H:i" }}</div>
-            </div>
-        </div>
-        <form method="post" class="mt-4 pt-4 border-t border-gray-200 flex gap-2">
-            {% csrf_token %}
+<div class="flex items-center justify-between gap-4">
+    <div>
+        <h1 class="text-xl font-bold text-gray-900">
+            {{ lead.public_identifier }}
             {% if lead.disqualified %}
-            <button type="submit" name="action" value="requalify"
-                    class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
-                ↺ Requalifier
-            </button>
-            {% else %}
-            <button type="submit" name="action" value="disqualify"
-                    class="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
-                ✗ Disqualifier (permanent)
-            </button>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 ml-2">disqualifié</span>
             {% endif %}
-            <a href="{{ linkedin_url }}" target="_blank"
-               class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
-                Voir sur LinkedIn ↗
-            </a>
-        </form>
-    </section>
+        </h1>
+        <a href="{{ linkedin_url }}" target="_blank" class="text-sm text-blue-600 hover:underline">{{ linkedin_url }} ↗</a>
+    </div>
+</div>
 
-    <!-- Deals par Campaign -->
-    {% if deals %}
-    <section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div class="px-6 py-3 border-b border-gray-200">
-            <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-                Présent dans {{ deals|length }} campagne{{ deals|length|pluralize }}
-            </h2>
+<!-- Infos lead + actions -->
+<section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+    <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Prospect</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div>
+            <div class="text-xs text-gray-500">Slug</div>
+            <div class="font-mono">{{ lead.public_identifier }}</div>
         </div>
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">Campagne</th>
-                    <th class="px-4 py-2 text-center text-xs text-gray-500 uppercase">État</th>
-                    <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">Raison / Outcome</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-                {% for d in deals %}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-2 text-sm">
-                        <a href="{% url 'ekoalu:campaign_detail' d.campaign.pk %}" class="text-blue-600 hover:underline">
-                            {{ d.campaign.name|cut:"EKOALU - " }}
-                        </a>
-                    </td>
-                    <td class="px-4 py-2 text-center">
-                        <span class="text-xs px-2 py-0.5 rounded-full
-                            {% if d.state == 'Connected' %}bg-green-100 text-green-800
-                            {% elif d.state == 'Pending' %}bg-orange-100 text-orange-800
-                            {% elif d.state == 'Failed' %}bg-red-100 text-red-800
-                            {% else %}bg-gray-100 text-gray-700{% endif %}">{{ d.state }}</span>
-                        {% if d.outcome %}<span class="text-xs text-gray-500 ml-1">{{ d.outcome }}</span>{% endif %}
-                    </td>
-                    <td class="px-4 py-2 text-sm text-gray-600">{{ d.reason|default:"—"|truncatechars:100 }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </section>
-    {% endif %}
+        <div>
+            <div class="text-xs text-gray-500">URN</div>
+            <div class="font-mono text-xs">{{ lead.urn|default:"(pas encore scrapé)" }}</div>
+        </div>
+        <div>
+            <div class="text-xs text-gray-500">Embedding ML</div>
+            <div>{% if has_embedding %}<span class="text-green-700">✓ calculé (384-dim)</span>{% else %}<span class="text-gray-400">— pas encore</span>{% endif %}</div>
+        </div>
+        <div>
+            <div class="text-xs text-gray-500">Créé</div>
+            <div>{{ lead.creation_date|date:"d/m/Y H:i" }}</div>
+        </div>
+        <div>
+            <div class="text-xs text-gray-500">Maj</div>
+            <div>{{ lead.update_date|date:"d/m/Y H:i" }}</div>
+        </div>
+    </div>
+    <form method="post" class="mt-4 pt-4 border-t border-gray-200 flex gap-2">
+        {% csrf_token %}
+        {% if lead.disqualified %}
+        <button type="submit" name="action" value="requalify"
+                class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+            ↺ Requalifier
+        </button>
+        {% else %}
+        <button type="submit" name="action" value="disqualify"
+                class="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+            ✗ Disqualifier (permanent)
+        </button>
+        {% endif %}
+        <a href="{{ linkedin_url }}" target="_blank"
+           class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
+            Voir sur LinkedIn ↗
+        </a>
+    </form>
+</section>
 
-    <!-- Timeline -->
-    {% if timeline_events %}
-    <section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <h2 class="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">Timeline</h2>
-        <ol class="space-y-3">
-            {% for evt in timeline_events %}
-            <li class="flex gap-3 items-start text-sm">
-                <span class="inline-block w-2 h-2 rounded-full mt-1.5
-                    {% if evt.kind == 'chat' %}bg-purple-500
-                    {% elif evt.kind == 'outbound' %}bg-blue-500
-                    {% elif evt.kind == 'deal_state' %}bg-green-500
-                    {% else %}bg-gray-400{% endif %}"></span>
-                <div class="flex-1">
-                    <div class="text-gray-900">{{ evt.label }}</div>
-                    <div class="text-xs text-gray-400">{{ evt.date|date:"d/m/Y H:i" }}</div>
-                    {% if evt.chat %}
-                    <p class="text-xs text-gray-600 mt-1 italic">{{ evt.chat.content|truncatechars:200 }}</p>
-                    {% elif evt.outbound %}
-                    <a href="{% url 'ekoalu:outbound_detail' evt.outbound.pk %}" class="text-xs text-blue-600 hover:underline">Voir le message →</a>
-                    {% elif evt.deal %}
-                    <p class="text-xs text-gray-600">{{ evt.deal.reason|truncatechars:120 }}</p>
-                    {% endif %}
-                </div>
-            </li>
+<!-- Deals par Campaign -->
+{% if deals %}
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-6 py-3 border-b border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+            Présent dans {{ deals|length }} campagne{{ deals|length|pluralize }}
+        </h2>
+    </div>
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">Campagne</th>
+                <th class="px-4 py-2 text-center text-xs text-gray-500 uppercase">État</th>
+                <th class="px-4 py-2 text-left text-xs text-gray-500 uppercase">Raison / Outcome</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+            {% for d in deals %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-4 py-2 text-sm">
+                    <a href="{% url 'ekoalu:campaign_detail' d.campaign.pk %}" class="text-blue-600 hover:underline">
+                        {{ d.campaign.name|cut:"EKOALU - " }}
+                    </a>
+                </td>
+                <td class="px-4 py-2 text-center">
+                    <span class="text-xs px-2 py-0.5 rounded-full
+                        {% if d.state == 'Connected' %}bg-green-100 text-green-800
+                        {% elif d.state == 'Pending' %}bg-orange-100 text-orange-800
+                        {% elif d.state == 'Failed' %}bg-red-100 text-red-800
+                        {% else %}bg-gray-100 text-gray-700{% endif %}">{{ d.state }}</span>
+                    {% if d.outcome %}<span class="text-xs text-gray-500 ml-1">{{ d.outcome }}</span>{% endif %}
+                </td>
+                <td class="px-4 py-2 text-sm text-gray-600">{{ d.reason|default:"—"|truncatechars:100 }}</td>
+            </tr>
             {% endfor %}
-        </ol>
-    </section>
-    {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
 
-</main>
+<!-- Timeline -->
+{% if timeline_events %}
+<section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+    <h2 class="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">Timeline</h2>
+    <ol class="space-y-3">
+        {% for evt in timeline_events %}
+        <li class="flex gap-3 items-start text-sm">
+            <span class="inline-block w-2 h-2 rounded-full mt-1.5
+                {% if evt.kind == 'chat' %}bg-purple-500
+                {% elif evt.kind == 'outbound' %}bg-blue-500
+                {% elif evt.kind == 'deal_state' %}bg-green-500
+                {% else %}bg-gray-400{% endif %}"></span>
+            <div class="flex-1">
+                <div class="text-gray-900">{{ evt.label }}</div>
+                <div class="text-xs text-gray-400">{{ evt.date|date:"d/m/Y H:i" }}</div>
+                {% if evt.chat %}
+                <p class="text-xs text-gray-600 mt-1 italic">{{ evt.chat.content|truncatechars:200 }}</p>
+                {% elif evt.outbound %}
+                <a href="{% url 'ekoalu:outbound_detail' evt.outbound.pk %}" class="text-xs text-blue-600 hover:underline">Voir le message →</a>
+                {% elif evt.deal %}
+                <p class="text-xs text-gray-600">{{ evt.deal.reason|truncatechars:120 }}</p>
+                {% endif %}
+            </div>
+        </li>
+        {% endfor %}
+    </ol>
+</section>
+{% endif %}
 
-<footer class="text-center text-xs text-gray-400 py-6">EKOALU · détail prospect</footer>
-
-</body>
-</html>
+{% endblock %}
