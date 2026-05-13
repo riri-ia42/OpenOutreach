@@ -156,8 +156,9 @@ class TestConfDefaults:
         assert conf.ACTIVE_WINDOWS[0] == (7.5, 12.0)
         assert conf.ACTIVE_WINDOWS[1] == (14.0, 20.0)
 
-    def test_volume_hebdo_target_par_defaut_60(self):
-        assert conf.WEEKLY_INVITE_TARGET == 60
+    def test_volume_hebdo_target_par_defaut_30(self):
+        # Pilote initial 30/sem (modifiable via EKOALU_WEEKLY_INVITE_TARGET)
+        assert conf.WEEKLY_INVITE_TARGET == 30
 
     def test_hard_cap_80(self):
         assert conf.WEEKLY_INVITE_HARD_CAP == 80

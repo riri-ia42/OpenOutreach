@@ -165,9 +165,66 @@ def process_approved_queue(
         ).count()
         return stats
 
-    approved = PendingOutbound.objects.filter(
-        status=OutboundStatus.APPROVED,
-    ).order_by("approved_at")[:max_messages]
+    # Cap dur : INVITATIONS uniquement (les DM follow-up ne sont pas cappes).
+    # On compte sent_at sur 24h et 7 jours glissants pour respecter les
+    # WEEKLY_INVITE_TARGET / DAILY_INVITE_CAP / WEEKLY_INVITE_HARD_CAP.
+    from datetime import timedelta
+    from django.utils import timezone
+
+    now = timezone.localtime()
+    invites_24h = PendingOutbound.objects.filter(
+        kind=OutboundKind.INVITATION,
+        status=OutboundStatus.SENT,
+        sent_at__gte=now - timedelta(days=1),
+    ).count()
+    invites_7d = PendingOutbound.objects.filter(
+        kind=OutboundKind.INVITATION,
+        status=OutboundStatus.SENT,
+        sent_at__gte=now - timedelta(days=7),
+    ).count()
+    if invites_24h >= conf.DAILY_INVITE_CAP:
+        logger.info(
+            "Cap journalier invitations atteint (%d/%d) - on attend demain",
+            invites_24h, conf.DAILY_INVITE_CAP,
+        )
+        stats["skipped"] = PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+            kind=OutboundKind.INVITATION,
+        ).count()
+        invitations_blocked = True
+    elif invites_7d >= conf.WEEKLY_INVITE_HARD_CAP:
+        logger.warning(
+            "Cap hebdo HARD atteint (%d/%d) - blocage total invitations",
+            invites_7d, conf.WEEKLY_INVITE_HARD_CAP,
+        )
+        stats["skipped"] = PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+            kind=OutboundKind.INVITATION,
+        ).count()
+        invitations_blocked = True
+    elif invites_7d >= conf.WEEKLY_INVITE_TARGET:
+        logger.info(
+            "Cible hebdo invitations atteinte (%d/%d) - on attend la rotation",
+            invites_7d, conf.WEEKLY_INVITE_TARGET,
+        )
+        stats["skipped"] = PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+            kind=OutboundKind.INVITATION,
+        ).count()
+        invitations_blocked = True
+    else:
+        invitations_blocked = False
+
+    # Si invitations bloquees, on traite quand meme les follow-up DMs
+    # (pas de cap LinkedIn comparable).
+    if invitations_blocked:
+        approved = PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+        ).exclude(kind=OutboundKind.INVITATION).order_by("approved_at")[:max_messages]
+    else:
+        approved = PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+        ).order_by("approved_at")[:max_messages]
 
     for i, po in enumerate(approved):
         stats["processed"] += 1

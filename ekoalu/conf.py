@@ -36,10 +36,10 @@ GAUSSIAN_SIGMA = 1.5          # écart-type (en heures)
 MIN_DELAY_SECONDS = 90       # 1.5 min minimum (jamais < 60s = pattern bot)
 MAX_DELAY_SECONDS = 1800     # 30 min maximum
 
-# Volumes (cibles + hard caps)
-WEEKLY_INVITE_TARGET = int(os.environ.get("EKOALU_WEEKLY_INVITE_TARGET", "60"))
+# Volumes (cibles + hard caps appliques dans process_approved_queue)
+WEEKLY_INVITE_TARGET = int(os.environ.get("EKOALU_WEEKLY_INVITE_TARGET", "30"))
 WEEKLY_INVITE_HARD_CAP = int(os.environ.get("EKOALU_WEEKLY_INVITE_HARD_CAP", "80"))
-DAILY_INVITE_CAP = int(os.environ.get("EKOALU_DAILY_INVITE_CAP", "15"))
+DAILY_INVITE_CAP = int(os.environ.get("EKOALU_DAILY_INVITE_CAP", "8"))
 DAILY_MESSAGE_CAP = int(os.environ.get("EKOALU_DAILY_MESSAGE_CAP", "80"))
 
 # Cooldown post-acceptation (heures avant follow-up)
