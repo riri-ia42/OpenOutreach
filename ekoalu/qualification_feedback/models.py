@@ -16,6 +16,7 @@ class QualificationFeedback(models.Model):
     class Kind(models.TextChoices):
         REQUALIFY = "requalify", "Remettre en file (Claude s'est trompe)"
         CONFIRM_REJECT = "confirm_reject", "Confirmer le rejet (Claude a raison)"
+        ALREADY_CONNECTED = "already_connected", "Deja ma relation (pas un wrong_fit)"
 
     prospect_public_id = models.CharField(max_length=128, db_index=True)
     campaign_id = models.IntegerField(null=True, blank=True, db_index=True)

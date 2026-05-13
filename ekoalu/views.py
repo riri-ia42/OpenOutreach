@@ -1013,6 +1013,22 @@ def deals_filtered(request):
                 request,
                 "Decision Claude confirmee, feedback enregistre pour apprentissage.",
             )
+        elif action == "already_connected":
+            QualificationFeedback.objects.create(
+                prospect_public_id=deal.lead.public_identifier,
+                campaign_id=deal.campaign_id,
+                campaign_name=deal.campaign.name if deal.campaign else "",
+                claude_reason=deal.reason or "",
+                richard_explanation=explanation or "Deja une relation de Richard",
+                kind=QualificationFeedback.Kind.ALREADY_CONNECTED,
+            )
+            # Exclusion permanente : evite re-sourcing futur
+            deal.lead.disqualified = True
+            deal.lead.save(update_fields=["disqualified"])
+            django_messages.success(
+                request,
+                f"{deal.lead.public_identifier} marque comme deja relation - exclu des sourcings futurs.",
+            )
         return redirect(request.path + "?" + request.GET.urlencode())
 
     state = request.GET.get("state", "qualified")
