@@ -60,6 +60,7 @@ def _send_message(session, po: PendingOutbound) -> tuple[bool, str]:
         return False, "patch not applied — original function unavailable"
 
     try:
+        session.ensure_browser()
         sent = original(session, _resolve_profile_dict(po), po.content_to_send)
         if sent:
             return True, ""
