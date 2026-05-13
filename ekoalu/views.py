@@ -564,6 +564,58 @@ def companies_validation(request):
                     django_messages.info(request, f"'{obj.name}' remise en attente.")
             return redirect("ekoalu:companies_validation")
 
+        elif action == "create_abm":
+            # Cree une Campaign ABM ciblee sur l'entreprise approuvee
+            from ekoalu.company_validation.abm import AbmCampaignLink
+            from linkedin.models import Campaign, LinkedInProfile
+
+            company_id = request.POST.get("company_id")
+            company = ApprovedCompany.objects.filter(pk=company_id).first()
+            if not company or company.status != CompanyStatus.APPROVED:
+                django_messages.error(request, "Entreprise introuvable ou non-approuvee.")
+                return redirect("ekoalu:companies_validation")
+            if hasattr(company, "abm_campaigns") and company.abm_campaigns.exists():
+                existing_link = company.abm_campaigns.first()
+                django_messages.warning(
+                    request,
+                    f"Une campagne ABM existe deja pour {company.name} (#{existing_link.campaign_id}).",
+                )
+                return redirect("ekoalu:companies_validation")
+
+            full_name = f"EKOALU - ABM - {company.name}"
+            campaign, created = Campaign.objects.get_or_create(
+                name=full_name,
+                defaults={
+                    "campaign_objective": (
+                        f"Account-Based Marketing sur {company.name}. "
+                        f"Identifier tous les decideurs et influenceurs internes "
+                        f"(dirigeants, BE, economiste, chefs de chantier, architectes internes, RH...) "
+                        f"pour trouver une porte d'entree. Objectif : RDV visio qualifie."
+                    ),
+                    "product_docs": (
+                        "EKOALU = menuiserie aluminium Chasselay (69), specialiste tertiaire "
+                        "(coupe-feu EI60/EI120, desenfumage, pare-balles, grandes dim, acoustique Rw>40). "
+                        "Atelier integre, multi-gammes (Cortizo, Sepalumic, SAPA, Wicona)."
+                    ),
+                    "booking_link": conf.CALENDAR_BOOKING_URL,
+                    "action_fraction": 1.0,
+                    "is_freemium": False,
+                },
+            )
+            AbmCampaignLink.objects.get_or_create(
+                campaign=campaign,
+                defaults={"target_company": company},
+            )
+            profile = LinkedInProfile.objects.filter(active=True).first()
+            if profile:
+                campaign.users.add(profile.user)
+            django_messages.success(
+                request,
+                f"Campagne ABM creee pour {company.name} et activee. "
+                "Phase 2 (sourcing LinkedIn cible par entreprise) arrive bientot.",
+            )
+            return redirect("ekoalu:companies_validation")
+
     # Liste par statut
     approved = ApprovedCompany.objects.filter(status=CompanyStatus.APPROVED).order_by("name")
     pending = ApprovedCompany.objects.filter(status=CompanyStatus.PENDING).order_by("-created_at")
@@ -688,6 +740,12 @@ def campaigns_list(request):
             active_user.campaigns.values_list("pk", flat=True),
         )
 
+    from ekoalu.company_validation.abm import AbmCampaignLink
+    abm_by_campaign = {
+        link.campaign_id: link.target_company
+        for link in AbmCampaignLink.objects.select_related("target_company").all()
+    }
+
     campaigns_data = []
     for campaign in queryset:
         deals = Deal.objects.filter(campaign=campaign)
@@ -735,6 +793,7 @@ def campaigns_list(request):
         campaigns_data.append({
             "campaign": campaign,
             "persona_slug": persona_slug,
+            "abm_company": abm_by_campaign.get(campaign.pk),
             "states": {
                 "qualified": qualified,
                 "ready": ready,

@@ -34,13 +34,18 @@
             {% for c in campaigns_data %}
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3">
-                    <a href="{% url 'ekoalu:campaign_detail' c.campaign.pk %}"
-                       class="text-sm font-medium text-gray-900 hover:text-blue-600">
-                        {{ c.campaign.name|cut:"EKOALU - " }}
-                    </a>
-                    {% if c.campaign.is_freemium %}
-                    <span class="text-xs text-gray-400 ml-2">(freemium)</span>
-                    {% endif %}
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <a href="{% url 'ekoalu:campaign_detail' c.campaign.pk %}"
+                           class="text-sm font-medium text-gray-900 hover:text-blue-600">
+                            {{ c.campaign.name|cut:"EKOALU - " }}
+                        </a>
+                        {% if c.abm_company %}
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800" title="Account-Based Marketing - cible une entreprise sous tous angles">🎯 ABM</span>
+                        {% endif %}
+                        {% if c.campaign.is_freemium %}
+                        <span class="text-xs text-gray-400">(freemium)</span>
+                        {% endif %}
+                    </div>
                 </td>
                 <td class="px-4 py-3 text-center">
                     {% if c.is_active %}

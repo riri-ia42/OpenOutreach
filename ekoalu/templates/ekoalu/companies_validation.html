@@ -142,26 +142,51 @@
         {% if approved %}
         <div class="bg-white rounded-lg shadow-sm border border-green-200 divide-y divide-gray-200">
             {% for c in approved %}
-            <div class="p-4 hover:bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+            <div class="p-4 hover:bg-gray-50 flex items-start justify-between gap-3 flex-wrap">
                 <div class="flex-1 min-w-0">
-                    <div class="font-medium text-gray-900">{{ c.name }}</div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-medium text-gray-900">{{ c.name }}</span>
+                        {% with abm_link=c.abm_campaigns.first %}
+                        {% if abm_link %}
+                        <a href="{% url 'ekoalu:campaign_detail' abm_link.campaign.pk %}"
+                           class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 hover:bg-purple-200">
+                            🎯 Campagne ABM active
+                        </a>
+                        {% endif %}
+                        {% endwith %}
+                    </div>
                     <div class="text-xs text-gray-500 mt-1">
                         {{ c.get_source_display }}
                         {% if c.decided_at %}· validée {{ c.decided_at|date:"d/m H:i" }}{% endif %}
                         {% if c.leads_count %}· {{ c.leads_count }} prospect{{ c.leads_count|pluralize }}{% endif %}
                     </div>
                     {% if c.notes %}
-                    <p class="text-xs text-gray-600 mt-1">{{ c.notes|truncatechars:160 }}</p>
+                    <p class="text-xs text-gray-600 mt-1">{{ c.notes|truncatechars:200 }}</p>
                     {% endif %}
                 </div>
-                <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="company_id" value="{{ c.pk }}">
-                    <button type="submit" name="action" value="set_pending"
-                            class="text-xs text-gray-600 hover:underline">
-                        Re-mettre en attente
-                    </button>
-                </form>
+                <div class="flex gap-2 items-start flex-wrap">
+                    {% with abm_link=c.abm_campaigns.first %}
+                    {% if not abm_link %}
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="company_id" value="{{ c.pk }}">
+                        <button type="submit" name="action" value="create_abm"
+                                class="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
+                                title="Créer une campagne dédiée à cette entreprise (Account-Based Marketing : tous angles d'attaque)">
+                            🎯 Créer campagne ABM
+                        </button>
+                    </form>
+                    {% endif %}
+                    {% endwith %}
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="company_id" value="{{ c.pk }}">
+                        <button type="submit" name="action" value="set_pending"
+                                class="text-xs text-gray-600 hover:underline self-center">
+                            Re-mettre en attente
+                        </button>
+                    </form>
+                </div>
             </div>
             {% endfor %}
         </div>
