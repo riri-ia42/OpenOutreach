@@ -947,8 +947,11 @@ def deals_filtered(request):
         if not deal:
             django_messages.error(request, "Deal introuvable.")
             return redirect(request.path + "?" + request.GET.urlencode())
-        if not explanation:
-            django_messages.error(request, "Une explication est obligatoire pour l'apprentissage.")
+
+        # Explanation : obligatoire pour requalify (Claude doit comprendre),
+        # optionnelle pour confirm_reject (Claude a raison, OK rapide).
+        if action == "requalify" and not explanation:
+            django_messages.error(request, "Une explication est obligatoire pour requalifier (apprentissage Claude).")
             return redirect(request.path + "?" + request.GET.urlencode())
 
         if action == "requalify":
@@ -1026,12 +1029,18 @@ def deals_filtered(request):
 
     feedback_slugs = set()
     all_ekoalu_campaigns = []
+    nb_reviewed = 0
+    show_reviewed = request.GET.get("reviewed") == "1"
     if state == "disqualified":
         feedback_slugs = set(
             QualificationFeedback.objects
             .filter(prospect_public_id__in=qs.values_list("lead__public_identifier", flat=True))
             .values_list("prospect_public_id", flat=True)
         )
+        nb_reviewed = len(feedback_slugs)
+        # Par defaut on cache les deja revus pour focus sur ceux a traiter (apprentissage)
+        if not show_reviewed and feedback_slugs:
+            qs = qs.exclude(lead__public_identifier__in=feedback_slugs)
         from linkedin.models import Campaign
         all_ekoalu_campaigns = list(
             Campaign.objects.filter(name__startswith="EKOALU - ").order_by("name")
@@ -1045,6 +1054,8 @@ def deals_filtered(request):
         "state_filter_map": _STATE_FILTER_MAP,
         "already_feedback_slugs": feedback_slugs,
         "all_ekoalu_campaigns": all_ekoalu_campaigns,
+        "nb_reviewed": nb_reviewed,
+        "show_reviewed": show_reviewed,
     }
     return render(request, "ekoalu/deals_filtered.html", context)
 
