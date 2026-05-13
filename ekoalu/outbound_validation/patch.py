@@ -96,6 +96,27 @@ def apply_outbound_validation_patch() -> None:
             logger.warning("Cannot enrich lead %s: %s", public_id, e)
         return company, headline, summary
 
+    _PENDING_OUTBOUND_OPEN_STATUSES = None  # filled lazily
+
+    def _has_open_outbound(public_id, campaign_id, kind):
+        """Vrai si un PendingOutbound non-terminal existe deja pour ce
+        (prospect, campaign, kind). Evite les doublons quand le daemon
+        re-traite un Deal reste a l'etat Qualified apres interception."""
+        from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
+        nonlocal _PENDING_OUTBOUND_OPEN_STATUSES
+        if _PENDING_OUTBOUND_OPEN_STATUSES is None:
+            _PENDING_OUTBOUND_OPEN_STATUSES = [
+                OutboundStatus.PENDING,
+                OutboundStatus.APPROVED,
+                OutboundStatus.BLOCKED_COMPANY,
+            ]
+        return PendingOutbound.objects.filter(
+            prospect_public_id=public_id,
+            campaign_id=campaign_id,
+            kind=kind,
+            status__in=_PENDING_OUTBOUND_OPEN_STATUSES,
+        ).exists()
+
     def patched_send_connection_request(session, profile):
         from ekoalu.company_validation.config import is_company_validation_enabled
         from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
@@ -112,6 +133,14 @@ def apply_outbound_validation_patch() -> None:
         company = profile.get("company", "") or profile.get("company_name", "")
         headline = profile.get("headline", "")
         summary = ""
+
+        campaign_id_early = getattr(getattr(session, "campaign", None), "pk", None)
+        if _has_open_outbound(public_id, campaign_id_early, OutboundKind.INVITATION):
+            logger.info(
+                "EKOALU: PendingOutbound invitation deja en file pour %s (campaign=%s) - skip dedup",
+                public_id, campaign_id_early,
+            )
+            return ProfileState.QUALIFIED
 
         # Enrichissement depuis Lead/Deal si pas dans profile dict
         if not company or not summary:
@@ -198,6 +227,13 @@ def apply_outbound_validation_patch() -> None:
         campaign = getattr(session, "campaign", None)
         campaign_id = getattr(campaign, "pk", None)
         campaign_name = getattr(campaign, "name", "") if campaign else ""
+
+        if _has_open_outbound(public_id, campaign_id, OutboundKind.FOLLOW_UP):
+            logger.info(
+                "EKOALU: PendingOutbound follow_up deja en file pour %s (campaign=%s) - skip dedup",
+                public_id, campaign_id,
+            )
+            return False
 
         # Vérif entreprise
         initial_status = OutboundStatus.PENDING
