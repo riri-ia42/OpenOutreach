@@ -69,6 +69,44 @@ def _send_message(session, po: PendingOutbound) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _bind_session_to_po_campaign(session, po: PendingOutbound) -> None:
+    """Aligne session.campaign sur la Campaign du PendingOutbound.
+
+    Indispensable pour que set_profile_state cible le bon Deal (un Lead peut
+    avoir plusieurs Deals — un par Campaign).
+    """
+    if not po.campaign_id:
+        return
+    from linkedin.models import Campaign
+    campaign = Campaign.objects.filter(pk=po.campaign_id).first()
+    if campaign:
+        session.campaign = campaign
+
+
+def _advance_deal_state(session, po: PendingOutbound) -> None:
+    """Pousse le Deal correspondant dans l'état attendu après envoi réussi.
+
+    INVITATION → PENDING (enqueue check_pending task).
+    FOLLOW_UP / REPLY → pas de transition (le Deal devrait déjà être CONNECTED).
+    """
+    if po.kind != OutboundKind.INVITATION:
+        return
+    try:
+        from linkedin.db.deals import set_profile_state
+        from linkedin.enums import ProfileState
+        set_profile_state(
+            session,
+            po.prospect_public_id,
+            ProfileState.PENDING.value,
+            reason="Invitation envoyée via outbound_validation sender",
+        )
+    except Exception as e:
+        logger.warning(
+            "Deal state transition failed for %s after invitation send: %s",
+            po.prospect_public_id, e,
+        )
+
+
 def send_one(session, po: PendingOutbound) -> bool:
     """Envoie un seul PendingOutbound. Met à jour son statut. Retourne True si envoyé."""
     if po.status != OutboundStatus.APPROVED:
@@ -79,6 +117,8 @@ def send_one(session, po: PendingOutbound) -> bool:
         "Envoi PendingOutbound #%s : kind=%s prospect=%s",
         po.pk, po.kind, po.prospect_public_id,
     )
+
+    _bind_session_to_po_campaign(session, po)
 
     if po.kind == OutboundKind.INVITATION:
         success, error = _send_invitation(session, po)
@@ -91,6 +131,7 @@ def send_one(session, po: PendingOutbound) -> bool:
         po.status = OutboundStatus.SENT
         po.sent_at = timezone.now()
         po.error_message = ""
+        _advance_deal_state(session, po)
     else:
         po.status = OutboundStatus.FAILED
         po.error_message = error[:1000] if error else "unknown error"
