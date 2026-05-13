@@ -47,10 +47,13 @@ DEFAULT_FOLLOW_UP_DAILY_LIMIT = 25
 # Set to False to run 24/7.
 # ----------------------------------------------------------------------
 ENABLE_ACTIVE_HOURS = True
-ACTIVE_START_HOUR = 9   # inclusive, local time
-ACTIVE_END_HOUR = 19    # exclusive, local time
-ACTIVE_TIMEZONE = system_timezone()
-REST_DAYS = (5, 6)      # 0=Mon … 6=Sun; default Sat+Sun off
+# Plage large OpenOutreach — le scheduler EKOALU (ekoalu/conf.py:ACTIVE_WINDOWS)
+# affine ensuite à 7h30-12h + 14h-20h avec pause déjeuner.
+ACTIVE_START_HOUR = 7   # inclusive, local time
+ACTIVE_END_HOUR = 20    # exclusive, local time
+# TZ forcée Europe/Paris : la machine TSE détectée en UTC sinon (cf. tz_detect).
+ACTIVE_TIMEZONE = "Europe/Paris"
+REST_DAYS = (6,)        # 0=Mon … 6=Sun; samedi conservé en activité réduite via WEEKDAY_WEIGHTS EKOALU
 
 # ----------------------------------------------------------------------
 # Campaign config (timing + ML defaults — hardcoded, no YAML)
