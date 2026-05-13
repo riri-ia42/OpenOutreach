@@ -23,6 +23,7 @@ class EkoaluConfig(AppConfig):
         from ekoalu.human_scheduler.patch import apply_human_scheduler_patch
         from ekoalu.llm_usage.patch import apply_claude_logging_patch
         from ekoalu.outbound_validation.patch import apply_outbound_validation_patch
+        from ekoalu.sourcing_filter.patch import apply_sourcing_filter_patch
 
         try:
             apply_human_scheduler_patch()
@@ -41,3 +42,9 @@ class EkoaluConfig(AppConfig):
             logger.info("EKOALU claude logging patch applied")
         except Exception as e:
             logger.error("Failed to apply claude logging patch: %s", e, exc_info=True)
+
+        try:
+            apply_sourcing_filter_patch()
+            logger.info("EKOALU sourcing_filter patch applied")
+        except Exception as e:
+            logger.error("Failed to apply sourcing_filter patch: %s", e, exc_info=True)
