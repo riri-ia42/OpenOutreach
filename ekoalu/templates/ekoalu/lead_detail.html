@@ -61,6 +61,61 @@
     </form>
 </section>
 
+<!-- G1 + G2 : Affectation campagnes -->
+<section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
+    <h2 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Affecter ce prospect à une campagne</h2>
+
+    {% if available_campaigns %}
+    <form method="post" class="flex flex-wrap items-end gap-2">
+        {% csrf_token %}
+        <div class="flex-1 min-w-[200px]">
+            <label class="block text-xs text-gray-600 mb-1">Campagne existante</label>
+            <select name="target_campaign_id" required
+                    class="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500">
+                {% for c in available_campaigns %}
+                <option value="{{ c.pk }}">{{ c.name|cut:"EKOALU - " }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" name="action" value="reassign"
+                class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+            ↳ Réaffecter (créer Deal Qualified)
+        </button>
+    </form>
+    {% else %}
+    <p class="text-xs text-gray-500 italic">Ce prospect a déjà un Deal dans toutes les campagnes EKOALU existantes.</p>
+    {% endif %}
+
+    <details class="border-t border-gray-200 pt-3">
+        <summary class="text-sm cursor-pointer text-purple-700 hover:text-purple-900 font-medium">
+            + Créer une nouvelle campagne pour ce prospect
+        </summary>
+        <form method="post" class="mt-3 space-y-2">
+            {% csrf_token %}
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">Nom (sans préfixe "EKOALU - ")</label>
+                <input type="text" name="name" required placeholder="ex: Économiste de la construction tertiaire"
+                       class="w-full border border-gray-300 rounded p-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">Objectif de la campagne</label>
+                <textarea name="objective" rows="2" required placeholder="ex: Trouver des économistes de la construction qui chiffrent les lots menuiserie alu sur des projets tertiaires Rhône-Alpes."
+                          class="w-full border border-gray-300 rounded p-2 text-sm"></textarea>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">Description produit (vue de leur côté)</label>
+                <textarea name="product_docs" rows="2" required placeholder="ex: EKOALU = menuisier alu Chasselay (69), spécialiste coupe-feu / désenfumage / acoustique pour projets tertiaires."
+                          class="w-full border border-gray-300 rounded p-2 text-sm"></textarea>
+            </div>
+            <button type="submit" name="action" value="create_campaign_and_assign"
+                    class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+                Créer + activer + rattacher ce prospect
+            </button>
+            <p class="text-xs text-gray-500">La campagne sera créée en EKOALU - {{ "(nom ci-dessus)" }}, activée pour ton compte, et ce prospect y sera ajouté en Qualified.</p>
+        </form>
+    </details>
+</section>
+
 <!-- Deals par Campaign -->
 {% if deals %}
 <section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">

@@ -25,6 +25,8 @@
                 <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">À valider</th>
                 <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Approuvé</th>
                 <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Connectés / (Pending + Connectés + Non-réponses)">Accept.</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="wrong_fit / (Qualifiés + Failed)">Hors cible</th>
                 <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
         </thead>
@@ -54,6 +56,21 @@
                 <td class="px-4 py-3 text-right text-sm {% if c.pending_out %}text-yellow-700 font-medium{% else %}text-gray-400{% endif %}">{{ c.pending_out }}</td>
                 <td class="px-4 py-3 text-right text-sm {% if c.approved_out %}text-blue-700 font-medium{% else %}text-gray-400{% endif %}">{{ c.approved_out }}</td>
                 <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.total }}</td>
+                <td class="px-4 py-3 text-right text-sm">
+                    {% if c.metrics.accept_rate is not None %}
+                        <span class="{% if c.metrics.accept_rate >= 30 %}text-green-700 font-medium{% elif c.metrics.accept_rate >= 20 %}text-yellow-700{% else %}text-red-700{% endif %}">{{ c.metrics.accept_rate }}%</span>
+                        <span class="text-xs text-gray-400 block">{{ c.metrics.invited_total }} invit.</span>
+                    {% else %}
+                        <span class="text-gray-300">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-3 text-right text-sm">
+                    {% if c.metrics.disqualif_rate is not None %}
+                        <span class="{% if c.metrics.disqualif_rate >= 80 %}text-red-700 font-medium{% elif c.metrics.disqualif_rate >= 50 %}text-orange-700{% else %}text-gray-700{% endif %}">{{ c.metrics.disqualif_rate }}%</span>
+                    {% else %}
+                        <span class="text-gray-300">—</span>
+                    {% endif %}
+                </td>
                 <td class="px-4 py-3 text-right">
                     {% if not c.campaign.is_freemium %}
                     <form method="post" class="inline">
@@ -70,7 +87,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="10" class="px-4 py-8 text-center text-gray-500 text-sm">Aucune campagne.</td>
+                <td colspan="12" class="px-4 py-8 text-center text-gray-500 text-sm">Aucune campagne.</td>
             </tr>
             {% endfor %}
         </tbody>

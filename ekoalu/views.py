@@ -200,12 +200,15 @@ def dashboard(request):
 
 @staff_member_required
 def lead_detail(request, slug: str):
-    """Détail d'un prospect : profil + scoring + timeline + actions."""
+    """Detail d'un prospect : profil + scoring + timeline + actions (incl. G1+G2)."""
     from chat.models import ChatMessage
     from crm.models import Deal, Lead
     from django.contrib.contenttypes.models import ContentType
+    from linkedin.models import Campaign, LinkedInProfile
 
     lead = get_object_or_404(Lead, public_identifier=slug)
+    profile = LinkedInProfile.objects.filter(active=True).first()
+    active_user = profile.user if profile else None
 
     if request.method == "POST":
         action = request.POST.get("action", "")
@@ -218,6 +221,58 @@ def lead_detail(request, slug: str):
             lead.disqualified = False
             lead.save()
             django_messages.success(request, "Prospect requalifié.")
+            return redirect("ekoalu:lead_detail", slug=slug)
+        elif action == "reassign":
+            # G1 : creer un Deal Qualified sur une campagne existante
+            target_id = request.POST.get("target_campaign_id")
+            target = Campaign.objects.filter(pk=target_id).first()
+            if not target:
+                django_messages.error(request, "Campagne cible introuvable.")
+            elif Deal.objects.filter(lead=lead, campaign=target).exists():
+                django_messages.warning(
+                    request, f"Ce prospect a deja un Deal dans « {target.name} ».",
+                )
+            else:
+                Deal.objects.create(
+                    lead=lead, campaign=target, state="Qualified",
+                    reason="Reaffecte manuellement par Richard depuis la fiche prospect.",
+                )
+                django_messages.success(
+                    request,
+                    f"Prospect réaffecté sur « {target.name} » (Deal Qualified créé).",
+                )
+            return redirect("ekoalu:lead_detail", slug=slug)
+        elif action == "create_campaign_and_assign":
+            # G2 : creer une nouvelle Campaign et y rattacher ce prospect
+            name = (request.POST.get("name") or "").strip()
+            objective = (request.POST.get("objective") or "").strip()
+            product_docs = (request.POST.get("product_docs") or "").strip()
+            if not (name and objective and product_docs):
+                django_messages.error(request, "Tous les champs sont requis pour creer une campagne.")
+                return redirect("ekoalu:lead_detail", slug=slug)
+            full_name = name if name.startswith("EKOALU - ") else f"EKOALU - {name}"
+            campaign, created = Campaign.objects.get_or_create(
+                name=full_name,
+                defaults={
+                    "campaign_objective": objective,
+                    "product_docs": product_docs,
+                    "booking_link": conf.CALENDAR_BOOKING_URL,
+                    "action_fraction": 1.0,
+                    "is_freemium": False,
+                },
+            )
+            if active_user:
+                campaign.users.add(active_user)
+            if not created:
+                django_messages.warning(request, f"La campagne « {full_name} » existe déjà — réutilisée.")
+            else:
+                django_messages.success(request, f"Campagne « {full_name} » créée et activée.")
+            if not Deal.objects.filter(lead=lead, campaign=campaign).exists():
+                Deal.objects.create(
+                    lead=lead, campaign=campaign, state="Qualified",
+                    reason="Premier prospect de cette nouvelle campagne (créée depuis sa fiche).",
+                )
+                django_messages.success(request, "Prospect rattaché à cette nouvelle campagne.")
             return redirect("ekoalu:lead_detail", slug=slug)
 
     deals = Deal.objects.filter(lead=lead).select_related("campaign").order_by("-creation_date")
@@ -263,6 +318,12 @@ def lead_detail(request, slug: str):
         })
     timeline_events.sort(key=lambda e: e["date"] or timezone.now(), reverse=True)
 
+    # Campagnes disponibles pour reaffectation (toutes EKOALU - sauf celles ou le lead a deja un Deal)
+    existing_campaign_ids = set(deals.values_list("campaign_id", flat=True))
+    available_campaigns = Campaign.objects.filter(
+        name__startswith="EKOALU - ",
+    ).exclude(pk__in=existing_campaign_ids).order_by("name")
+
     return render(request, "ekoalu/lead_detail.html", {
         "lead": lead,
         "linkedin_url": f"https://www.linkedin.com/in/{slug}/",
@@ -271,6 +332,7 @@ def lead_detail(request, slug: str):
         "pending_outbound": pending_outbound,
         "timeline_events": timeline_events[:30],
         "has_embedding": lead.embedding is not None,
+        "available_campaigns": available_campaigns,
     })
 
 
@@ -648,21 +710,48 @@ def campaigns_list(request):
             status=OutboundStatus.APPROVED,
         ).count()
 
+        # G3 : metriques d'efficacite
+        qualified = state_counts.get("Qualified", 0)
+        ready = state_counts.get("Ready_to_connect", 0)
+        pending = state_counts.get("Pending", 0)
+        connected = state_counts.get("Connected", 0) + state_counts.get("Completed", 0)
+        failed = state_counts.get("Failed", 0)
+        unresponsive = Deal.objects.filter(
+            campaign=campaign, state="Failed", outcome="unresponsive",
+        ).count()
+        wrong_fit = Deal.objects.filter(
+            campaign=campaign, state="Failed", outcome="wrong_fit",
+        ).count()
+        invited_total = pending + connected + unresponsive
+        accept_rate = (
+            round(connected / invited_total * 100, 1)
+            if invited_total > 0 else None
+        )
+        disqualif_rate = (
+            round(wrong_fit / (qualified + failed) * 100, 1)
+            if (qualified + failed) > 0 else None
+        )
+
         campaigns_data.append({
             "campaign": campaign,
             "persona_slug": persona_slug,
             "states": {
-                "qualified": state_counts.get("Qualified", 0),
-                "ready": state_counts.get("Ready_to_connect", 0),
-                "pending": state_counts.get("Pending", 0),
+                "qualified": qualified,
+                "ready": ready,
+                "pending": pending,
                 "connected": state_counts.get("Connected", 0),
                 "completed": state_counts.get("Completed", 0),
-                "failed": state_counts.get("Failed", 0),
+                "failed": failed,
             },
             "total": sum(state_counts.values()),
             "pending_out": pending_out,
             "approved_out": approved_out,
             "is_active": campaign.pk in active_campaign_ids and not campaign.is_freemium,
+            "metrics": {
+                "invited_total": invited_total,
+                "accept_rate": accept_rate,
+                "disqualif_rate": disqualif_rate,
+            },
         })
 
     return render(request, "ekoalu/campaigns_list.html", {
