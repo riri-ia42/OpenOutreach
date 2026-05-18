@@ -84,22 +84,22 @@
                 </select>
             </div>
 
-            <div class="flex gap-2 flex-wrap">
+            <div class="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">
                 <button type="submit" name="action" value="confirm_reject"
-                        class="px-3 py-1.5 bg-gray-200 text-gray-800 text-xs rounded hover:bg-gray-300">
-                    ✓ Confirmer le rejet (Claude a raison)
+                        class="px-4 py-3 sm:py-1.5 bg-gray-200 text-gray-800 text-sm sm:text-xs font-medium rounded hover:bg-gray-300">
+                    ✓ Confirmer le rejet
                 </button>
                 <button type="submit" name="action" value="already_connected"
-                        class="px-3 py-1.5 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200" title="Cette personne est déjà ma relation - exclure des sourcings, ce n'est pas un wrong_fit">
+                        class="px-4 py-3 sm:py-1.5 bg-blue-100 text-blue-800 text-sm sm:text-xs font-medium rounded hover:bg-blue-200" title="Déjà ma relation — exclure des sourcings">
                     ⚡ Déjà ma relation
                 </button>
                 <button type="submit" name="action" value="requalify"
-                        class="px-3 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700">
-                    ↺ Remettre dans la boucle (Claude s'est trompé)
+                        class="px-4 py-3 sm:py-1.5 bg-green-600 text-white text-sm sm:text-xs font-medium rounded hover:bg-green-700">
+                    ↺ Remettre dans la boucle
                 </button>
                 <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}"
-                   class="px-3 py-1.5 bg-purple-50 text-purple-800 text-xs rounded hover:bg-purple-100">
-                    + Créer une campagne dédiée
+                   class="block text-center px-4 py-3 sm:py-1.5 bg-purple-50 text-purple-800 text-sm sm:text-xs font-medium rounded hover:bg-purple-100">
+                    + Campagne dédiée
                 </a>
             </div>
             <p class="text-xs text-gray-500">Une fois traité, ce prospect est masqué de la liste (pour ne pas re-traiter). Toggle "Voir aussi les déjà revus" en haut pour les retrouver.</p>

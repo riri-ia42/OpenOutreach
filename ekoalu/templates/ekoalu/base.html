@@ -18,87 +18,103 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
 
-<header class="bg-white shadow-sm border-b sticky top-0 z-10">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex items-center gap-3">
-            <a href="/ekoalu/" class="block">
-                <h1 class="text-lg font-bold text-gray-900">EKOALU — Prospection</h1>
-                <p class="text-xs text-gray-500">{{ now_local|date:"l j F, H:i" }} · Chasselay (69)</p>
-            </a>
+<header class="bg-white shadow-sm border-b sticky top-0 z-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+        <div class="flex items-center justify-between gap-3">
+            <!-- Titre + statut -->
+            <div class="flex items-center gap-2 flex-wrap min-w-0">
+                <a href="/ekoalu/" class="block min-w-0">
+                    <h1 class="text-base sm:text-lg font-bold text-gray-900 truncate">EKOALU — Prospection</h1>
+                    <p class="text-xs text-gray-500 truncate">{{ now_local|date:"l j F, H:i" }} · Chasselay (69)</p>
+                </a>
 
-            <!-- Statut daemon (C) -->
-            {% if daemon_status %}
-            <div class="relative tooltip-host">
-                {% if daemon_status.active %}
-                    <span class="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium cursor-help">
-                        ⚡ Outil actif
-                    </span>
-                {% else %}
-                    <span class="px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium cursor-help">
-                        ⏸ En pause
-                    </span>
-                {% endif %}
-                <div class="tooltip-body hidden absolute left-0 top-full mt-1 w-80 bg-gray-900 text-white text-xs rounded-lg p-3 shadow-xl z-20">
+                {% if daemon_status %}
+                <div class="relative tooltip-host">
                     {% if daemon_status.active %}
-                        <div class="font-semibold mb-1">L'outil envoie actuellement</div>
-                        <div>Les actions LinkedIn sont autorisées maintenant (plage active, hors pause).</div>
+                        <span class="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium cursor-help">⚡ Actif</span>
                     {% else %}
-                        <div class="font-semibold mb-1">Pause : {{ daemon_status.reason }}</div>
-                        {% if daemon_status.next_active_at %}
-                        <div class="text-gray-300">Prochaine fenêtre active : {{ daemon_status.next_active_at|date:"l j F H:i" }}</div>
-                        {% endif %}
+                        <span class="px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium cursor-help">⏸ Pause</span>
                     {% endif %}
-                    <hr class="my-2 border-gray-700">
-                    <div class="font-semibold mb-1">Règles</div>
-                    <div class="space-y-0.5 text-gray-300">
-                        <div>Plages : <span class="text-white">7h30-12h + 14h-20h</span></div>
-                        <div>Lun-Jeu 100% · Ven 70% · Sam 20% · Dim off</div>
-                        <div>Cible : <span class="text-white">{{ ekoalu_conf.weekly_target }} invits/sem</span> · cap dur {{ ekoalu_conf.weekly_cap }}/sem</div>
-                        <div>Cap journalier : {{ ekoalu_conf.daily_cap }} invitations</div>
+                    <div class="tooltip-body hidden absolute left-0 top-full mt-1 w-72 bg-gray-900 text-white text-xs rounded-lg p-3 shadow-xl z-30">
+                        {% if daemon_status.active %}
+                            <div class="font-semibold mb-1">L'outil envoie actuellement</div>
+                            <div>Actions LinkedIn autorisées maintenant.</div>
+                        {% else %}
+                            <div class="font-semibold mb-1">Pause : {{ daemon_status.reason }}</div>
+                            {% if daemon_status.next_active_at %}
+                            <div class="text-gray-300">Prochaine fenêtre : {{ daemon_status.next_active_at|date:"l j F H:i" }}</div>
+                            {% endif %}
+                        {% endif %}
+                        <hr class="my-2 border-gray-700">
+                        <div class="space-y-0.5 text-gray-300">
+                            <div>Plages : <span class="text-white">7h30-12h + 14h-20h</span></div>
+                            <div>L-J 100% · V 70% · S 20% · D off</div>
+                            <div>Cible : <span class="text-white">{{ ekoalu_conf.weekly_target }}/sem</span> · cap dur {{ ekoalu_conf.weekly_cap }}</div>
+                            <div>Cap jour : {{ ekoalu_conf.daily_cap }} invits</div>
+                        </div>
                     </div>
                 </div>
-            </div>
-            {% endif %}
+                {% endif %}
 
-            <!-- Cout Claude API (D) -->
-            <a href="/ekoalu/usage/" class="px-2 py-1 bg-blue-50 text-blue-800 rounded-full text-xs font-medium hover:bg-blue-100" title="Detail consommation IA">
-                💰 {{ claude_cost_today_usd|floatformat:3 }}$/j · {{ claude_cost_month_usd|floatformat:2 }}$/mois
-            </a>
+                <a href="/ekoalu/usage/" class="hidden sm:inline-block px-2 py-1 bg-blue-50 text-blue-800 rounded-full text-xs font-medium hover:bg-blue-100" title="Detail consommation IA">
+                    💰 {{ claude_cost_today_usd|floatformat:3 }}$/j
+                </a>
+            </div>
+
+            <!-- Burger mobile -->
+            <button type="button" onclick="document.getElementById('mobile-nav').classList.toggle('hidden')"
+                    class="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-md text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 relative"
+                    aria-label="Menu">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                {% if badge_pending_outbound > 0 or badge_inbox > 0 or badge_companies > 0 %}
+                <span class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full pulse"></span>
+                {% endif %}
+            </button>
+
+            <!-- Nav desktop -->
+            <nav class="hidden md:flex items-center gap-3 flex-wrap text-sm">
+                {% if active_profile %}
+                    {% if active_profile.active %}
+                        <span class="px-2 py-1 bg-green-50 text-green-700 rounded text-xs">● {{ active_profile.linkedin_username }}</span>
+                    {% else %}
+                        <span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">○ Kill switch</span>
+                    {% endif %}
+                {% endif %}
+                <a href="/ekoalu/" class="text-blue-600 hover:underline">Dashboard</a>
+                <a href="/ekoalu/campaigns/" class="text-blue-600 hover:underline">Campagnes</a>
+                <a href="/ekoalu/companies-validation/" class="relative text-blue-600 hover:underline">Entreprises ✓
+                    {% if badge_companies > 0 %}<span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ badge_companies }}</span>{% endif %}
+                </a>
+                <a href="/ekoalu/messages/" class="relative text-blue-600 hover:underline">Messages
+                    {% if badge_pending_outbound > 0 %}<span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ badge_pending_outbound }}</span>{% endif %}
+                </a>
+                <a href="/ekoalu/inbox/" class="relative text-blue-600 hover:underline">Inbox
+                    {% if badge_inbox > 0 %}<span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ badge_inbox }}</span>{% endif %}
+                </a>
+                <a href="/ekoalu/companies/" class="text-blue-600 hover:underline">Sociétés</a>
+                <a href="/ekoalu/leads/add/" class="text-blue-600 hover:underline">+ Prospects</a>
+                <a href="/admin/" class="text-blue-600 hover:underline">Admin</a>
+            </nav>
         </div>
 
-        <nav class="flex items-center gap-3 flex-wrap text-sm">
-            {% if active_profile %}
-                {% if active_profile.active %}
-                    <span class="px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-                        ● {{ active_profile.linkedin_username }}
-                    </span>
-                {% else %}
-                    <span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">○ Kill switch</span>
-                {% endif %}
-            {% endif %}
-            <a href="/ekoalu/" class="text-blue-600 hover:underline">Dashboard</a>
-            <a href="/ekoalu/campaigns/" class="text-blue-600 hover:underline">Campagnes</a>
-            <a href="/ekoalu/companies-validation/" class="relative text-blue-600 hover:underline">
-                Entreprises ✓
-                {% if badge_companies > 0 %}
-                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ badge_companies }}</span>
-                {% endif %}
+        <!-- Nav mobile (drawer) -->
+        <nav id="mobile-nav" class="hidden md:hidden mt-3 pt-3 border-t border-gray-200 grid grid-cols-2 gap-2 text-sm">
+            <a href="/ekoalu/" class="px-3 py-3 bg-gray-50 rounded text-blue-700 font-medium text-center">📊 Dashboard</a>
+            <a href="/ekoalu/messages/" class="relative px-3 py-3 bg-yellow-50 rounded text-yellow-800 font-medium text-center">✉️ Messages
+                {% if badge_pending_outbound > 0 %}<span class="ml-1 inline-block bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-bold">{{ badge_pending_outbound }}</span>{% endif %}
             </a>
-            <a href="/ekoalu/messages/" class="relative text-blue-600 hover:underline">
-                Messages
-                {% if badge_pending_outbound > 0 %}
-                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ badge_pending_outbound }}</span>
-                {% endif %}
+            <a href="/ekoalu/inbox/" class="relative px-3 py-3 bg-blue-50 rounded text-blue-800 font-medium text-center">📬 Inbox
+                {% if badge_inbox > 0 %}<span class="ml-1 inline-block bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-bold">{{ badge_inbox }}</span>{% endif %}
             </a>
-            <a href="/ekoalu/inbox/" class="relative text-blue-600 hover:underline">
-                Inbox
-                {% if badge_inbox > 0 %}
-                <span class="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold pulse">{{ badge_inbox }}</span>
-                {% endif %}
+            <a href="/ekoalu/companies-validation/" class="relative px-3 py-3 bg-green-50 rounded text-green-800 font-medium text-center">🏢 Entreprises ✓
+                {% if badge_companies > 0 %}<span class="ml-1 inline-block bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-bold">{{ badge_companies }}</span>{% endif %}
             </a>
-            <a href="/ekoalu/companies/" class="text-blue-600 hover:underline">Sociétés</a>
-            <a href="/ekoalu/leads/add/" class="text-blue-600 hover:underline">+ Prospects</a>
-            <a href="/admin/" class="text-blue-600 hover:underline">Admin</a>
+            <a href="/ekoalu/deals/?state=disqualified" class="px-3 py-3 bg-gray-50 rounded text-gray-700 font-medium text-center">🚫 Disqualifiés</a>
+            <a href="/ekoalu/campaigns/" class="px-3 py-3 bg-gray-50 rounded text-gray-700 font-medium text-center">🎯 Campagnes</a>
+            <a href="/ekoalu/companies/" class="px-3 py-3 bg-gray-50 rounded text-gray-700 font-medium text-center">🏗️ Sociétés</a>
+            <a href="/ekoalu/leads/add/" class="px-3 py-3 bg-gray-50 rounded text-gray-700 font-medium text-center">➕ Prospects</a>
+            <a href="/ekoalu/usage/" class="col-span-2 px-3 py-2 bg-blue-50 rounded text-blue-800 text-xs text-center">💰 {{ claude_cost_today_usd|floatformat:3 }}$/j · {{ claude_cost_month_usd|floatformat:2 }}$/mois</a>
+            <a href="/admin/" class="col-span-2 px-3 py-2 bg-gray-100 rounded text-gray-600 text-xs text-center">Admin Django</a>
         </nav>
     </div>
 </header>
