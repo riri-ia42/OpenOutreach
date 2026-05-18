@@ -20,4 +20,6 @@ urlpatterns = [
     path("companies-validation/", views.companies_validation, name="companies_validation"),
     path("deals/", views.deals_filtered, name="deals_filtered"),
     path("usage/", views.usage, name="usage"),
+    path("recap/", views.daily_recap_today, name="recap_today"),
+    path("recap/<str:day>/", views.daily_recap_view, name="recap_day"),
 ]

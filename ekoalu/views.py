@@ -1219,3 +1219,37 @@ def usage(request):
         "total_all": total_all,
         "recent": recent,
     })
+
+
+@staff_member_required
+def daily_recap_today(request):
+    """Redirige vers le recap du jour."""
+    today = timezone.localdate().strftime("%Y-%m-%d")
+    return redirect("ekoalu:recap_day", day=today)
+
+
+@staff_member_required
+def daily_recap_view(request, day: str):
+    """Sert le HTML du recap genere par la commande daily_recap.
+
+    Si pas encore genere, le genere a la volee (sans envoi mail, juste l'HTML).
+    """
+    from datetime import datetime
+    from pathlib import Path
+    from django.conf import settings
+    from django.http import HttpResponse
+    from ekoalu.management.commands.daily_recap import compute_stats, render_html
+
+    try:
+        target_date = datetime.strptime(day, "%Y-%m-%d").date()
+    except ValueError:
+        return HttpResponse("Date invalide (attendu YYYY-MM-DD)", status=400)
+
+    recap_path = Path(settings.ROOT_DIR) / "data" / "recaps" / f"{day}.html"
+    if recap_path.exists():
+        html = recap_path.read_text(encoding="utf-8")
+    else:
+        stats = compute_stats(target_date)
+        html = render_html(stats)
+
+    return HttpResponse(html, content_type="text/html; charset=utf-8")

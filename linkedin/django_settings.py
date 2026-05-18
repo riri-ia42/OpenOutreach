@@ -12,6 +12,17 @@ os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+# Charge le .env du projet parent (prospection-ia/.env) puis du root openoutreach/.env
+# pour exposer EMAIL_HOST / EMAIL_HOST_PASSWORD / etc. aux settings ci-dessous.
+try:
+    from dotenv import load_dotenv
+
+    for env_path in (ROOT_DIR.parent / ".env", ROOT_DIR / ".env"):
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
+except ImportError:
+    pass
+
 BASE_DIR = ROOT_DIR
 
 SECRET_KEY = "openoutreach-local-dev-key-change-in-production"
@@ -85,6 +96,18 @@ LOGIN_URL = "/admin/login/"
 
 DEFAULT_FROM_EMAIL = "noreply@localhost"
 EMAIL_SUBJECT_PREFIX = "CRM: "
+
+# Recap quotidien -- envoi SMTP optionnel.
+# Si EMAIL_HOST defini dans l'environnement, Django utilisera SMTP, sinon
+# la commande daily_recap dump uniquement le HTML dans data/recaps/.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() in ("1", "true", "yes")
+EMAIL_TIMEOUT = 20
+RECAP_RECIPIENT = os.environ.get("NOTIFY_EMAIL", "richard@ekoalu.com")
+RECAP_FROM = os.environ.get("RECAP_FROM_EMAIL", EMAIL_HOST_USER or "noreply@localhost")
 
 LANGUAGE_CODE = "en"
 LANGUAGES = [("en", "English")]
