@@ -1502,7 +1502,7 @@ def deals_filtered(request):
             Campaign.objects.filter(name__startswith="EKOALU - ").order_by("name")
         )
 
-    from ekoalu.prospect_display import resolve_prospect_display
+    from ekoalu.prospect_display import analyze_disqualification, resolve_prospect_display
     deals_list = list(qs[:200])
     for d in deals_list:
         disp = resolve_prospect_display(d.lead.public_identifier, deal=d)
@@ -1510,6 +1510,10 @@ def deals_filtered(request):
         d.prospect_company_display = disp["company"]
         d.prospect_location = disp["location"]
         d.prospect_job_title = disp["job_title"]
+        if state == "disqualified":
+            analysis = analyze_disqualification(d.reason or "")
+            d.analysis_criteria = analysis["criteria"]
+            d.analysis_tldr = analysis["tldr"]
 
     context = {
         "state_filter": state,

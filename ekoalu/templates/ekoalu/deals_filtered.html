@@ -78,10 +78,29 @@
                     <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-800">{{ d.state }}</span>
                     {% if d.outcome %}<span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{{ d.outcome }}</span>{% endif %}
                 </div>
-                <div class="mt-2">
-                    <div class="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Raison Claude</div>
-                    <p class="text-sm text-gray-700 italic whitespace-pre-wrap bg-gray-50 p-3 rounded border border-gray-200">{{ d.reason|default:"(aucune raison enregistrée)" }}</p>
+                {% if d.analysis_criteria %}
+                <div class="mt-2 flex items-center gap-1.5 flex-wrap">
+                    {% for c in d.analysis_criteria %}
+                    <span class="text-xs px-2 py-0.5 rounded border
+                        {% if c.status == 'ok' %}bg-green-50 border-green-300 text-green-800
+                        {% elif c.status == 'ko' %}bg-red-50 border-red-300 text-red-800
+                        {% else %}bg-gray-50 border-gray-300 text-gray-600{% endif %}">
+                        {% if c.status == 'ok' %}✓{% elif c.status == 'ko' %}✗{% else %}–{% endif %}
+                        <span class="font-medium">{{ c.label }}</span>
+                        {% if c.micro and c.micro != "—" %}<span class="text-[10px] opacity-80">· {{ c.micro }}</span>{% endif %}
+                    </span>
+                    {% endfor %}
                 </div>
+                {% endif %}
+                {% if d.analysis_tldr %}
+                <p class="mt-2 text-sm text-gray-700 line-clamp-2">{{ d.analysis_tldr }}</p>
+                {% endif %}
+                {% if d.reason %}
+                <details class="mt-1">
+                    <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Voir la raison Claude complète</summary>
+                    <p class="mt-2 text-sm text-gray-700 italic whitespace-pre-wrap bg-gray-50 p-3 rounded border border-gray-200">{{ d.reason }}</p>
+                </details>
+                {% endif %}
             </div>
             <div class="text-right">
                 <div class="text-xs text-gray-400 whitespace-nowrap">{{ d.update_date|date:"d/m H:i" }}</div>
