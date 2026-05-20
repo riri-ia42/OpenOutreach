@@ -341,6 +341,21 @@ def lead_detail(request, slug: str):
     })
 
 
+def _parse_bulk_ids(request) -> list[int]:
+    """Recupere et parse selected_ids depuis le POST (CSV ou liste)."""
+    raw = request.POST.get("selected_ids", "") or ""
+    parts = [p.strip() for p in raw.replace(";", ",").split(",")]
+    out = []
+    for p in parts:
+        if not p:
+            continue
+        try:
+            out.append(int(p))
+        except ValueError:
+            continue
+    return out
+
+
 @staff_member_required
 def companies_list(request):
     """Vue agrégée par société (basée sur Deal.profile_summary)."""
@@ -482,6 +497,50 @@ def companies_validation(request):
                         obj.decided_at = timezone.now()
                     obj.save()
                 django_messages.success(request, f"'{name}' enregistrée comme {obj.get_status_display()}.")
+            return redirect("ekoalu:companies_validation")
+
+        elif action in ("bulk_approve_companies", "bulk_reject_companies"):
+            from ekoalu.company_validation.models import _normalize_company_name
+            ids = _parse_bulk_ids(request)
+            if not ids:
+                django_messages.warning(request, "Aucune entreprise sélectionnée.")
+                return redirect("ekoalu:companies_validation")
+            new_status = (
+                CompanyStatus.APPROVED if action == "bulk_approve_companies"
+                else CompanyStatus.REJECTED
+            )
+            companies = ApprovedCompany.objects.filter(pk__in=ids)
+            n_companies = 0
+            n_unblocked = 0
+            for c in companies:
+                c.status = new_status
+                c.decided_at = timezone.now()
+                c.save()
+                n_companies += 1
+                normalized = _normalize_company_name(c.name)
+                if new_status == CompanyStatus.APPROVED:
+                    blocked = PendingOutbound.objects.filter(status=OutboundStatus.BLOCKED_COMPANY)
+                    for po in blocked:
+                        if _normalize_company_name(po.prospect_company or "") == normalized:
+                            po.status = OutboundStatus.PENDING
+                            po.save()
+                            n_unblocked += 1
+                else:
+                    for po in PendingOutbound.objects.filter(
+                        status__in=[OutboundStatus.PENDING, OutboundStatus.BLOCKED_COMPANY],
+                    ):
+                        if _normalize_company_name(po.prospect_company or "") == normalized:
+                            po.status = OutboundStatus.REJECTED
+                            po.rejection_reason = f"Entreprise refusée (masse) : {c.name}"
+                            po.save()
+            if new_status == CompanyStatus.APPROVED:
+                django_messages.success(
+                    request,
+                    f"✓ {n_companies} entreprise(s) approuvée(s). "
+                    f"{n_unblocked} message(s) débloqué(s).",
+                )
+            else:
+                django_messages.warning(request, f"✗ {n_companies} entreprise(s) refusée(s).")
             return redirect("ekoalu:companies_validation")
 
         elif action == "suggest_ai":
@@ -908,9 +967,42 @@ def campaign_detail(request, pk: int):
 
 @staff_member_required
 def outbound_list(request):
-    """Liste des messages sortants à valider."""
+    """Liste des messages sortants à valider + actions en masse."""
     from crm.models import Deal
     from ekoalu.prospect_display import resolve_prospect_display
+
+    if request.method == "POST":
+        bulk_action = request.POST.get("bulk_action", "")
+        ids = _parse_bulk_ids(request)
+        if not ids:
+            django_messages.warning(request, "Aucun message sélectionné.")
+            return redirect(request.path + "?" + request.GET.urlencode())
+        qs = PendingOutbound.objects.filter(pk__in=ids)
+        n = 0
+        if bulk_action == "bulk_approve":
+            for po in qs.filter(status=OutboundStatus.PENDING):
+                po.status = OutboundStatus.APPROVED
+                po.approved_at = timezone.now()
+                # final_content reste vide -> ai_draft sera envoye tel quel
+                po.save()
+                n += 1
+            django_messages.success(request, f"✓ {n} message(s) approuvé(s) — partira au prochain cycle daemon.")
+        elif bulk_action == "bulk_reject":
+            reason = request.POST.get("bulk_reason", "").strip() or "(rejet en masse)"
+            n = qs.exclude(status__in=[OutboundStatus.SENT, OutboundStatus.REJECTED]).update(
+                status=OutboundStatus.REJECTED,
+                rejection_reason=reason,
+            )
+            django_messages.warning(request, f"✗ {n} message(s) refusé(s).")
+        elif bulk_action == "bulk_mark_sent":
+            n = qs.filter(status=OutboundStatus.APPROVED).update(
+                status=OutboundStatus.SENT,
+                sent_at=timezone.now(),
+            )
+            django_messages.success(request, f"{n} message(s) marqué(s) envoyés manuellement.")
+        else:
+            django_messages.error(request, f"Action en masse inconnue : {bulk_action}")
+        return redirect(request.path + "?" + request.GET.urlencode())
 
     status_filter = request.GET.get("status", "pending")
     kind_filter = request.GET.get("kind", "")
@@ -943,6 +1035,7 @@ def outbound_list(request):
         o.prospect_name = disp["name"]
         o.prospect_company_display = disp["company"]
         o.prospect_location = disp["location"]
+        o.prospect_job_title = disp["job_title"]
 
     context = {
         "outbound_list": items,
@@ -1227,6 +1320,32 @@ def deals_filtered(request):
         from linkedin.models import Campaign
 
         action = request.POST.get("action", "")
+
+        # ---- Bulk action : confirm_reject sur plusieurs disqualifies a la fois ----
+        if action == "bulk_confirm_reject":
+            ids = _parse_bulk_ids(request)
+            if not ids:
+                django_messages.warning(request, "Aucun prospect sélectionné.")
+                return redirect(request.path + "?" + request.GET.urlencode())
+            deals_qs = Deal.objects.filter(pk__in=ids).select_related("lead", "campaign")
+            n = 0
+            for d in deals_qs:
+                QualificationFeedback.objects.create(
+                    prospect_public_id=d.lead.public_identifier,
+                    campaign_id=d.campaign_id,
+                    campaign_name=d.campaign.name if d.campaign else "",
+                    claude_reason=d.reason or "",
+                    richard_explanation="(rejet en masse)",
+                    kind=QualificationFeedback.Kind.CONFIRM_REJECT,
+                )
+                n += 1
+            django_messages.success(
+                request,
+                f"✓ Rejet confirmé en masse pour {n} prospect{'s' if n>1 else ''}. "
+                "Décisions Claude validées, feedback enregistré pour apprentissage.",
+            )
+            return redirect(request.path + "?" + request.GET.urlencode())
+
         deal_id = request.POST.get("deal_id")
         explanation = (request.POST.get("explanation") or "").strip()
         deal = Deal.objects.filter(pk=deal_id).select_related("lead", "campaign").first()
@@ -1390,6 +1509,7 @@ def deals_filtered(request):
         d.prospect_name = disp["name"]
         d.prospect_company_display = disp["company"]
         d.prospect_location = disp["location"]
+        d.prospect_job_title = disp["job_title"]
 
     context = {
         "state_filter": state,

@@ -32,6 +32,16 @@
 </div>
 {% endif %}
 
+{% if state_filter == 'disqualified' and deals %}
+<div class="bg-white rounded-lg p-3 border border-gray-200 flex items-center gap-3 flex-wrap text-sm">
+    <label class="inline-flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="bulk-all" class="w-4 h-4 accent-red-600">
+        <span class="font-medium text-gray-700">Tout sélectionner</span>
+    </label>
+    <span class="text-xs text-gray-500">· Coche les prospects à confirmer en rejet en masse</span>
+</div>
+{% endif %}
+
 <!-- Liste -->
 {% if deals %}
 {% if state_filter == 'disqualified' %}
@@ -39,24 +49,34 @@
 <div class="space-y-3">
     {% for d in deals %}
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-        <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div class="flex items-start gap-3">
+            {% if d.lead.public_identifier in handled_elsewhere_slugs or d.lead.public_identifier in already_feedback_slugs %}
+            <div class="w-4 mt-1"></div>
+            {% else %}
+            <input type="checkbox" class="bulk-cb mt-1 w-4 h-4 accent-red-600" data-id="{{ d.pk }}">
+            {% endif %}
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                     <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}" class="font-semibold text-gray-900 hover:text-blue-600">
                         {{ d.prospect_name|default:d.lead.public_identifier }}
                     </a>
                     {% if d.prospect_company_display %}
-                    <span class="text-sm text-gray-700">· {{ d.prospect_company_display }}</span>
+                    <span class="text-sm font-medium text-gray-800">— {{ d.prospect_company_display }}</span>
+                    {% endif %}
+                    <a href="https://www.linkedin.com/in/{{ d.lead.public_identifier }}/" target="_blank" class="text-xs text-blue-600 hover:underline">Profil ↗</a>
+                </div>
+                <div class="mt-1 flex items-center gap-2 flex-wrap text-xs text-gray-600">
+                    {% if d.prospect_job_title %}
+                    <span>💼 {{ d.prospect_job_title }}</span>
                     {% endif %}
                     {% if d.prospect_location %}
-                    <span class="text-xs text-gray-500">· 📍 {{ d.prospect_location }}</span>
+                    <span>📍 {{ d.prospect_location }}</span>
                     {% endif %}
-                    <a href="{% url 'ekoalu:campaign_detail' d.campaign.pk %}" class="text-xs text-gray-500 hover:underline">
+                    <a href="{% url 'ekoalu:campaign_detail' d.campaign.pk %}" class="hover:underline">
                         cible : {{ d.campaign.name|cut:"EKOALU - " }}
                     </a>
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800">{{ d.state }}</span>
-                    {% if d.outcome %}<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{{ d.outcome }}</span>{% endif %}
-                    <a href="https://www.linkedin.com/in/{{ d.lead.public_identifier }}/" target="_blank" class="text-xs text-blue-600 hover:underline">Profil ↗</a>
+                    <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-800">{{ d.state }}</span>
+                    {% if d.outcome %}<span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{{ d.outcome }}</span>{% endif %}
                 </div>
                 <div class="mt-2">
                     <div class="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Raison Claude</div>
@@ -114,6 +134,50 @@
     </div>
     {% endfor %}
 </div>
+
+<!-- Sticky bar : actions en masse -->
+<form method="post" id="bulk-form" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-white shadow-xl border-t border-gray-700 px-4 py-3 z-50 hidden"
+      onsubmit="return confirm('Confirmer le rejet en masse pour ' + document.getElementById('bulk-count').textContent + ' prospect(s) ?');">
+    {% csrf_token %}
+    <input type="hidden" name="selected_ids" id="bulk-ids" value="">
+    <div class="max-w-7xl mx-auto flex items-center gap-3 flex-wrap">
+        <span class="font-semibold"><span id="bulk-count">0</span> prospect(s) sélectionné(s)</span>
+        <button type="submit" name="action" value="bulk_confirm_reject"
+                class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">
+            ✓ Confirmer le rejet en masse
+        </button>
+        <button type="button" onclick="document.querySelectorAll('.bulk-cb').forEach(c => c.checked = false); document.getElementById('bulk-all').checked = false; updateBulkBar();"
+                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded">
+            Tout décocher
+        </button>
+    </div>
+</form>
+
+<script>
+(function() {
+    function updateBulkBar() {
+        const checked = [...document.querySelectorAll('.bulk-cb:checked')];
+        const ids = checked.map(c => c.dataset.id);
+        document.getElementById('bulk-ids').value = ids.join(',');
+        document.getElementById('bulk-count').textContent = ids.length;
+        document.getElementById('bulk-form').classList.toggle('hidden', ids.length === 0);
+    }
+    window.updateBulkBar = updateBulkBar;
+
+    const master = document.getElementById('bulk-all');
+    if (master) {
+        master.addEventListener('change', () => {
+            document.querySelectorAll('.bulk-cb').forEach(c => c.checked = master.checked);
+            updateBulkBar();
+        });
+    }
+    document.querySelectorAll('.bulk-cb').forEach(cb => cb.addEventListener('change', updateBulkBar));
+
+    // Padding bas pour ne pas masquer du contenu sous la barre sticky
+    document.body.style.paddingBottom = '80px';
+})();
+</script>
+
 {% else %}
 <!-- Vue table standard pour les autres états -->
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">

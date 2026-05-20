@@ -35,6 +35,16 @@
     </a>
 </div>
 
+{% if outbound_list and status_filter in 'pending,approved' %}
+<div class="bg-white rounded-lg p-3 border border-gray-200 flex items-center gap-3 flex-wrap text-sm">
+    <label class="inline-flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="bulk-all" class="w-4 h-4 accent-blue-600">
+        <span class="font-medium text-gray-700">Tout sélectionner</span>
+    </label>
+    <span class="text-xs text-gray-500">· Coche les messages pour actions en masse</span>
+</div>
+{% endif %}
+
 <!-- Liste -->
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
     {% if outbound_list %}
@@ -42,6 +52,9 @@
             {% for o in outbound_list %}
             <li class="p-4 hover:bg-gray-50">
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-3 sm:gap-4">
+                    {% if o.status == 'pending' or o.status == 'approved' %}
+                    <input type="checkbox" class="bulk-cb mt-1 w-4 h-4 accent-blue-600" data-id="{{ o.pk }}">
+                    {% endif %}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1 flex-wrap">
                             <span class="text-xs px-2 py-0.5 rounded-full
@@ -99,5 +112,59 @@
         </div>
     {% endif %}
 </div>
+
+{% if outbound_list and status_filter in 'pending,approved' %}
+<form method="post" id="bulk-form" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-white shadow-xl border-t border-gray-700 px-4 py-3 z-50 hidden">
+    {% csrf_token %}
+    <input type="hidden" name="selected_ids" id="bulk-ids" value="">
+    <div class="max-w-7xl mx-auto flex items-center gap-3 flex-wrap">
+        <span class="font-semibold"><span id="bulk-count">0</span> message(s) sélectionné(s)</span>
+        {% if status_filter == 'pending' %}
+        <button type="submit" name="bulk_action" value="bulk_approve"
+                onclick="return confirm('Approuver ' + document.getElementById('bulk-count').textContent + ' message(s) ?\nIls partiront au prochain cycle daemon.');"
+                class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded font-medium">
+            ✓ Approuver tout
+        </button>
+        {% endif %}
+        {% if status_filter == 'approved' %}
+        <button type="submit" name="bulk_action" value="bulk_mark_sent"
+                onclick="return confirm('Marquer ' + document.getElementById('bulk-count').textContent + ' message(s) comme envoyés ?');"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium">
+            Marquer envoyé
+        </button>
+        {% endif %}
+        <button type="submit" name="bulk_action" value="bulk_reject"
+                onclick="return confirm('Refuser ' + document.getElementById('bulk-count').textContent + ' message(s) ?');"
+                class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">
+            ✗ Refuser tout
+        </button>
+        <button type="button" onclick="document.querySelectorAll('.bulk-cb').forEach(c => c.checked = false); document.getElementById('bulk-all').checked = false; updateBulkBar();"
+                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded">
+            Tout décocher
+        </button>
+    </div>
+</form>
+
+<script>
+(function() {
+    function updateBulkBar() {
+        const checked = [...document.querySelectorAll('.bulk-cb:checked')];
+        document.getElementById('bulk-ids').value = checked.map(c => c.dataset.id).join(',');
+        document.getElementById('bulk-count').textContent = checked.length;
+        document.getElementById('bulk-form').classList.toggle('hidden', checked.length === 0);
+    }
+    window.updateBulkBar = updateBulkBar;
+    const master = document.getElementById('bulk-all');
+    if (master) {
+        master.addEventListener('change', () => {
+            document.querySelectorAll('.bulk-cb').forEach(c => c.checked = master.checked);
+            updateBulkBar();
+        });
+    }
+    document.querySelectorAll('.bulk-cb').forEach(cb => cb.addEventListener('change', updateBulkBar));
+    document.body.style.paddingBottom = '80px';
+})();
+</script>
+{% endif %}
 
 {% endblock %}

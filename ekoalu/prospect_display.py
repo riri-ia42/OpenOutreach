@@ -17,6 +17,11 @@ _COMPANY_MARKERS = (
     "company:", "works at ", "entreprise :", "entreprise:",
     "societe :", "societe:", "société :", "société:", "chez ",
 )
+_TITLE_MARKERS = (
+    "title:", "job_title:", "job title:", "headline:", "position:",
+    "role:", "poste :", "poste:", "metier :", "metier:", "métier :", "métier:",
+    "works as ", "occupation:",
+)
 
 
 def _facts_iter(profile_summary):
@@ -87,8 +92,21 @@ def extract_location(profile_summary) -> str:
     return ""
 
 
+def extract_job_title(profile_summary) -> str:
+    """Extrait le metier / poste actuel depuis les facts mem0."""
+    for txt in _facts_iter(profile_summary):
+        low = txt.lower()
+        for marker in _TITLE_MARKERS:
+            if marker in low:
+                idx = low.find(marker) + len(marker)
+                value = txt[idx:].strip(".,;:- \n").split("\n")[0]
+                if value and len(value) <= 160:
+                    return value.strip()
+    return ""
+
+
 def resolve_prospect_display(slug: str, deal=None, company_hint: str = "") -> dict:
-    """Renvoie un dict {name, company, location} pour les templates.
+    """Renvoie un dict {name, company, location, job_title} pour les templates.
 
     Args:
         slug: public_identifier LinkedIn (toujours dispo)
@@ -99,7 +117,8 @@ def resolve_prospect_display(slug: str, deal=None, company_hint: str = "") -> di
     profile_summary = getattr(deal, "profile_summary", None) if deal else None
     company = extract_company(profile_summary) or company_hint or ""
     location = extract_location(profile_summary)
-    return {"name": name, "company": company, "location": location}
+    job_title = extract_job_title(profile_summary)
+    return {"name": name, "company": company, "location": location, "job_title": job_title}
 
 
 def resolve_for_lead(lead, deal=None) -> dict:
