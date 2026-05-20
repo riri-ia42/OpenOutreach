@@ -97,10 +97,15 @@
         </h2>
         <div class="bg-white rounded-lg shadow-sm border border-yellow-200 divide-y divide-gray-200">
             {% for c in pending %}
-            <div class="p-4 hover:bg-gray-50">
+            <div class="p-4 hover:bg-gray-50 {% if c.is_fresh %}bg-purple-50{% endif %}">
                 <div class="flex items-center justify-between gap-3 flex-wrap">
                     <div class="flex-1 min-w-0">
-                        <div class="font-medium text-gray-900">{{ c.name }}</div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-medium text-gray-900">{{ c.name }}</span>
+                            {% if c.is_fresh %}
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-purple-600 text-white font-semibold">🆕 NOUVEAU</span>
+                            {% endif %}
+                        </div>
                         <div class="text-xs text-gray-500 mt-1">
                             Source : {{ c.get_source_display }}
                             {% if c.leads_count %}· {{ c.leads_count }} prospect{{ c.leads_count|pluralize }} identifié{{ c.leads_count|pluralize }}{% endif %}

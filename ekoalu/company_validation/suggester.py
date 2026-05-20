@@ -38,6 +38,48 @@ Pas de texte avant ou après le JSON. Pas de markdown. Juste le tableau JSON.
 """
 
 
+def _parse_company_json_tolerant(text: str) -> list[dict]:
+    """Parse JSON tableau d'entreprises avec tolerance aux troncatures.
+
+    Si la reponse Claude est coupee a max_tokens, le dernier objet est
+    incomplet. On essaye le parse strict, puis on backtrack en cherchant
+    le dernier objet `}` complet pour ne pas tout perdre.
+    """
+    text = text.strip()
+    # Retirer markdown ```json ... ``` au cas ou
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # Tolerance : truncation a max_tokens. On cherche le dernier '}' qui
+    # ferme un objet complet et on referme le tableau a la main.
+    last_close = text.rfind("}")
+    if last_close > 0:
+        partial = text[: last_close + 1].rstrip(", \n\t")
+        if not partial.endswith("]"):
+            partial = partial + "]"
+        try:
+            data = json.loads(partial)
+            if isinstance(data, list) and data:
+                logger.warning(
+                    "JSON Claude tronque (max_tokens probablement atteint), "
+                    "recuperation partielle : %d objets",
+                    len(data),
+                )
+                return data
+        except json.JSONDecodeError as e:
+            logger.error("JSON parse error meme apres tolerance : %s", e)
+
+    logger.error("Impossible de parser la reponse Claude. Texte brut :\n%s", text[:2000])
+    return []
+
+
 def suggest_companies(n: int = 10, focus: str = "") -> list[dict]:
     """Demande à Claude N suggestions d'entreprises.
 
@@ -68,31 +110,30 @@ def suggest_companies(n: int = 10, focus: str = "") -> list[dict]:
     if focus:
         user_msg += f" Focus particulier : {focus}."
 
+    # Budget tokens : ~300 tokens par entreprise (nom + ville + rationale 1-2 phrases)
+    # Plafonne a 8000 pour rester raisonnable (cout ~0.12 USD max).
+    max_tokens_budget = min(max(n * 300, 1500), 8000)
+
     client = Anthropic(api_key=api_key)
     try:
         resp = client.messages.create(
             model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-            max_tokens=2000,
+            max_tokens=max_tokens_budget,
             system=PROMPT_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
         )
         text = resp.content[0].text if resp.content else ""
+        stop_reason = getattr(resp, "stop_reason", "")
+        if stop_reason == "max_tokens":
+            logger.warning(
+                "Claude reponse tronquee (stop_reason=max_tokens) — augmente max_tokens_budget actuel %d.",
+                max_tokens_budget,
+            )
     except Exception as e:
         logger.exception("Erreur Claude API : %s", e)
         return []
 
-    # Parser JSON — robuste aux variations
-    text = text.strip()
-    # Retirer markdown ```json ... ``` au cas où
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        logger.error("JSON parse error : %s\nText: %s", e, text[:500])
-        return []
-
+    data = _parse_company_json_tolerant(text)
     if not isinstance(data, list):
         return []
 

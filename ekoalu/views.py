@@ -500,16 +500,27 @@ def companies_validation(request):
             if not suggestions:
                 django_messages.error(
                     request,
-                    "Échec génération suggestions (clé API ? prompt ? erreur réseau ?). "
-                    "Voir logs serveur.",
+                    "Échec génération suggestions Claude (JSON invalide / réponse vide / erreur API). "
+                    "Voir logs serveur — possible cause : reponse tronquee à max_tokens. "
+                    "Ré-essaye avec un nombre plus petit.",
                 )
             else:
                 stats = import_suggestions_into_db(suggestions)
-                django_messages.success(
-                    request,
-                    f"{stats['created']} entreprise(s) suggérée(s) ajoutée(s) en attente. "
-                    f"{stats['skipped_existing']} déjà existante(s)."
-                )
+                if stats["created"] == 0 and stats["skipped_existing"] > 0:
+                    django_messages.warning(
+                        request,
+                        f"Claude a proposé {len(suggestions)} entreprise(s), mais TOUTES "
+                        f"étaient déjà en base (approuvée/refusée/pending). "
+                        f"Essaye un focus différent (ex: 'Rhône-Alpes hors 69', "
+                        f"'designer espace tertiaire', 'BET acoustique') pour explorer de nouveaux secteurs.",
+                    )
+                else:
+                    django_messages.success(
+                        request,
+                        f"✅ {stats['created']} nouvelle(s) suggestion(s) ajoutée(s) en PENDING — "
+                        f"voir la section « ⏳ En attente de validation » ci-dessous. "
+                        f"{stats['skipped_existing']} déjà connue(s), ignorée(s).",
+                    )
             return redirect("ekoalu:companies_validation")
 
         elif action in ("approve", "reject", "set_pending"):
@@ -623,8 +634,15 @@ def companies_validation(request):
 
     # Liste par statut
     approved = ApprovedCompany.objects.filter(status=CompanyStatus.APPROVED).order_by("name")
-    pending = ApprovedCompany.objects.filter(status=CompanyStatus.PENDING).order_by("-created_at")
+    pending = list(
+        ApprovedCompany.objects.filter(status=CompanyStatus.PENDING).order_by("-created_at"),
+    )
     rejected = ApprovedCompany.objects.filter(status=CompanyStatus.REJECTED).order_by("name")
+    # Marque les entreprises creees dans la derniere heure (= session courante)
+    from datetime import timedelta
+    fresh_cutoff = timezone.now() - timedelta(hours=1)
+    for c in pending:
+        c.is_fresh = c.created_at >= fresh_cutoff
 
     # Stats PendingOutbound bloqués
     nb_blocked_by_company = PendingOutbound.objects.filter(
