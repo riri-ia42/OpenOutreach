@@ -74,7 +74,26 @@ NICHE_PRODUCTS = [
     "pare-balles", "BC1", "BC2", "BC3", "BC4",
     "grandes dimensions", "grandes dim",
     "acoustique", "Rw", "POA",
+    "mur-rideau", "mur rideau",
 ]
+
+# ----------------------------------------------------------------------
+# Signature DM follow-up (bloc final des messages post-acceptation)
+# ----------------------------------------------------------------------
+SIGNATURE_NAME = os.environ.get("EKOALU_SIGNATURE_NAME", "Richard Gros")
+SIGNATURE_TITLE = os.environ.get("EKOALU_SIGNATURE_TITLE", "Président EKOALU")
+SIGNATURE_MOBILE = os.environ.get("EKOALU_SIGNATURE_MOBILE", "06 XX XX XX XX")
+SIGNATURE_EMAIL = os.environ.get("EKOALU_SIGNATURE_EMAIL", "richard@ekoalu.com")
+
+
+def render_signature() -> str:
+    """Bloc signature 4 lignes pour les DM follow-up EKOALU."""
+    return (
+        f"{SIGNATURE_NAME}\n"
+        f"{SIGNATURE_TITLE}\n"
+        f"{SIGNATURE_MOBILE}\n"
+        f"{SIGNATURE_EMAIL}"
+    )
 
 # Ordre des personas EKOALU (priorité)
 PERSONAS_PRIORITY: list[str] = [

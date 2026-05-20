@@ -59,11 +59,22 @@ class PendingReply(models.Model):
 
 
 class CorrectionExample(models.Model):
-    """Snapshot d une correction Richard pour alimenter le few-shot d apprentissage.
+    """Snapshot d un feedback Richard pour alimenter le few-shot d apprentissage.
 
-    Créé automatiquement quand PendingReply.status passe à SENT et que
-    final_sent != ai_draft.
+    Trois variantes (champ `kind`) :
+    - TEXT_CORRECTION : Richard a edite le brouillon (final_sent != ai_draft)
+    - INSTRUCTION_ONLY : Richard a regenere via une consigne sans corriger le texte
+    - BOTH : Richard a a la fois donne une consigne ET edite le brouillon
+
+    Cree automatiquement par :
+    - outbound_detail view a l approbation (TEXT_CORRECTION ou BOTH)
+    - outbound_detail view a la regeneration (INSTRUCTION_ONLY)
     """
+
+    class Kind(models.TextChoices):
+        TEXT_CORRECTION = "text_correction", "Correction texte"
+        INSTRUCTION_ONLY = "instruction_only", "Consigne seule"
+        BOTH = "both", "Correction + consigne"
 
     pending_reply = models.OneToOneField(
         PendingReply,
@@ -71,6 +82,12 @@ class CorrectionExample(models.Model):
         related_name="correction",
     )
     persona_slug = models.CharField(max_length=64, db_index=True)
+    kind = models.CharField(
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.TEXT_CORRECTION,
+        db_index=True,
+    )
     similarity_ratio = models.FloatField(
         help_text="0.0 = totalement réécrit, 1.0 = aucune correction",
     )
@@ -81,6 +98,10 @@ class CorrectionExample(models.Model):
     explanation = models.CharField(
         max_length=300, blank=True, default="",
         help_text="Note Richard expliquant pourquoi cette correction (aide apprentissage Claude)",
+    )
+    instruction = models.TextField(
+        blank=True, default="",
+        help_text="Consigne textuelle donnee par Richard avant la regeneration (kind=instruction_only|both)",
     )
     used_in_prompt = models.BooleanField(
         default=False,
@@ -95,7 +116,7 @@ class CorrectionExample(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"CorrectionExample({self.persona_slug}, sim={self.similarity_ratio:.2f})"
+        return f"CorrectionExample({self.persona_slug}, {self.kind}, sim={self.similarity_ratio:.2f})"
 
     @classmethod
     def compute_similarity_ratio(cls, draft: str, final: str) -> float:
@@ -110,8 +131,15 @@ class CorrectionExample(models.Model):
         pending: PendingReply,
         persona_slug: str = "",
         explanation: str = "",
+        instruction: str = "",
     ) -> CorrectionExample:
-        """Crée un CorrectionExample à partir d un PendingReply envoyé."""
+        """Crée un CorrectionExample a partir d un PendingReply envoye.
+
+        Le kind est inferre :
+        - INSTRUCTION_ONLY si consigne presente et texte non modifie (ratio >= 0.99)
+        - BOTH si consigne presente et texte modifie
+        - TEXT_CORRECTION si pas de consigne
+        """
         ratio = cls.compute_similarity_ratio(pending.ai_draft, pending.final_sent)
         diff = list(
             difflib.unified_diff(
@@ -121,10 +149,16 @@ class CorrectionExample(models.Model):
                 n=2,
             )
         )
+        if instruction.strip():
+            kind = cls.Kind.INSTRUCTION_ONLY if ratio >= 0.99 else cls.Kind.BOTH
+        else:
+            kind = cls.Kind.TEXT_CORRECTION
         return cls.objects.create(
             pending_reply=pending,
             persona_slug=persona_slug,
+            kind=kind,
             similarity_ratio=ratio,
             diff_lines=diff,
             explanation=explanation,
+            instruction=instruction.strip(),
         )
