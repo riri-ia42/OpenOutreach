@@ -913,6 +913,101 @@ def outbound_list(request):
     return render(request, "ekoalu/outbound_list.html", context)
 
 
+def _persona_slug_for_outbound(outbound: PendingOutbound) -> str:
+    """Infere le persona slug depuis le campaign_name de l'outbound."""
+    name = outbound.campaign_name or ""
+    if not name:
+        return ""
+    for p in PERSONAS.values():
+        if p.label in name:
+            return p.slug
+    return ""
+
+
+def _capture_correction_example(
+    outbound: PendingOutbound,
+    final_text: str,
+    explanation: str = "",
+    instruction: str = "",
+) -> None:
+    """Cree un PendingReply + CorrectionExample pour alimenter le few-shot."""
+    try:
+        from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+        persona_slug = _persona_slug_for_outbound(outbound)
+        if not persona_slug:
+            persona_slug = outbound.kind  # fallback "invitation" / "follow_up" / "reply"
+        pr = PendingReply.objects.create(
+            prospect_public_id=outbound.prospect_public_id,
+            campaign_id=outbound.campaign_id,
+            inbound_message=f"(outbound {outbound.kind})",
+            ai_draft=outbound.ai_draft,
+            final_sent=final_text,
+            status=PendingReply.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        CorrectionExample.from_pending(
+            pr,
+            persona_slug=persona_slug,
+            explanation=explanation,
+            instruction=instruction,
+        )
+    except Exception as e:
+        import logging
+        logging.exception("CorrectionExample creation failed: %s", e)
+
+
+def _regenerate_outbound_draft(outbound: PendingOutbound, instruction: str) -> tuple[bool, str]:
+    """Regenere le brouillon de l'outbound via le generateur EKOALU.
+
+    Renvoie (success, error_msg).
+    Seulement applicable a FOLLOW_UP et REPLY (invitations restent sans note).
+    """
+    if outbound.kind == OutboundKind.INVITATION:
+        return False, "Régénération désactivée pour les invitations (mode sans note)."
+
+    from crm.models import Deal
+    from ekoalu.follow_up.generator import generate_ekoalu_dm
+    from ekoalu.follow_up.models import get_or_create_dm_config
+    from ekoalu.follow_up.patch import _format_recent_messages, _is_first_outgoing_dm
+
+    deal = (
+        Deal.objects
+        .filter(
+            lead__public_identifier=outbound.prospect_public_id,
+            campaign_id=outbound.campaign_id,
+        )
+        .select_related("lead", "campaign")
+        .first()
+    )
+    profile_summary = deal.profile_summary if deal else None
+    chat_summary = deal.chat_summary if deal else None
+    recent_text = _format_recent_messages(deal) if deal else ""
+    persona_slug = _persona_slug_for_outbound(outbound)
+
+    include_booking = False
+    if deal and deal.campaign:
+        dm_cfg = get_or_create_dm_config(deal.campaign)
+        include_booking = (
+            dm_cfg.include_booking_in_first_dm and _is_first_outgoing_dm(deal)
+        )
+
+    new_text = generate_ekoalu_dm(
+        public_id=outbound.prospect_public_id,
+        profile_summary=profile_summary,
+        chat_summary=chat_summary,
+        recent_messages_text=recent_text,
+        persona_slug=persona_slug,
+        include_booking=include_booking,
+        instruction=instruction,
+    )
+    if not new_text:
+        return False, "Le générateur Claude a renvoyé un texte vide (clé API ? erreur réseau ?)."
+    outbound.ai_draft = new_text
+    outbound.final_content = ""  # on repart sur le nouveau draft
+    outbound.save(update_fields=["ai_draft", "final_content"])
+    return True, ""
+
+
 @staff_member_required
 def outbound_detail(request, pk: int):
     """Détail d'un message sortant + édition + actions."""
@@ -930,22 +1025,12 @@ def outbound_detail(request, pk: int):
 
             # Si Richard a edite (final != draft), creer CorrectionExample pour apprentissage
             if final_content.strip() and final_content.strip() != outbound.ai_draft.strip():
-                try:
-                    from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
-                    # Creer un PendingReply minimal qui sert de container
-                    pr = PendingReply.objects.create(
-                        prospect_public_id=outbound.prospect_public_id,
-                        campaign_id=outbound.campaign_id,
-                        inbound_message="(invitation outbound)",
-                        ai_draft=outbound.ai_draft,
-                        final_sent=final_content.strip(),
-                        status=PendingReply.Status.SENT,
-                        sent_at=timezone.now(),
-                    )
-                    CorrectionExample.from_pending(pr, persona_slug="invitation")
-                except Exception as e:
-                    import logging
-                    logging.exception("CorrectionExample creation failed: %s", e)
+                learn_note = request.POST.get("learn_note", "").strip()
+                _capture_correction_example(
+                    outbound,
+                    final_text=final_content.strip(),
+                    explanation=learn_note,
+                )
 
             django_messages.success(request, "Message approuvé. Il sera envoyé au prochain cycle.")
             return redirect("ekoalu:outbound_list")
@@ -970,11 +1055,54 @@ def outbound_detail(request, pk: int):
             django_messages.success(request, "Marqué comme envoyé manuellement.")
             return redirect("ekoalu:outbound_list")
 
+        elif action == "regenerate":
+            instruction = request.POST.get("regen_instruction", "").strip()
+            old_draft = outbound.ai_draft
+            success, error = _regenerate_outbound_draft(outbound, instruction)
+            if not success:
+                django_messages.error(request, error)
+                return redirect("ekoalu:outbound_detail", pk=pk)
+            # Capture l'echange comme apprentissage : ancienne version -> nouvelle version
+            # piloté par la consigne (peut etre vide).
+            try:
+                from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+                persona_slug = _persona_slug_for_outbound(outbound) or outbound.kind
+                pr = PendingReply.objects.create(
+                    prospect_public_id=outbound.prospect_public_id,
+                    campaign_id=outbound.campaign_id,
+                    inbound_message=f"(regenerate {outbound.kind})",
+                    ai_draft=old_draft,
+                    final_sent=outbound.ai_draft,
+                    status=PendingReply.Status.SENT,
+                    sent_at=timezone.now(),
+                )
+                CorrectionExample.from_pending(
+                    pr,
+                    persona_slug=persona_slug,
+                    instruction=instruction,
+                )
+            except Exception as e:
+                import logging
+                logging.exception("CorrectionExample (regenerate) creation failed: %s", e)
+            if instruction:
+                django_messages.success(
+                    request,
+                    "Brouillon régénéré avec ta consigne. Tu peux encore éditer avant d'approuver.",
+                )
+            else:
+                django_messages.success(
+                    request,
+                    "Brouillon régénéré (sans consigne). Tu peux encore éditer avant d'approuver.",
+                )
+            return redirect("ekoalu:outbound_detail", pk=pk)
+
     context = {
         "outbound": outbound,
         "linkedin_url": f"https://www.linkedin.com/in/{outbound.prospect_public_id}/",
         "is_pending": outbound.status == OutboundStatus.PENDING,
         "is_approved": outbound.status == OutboundStatus.APPROVED,
+        "can_regenerate": outbound.kind != OutboundKind.INVITATION
+            and outbound.status == OutboundStatus.PENDING,
     }
     return render(request, "ekoalu/outbound_detail.html", context)
 

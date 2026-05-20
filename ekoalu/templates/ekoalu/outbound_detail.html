@@ -48,6 +48,34 @@
     <p class="text-xs text-gray-400 mt-2">{{ outbound.ai_draft|length }} caractères</p>
 </div>
 
+{% if can_regenerate %}
+<!-- Régénération avec consigne -->
+<form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-purple-200">
+    {% csrf_token %}
+    <h2 class="text-sm font-semibold text-purple-900 mb-3 uppercase tracking-wide">
+        🔄 Régénérer un nouveau brouillon
+    </h2>
+    <p class="text-xs text-gray-600 mb-3">
+        Tu peux demander à Claude de proposer une nouvelle version. Donne-lui une
+        consigne (optionnelle) pour orienter la régénération. La consigne ET la
+        nouvelle version sont sauvegardées comme exemple d'apprentissage.
+    </p>
+    <label for="regen_instruction" class="block text-xs font-medium text-gray-700 mb-1">
+        Consigne pour la nouvelle version (optionnel)
+    </label>
+    <textarea name="regen_instruction" id="regen_instruction" rows="3" maxlength="600"
+              placeholder="ex: trop long, sois plus direct / supprime la mention pare-balles, garde le coupe-feu / mentionne aussi l'acier"
+              class="w-full border border-purple-200 rounded p-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 mb-3"></textarea>
+    <button type="submit" name="action" value="regenerate"
+            class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+        🔄 Régénérer le brouillon
+    </button>
+    <p class="text-xs text-gray-500 mt-2">
+        ⚠ Le brouillon actuel sera remplacé. Les éditions non sauvegardées dans le champ ci-dessous seront perdues.
+    </p>
+</form>
+{% endif %}
+
 <!-- Édition + actions -->
 <form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
     {% csrf_token %}
