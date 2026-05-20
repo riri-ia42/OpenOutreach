@@ -26,16 +26,25 @@
 <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
     <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Prospect</h2>
     <div class="space-y-2 text-sm">
+        <div class="text-lg font-semibold text-gray-900">
+            {{ prospect_display.name|default:outbound.prospect_public_id }}
+            {% if prospect_display.company %}
+            <span class="text-base font-normal text-gray-700">— {{ prospect_display.company }}</span>
+            {% endif %}
+        </div>
+        {% if prospect_display.location %}
+        <div class="text-sm text-gray-600">📍 {{ prospect_display.location }}</div>
+        {% endif %}
         <div>
-            <span class="text-gray-500">Slug :</span>
-            <a href="{{ linkedin_url }}" target="_blank" class="font-medium text-blue-600 hover:underline">
+            <span class="text-gray-500">Slug LinkedIn :</span>
+            <a href="{{ linkedin_url }}" target="_blank" class="text-blue-600 hover:underline">
                 {{ outbound.prospect_public_id }} ↗
             </a>
         </div>
         {% if outbound.campaign_name %}
         <div>
-            <span class="text-gray-500">Campaign :</span>
-            <span class="font-medium text-gray-900">{{ outbound.campaign_name }}</span>
+            <span class="text-gray-500">Cible (campagne) :</span>
+            <span class="font-medium text-gray-900">{{ outbound.campaign_name|cut:"EKOALU - " }}</span>
         </div>
         {% endif %}
     </div>

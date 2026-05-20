@@ -6,12 +6,18 @@
 
 <div class="flex items-center justify-between gap-4">
     <div>
-        <h1 class="text-xl font-bold text-gray-900">
-            {{ lead.public_identifier }}
+        <h1 class="text-2xl font-bold text-gray-900">
+            {{ prospect_display.name|default:lead.public_identifier }}
+            {% if prospect_display.company %}
+            <span class="text-lg font-normal text-gray-700">— {{ prospect_display.company }}</span>
+            {% endif %}
             {% if lead.disqualified %}
-            <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 ml-2">disqualifié</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 ml-2 align-middle">disqualifié</span>
             {% endif %}
         </h1>
+        {% if prospect_display.location %}
+        <p class="text-sm text-gray-600">📍 {{ prospect_display.location }}</p>
+        {% endif %}
         <a href="{{ linkedin_url }}" target="_blank" class="text-sm text-blue-600 hover:underline">{{ linkedin_url }} ↗</a>
     </div>
 </div>

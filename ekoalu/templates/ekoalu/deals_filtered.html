@@ -42,15 +42,21 @@
         <div class="flex items-start justify-between gap-3 flex-wrap">
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                    <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}" class="font-medium text-gray-900 hover:text-blue-600">
-                        {{ d.lead.public_identifier }}
+                    <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}" class="font-semibold text-gray-900 hover:text-blue-600">
+                        {{ d.prospect_name|default:d.lead.public_identifier }}
                     </a>
+                    {% if d.prospect_company_display %}
+                    <span class="text-sm text-gray-700">· {{ d.prospect_company_display }}</span>
+                    {% endif %}
+                    {% if d.prospect_location %}
+                    <span class="text-xs text-gray-500">· 📍 {{ d.prospect_location }}</span>
+                    {% endif %}
                     <a href="{% url 'ekoalu:campaign_detail' d.campaign.pk %}" class="text-xs text-gray-500 hover:underline">
-                        {{ d.campaign.name|cut:"EKOALU - " }}
+                        cible : {{ d.campaign.name|cut:"EKOALU - " }}
                     </a>
                     <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800">{{ d.state }}</span>
                     {% if d.outcome %}<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{{ d.outcome }}</span>{% endif %}
-                    <a href="https://www.linkedin.com/in/{{ d.lead.public_identifier }}/" target="_blank" class="text-xs text-blue-600 hover:underline">Profil LinkedIn ↗</a>
+                    <a href="https://www.linkedin.com/in/{{ d.lead.public_identifier }}/" target="_blank" class="text-xs text-blue-600 hover:underline">Profil ↗</a>
                 </div>
                 <div class="mt-2">
                     <div class="text-xs text-gray-500 font-medium uppercase tracking-wide mb-1">Raison Claude</div>
@@ -125,9 +131,12 @@
             {% for d in deals %}
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-2 text-sm">
-                    <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}" class="text-blue-600 hover:underline font-medium">
-                        {{ d.lead.public_identifier }}
+                    <a href="{% url 'ekoalu:lead_detail' d.lead.public_identifier %}" class="text-blue-600 hover:underline font-medium block">
+                        {{ d.prospect_name|default:d.lead.public_identifier }}
                     </a>
+                    {% if d.prospect_company_display %}
+                    <div class="text-xs text-gray-600">{{ d.prospect_company_display }}{% if d.prospect_location %} · 📍 {{ d.prospect_location }}{% endif %}</div>
+                    {% endif %}
                 </td>
                 <td class="px-4 py-2 text-sm text-gray-700">
                     <a href="{% url 'ekoalu:campaign_detail' d.campaign.pk %}" class="hover:underline">

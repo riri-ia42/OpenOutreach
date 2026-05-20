@@ -43,7 +43,7 @@
             <li class="p-4 hover:bg-gray-50">
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-3 sm:gap-4">
                     <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <div class="flex items-center gap-2 mb-1 flex-wrap">
                             <span class="text-xs px-2 py-0.5 rounded-full
                                 {% if o.kind == 'invitation' %}bg-blue-100 text-blue-800
                                 {% elif o.kind == 'follow_up' %}bg-green-100 text-green-800
@@ -57,14 +57,23 @@
                                 {% else %}bg-gray-200 text-gray-700{% endif %}">
                                 {{ o.get_status_display }}
                             </span>
-                            <a href="https://www.linkedin.com/in/{{ o.prospect_public_id }}/" target="_blank"
-                               class="font-medium text-gray-900 hover:underline">
-                                {{ o.prospect_public_id }}
-                            </a>
-                            {% if o.campaign_name %}
-                            <span class="text-xs text-gray-500">· {{ o.campaign_name|cut:"EKOALU - " }}</span>
+                            <span class="font-semibold text-gray-900">{{ o.prospect_name|default:o.prospect_public_id }}</span>
+                            {% if o.prospect_company_display %}
+                            <span class="text-sm text-gray-700">· {{ o.prospect_company_display }}</span>
+                            {% endif %}
+                            {% if o.prospect_location %}
+                            <span class="text-xs text-gray-500">· 📍 {{ o.prospect_location }}</span>
                             {% endif %}
                             <span class="text-xs text-gray-400 ml-auto">{{ o.created_at|date:"d/m H:i" }}</span>
+                        </div>
+                        <div class="flex items-center gap-2 mb-2 flex-wrap text-xs text-gray-500">
+                            <a href="https://www.linkedin.com/in/{{ o.prospect_public_id }}/" target="_blank"
+                               class="text-blue-600 hover:underline">
+                                {{ o.prospect_public_id }} ↗
+                            </a>
+                            {% if o.campaign_name %}
+                            <span>· cible : {{ o.campaign_name|cut:"EKOALU - " }}</span>
+                            {% endif %}
                         </div>
                         <p class="text-sm text-gray-700">
                             {{ o.content_to_send|truncatechars:200 }}

@@ -324,6 +324,10 @@ def lead_detail(request, slug: str):
         name__startswith="EKOALU - ",
     ).exclude(pk__in=existing_campaign_ids).order_by("name")
 
+    from ekoalu.prospect_display import resolve_prospect_display
+    primary_deal = deals.first() if deals else None
+    display = resolve_prospect_display(slug, deal=primary_deal)
+
     return render(request, "ekoalu/lead_detail.html", {
         "lead": lead,
         "linkedin_url": f"https://www.linkedin.com/in/{slug}/",
@@ -333,6 +337,7 @@ def lead_detail(request, slug: str):
         "timeline_events": timeline_events[:30],
         "has_embedding": lead.embedding is not None,
         "available_campaigns": available_campaigns,
+        "prospect_display": display,
     })
 
 
@@ -886,6 +891,9 @@ def campaign_detail(request, pk: int):
 @staff_member_required
 def outbound_list(request):
     """Liste des messages sortants à valider."""
+    from crm.models import Deal
+    from ekoalu.prospect_display import resolve_prospect_display
+
     status_filter = request.GET.get("status", "pending")
     kind_filter = request.GET.get("kind", "")
 
@@ -902,8 +910,24 @@ def outbound_list(request):
         "rejected": PendingOutbound.objects.filter(status=OutboundStatus.REJECTED).count(),
     }
 
+    items = list(queryset[:100])
+    # Enrichissement nom + societe + ville (un lookup Deal par slug/campaign)
+    slug_camp = [(o.prospect_public_id, o.campaign_id) for o in items]
+    deal_map = {}
+    if slug_camp:
+        deals = Deal.objects.filter(
+            lead__public_identifier__in=[s for s, _ in slug_camp],
+        ).select_related("lead", "campaign")
+        deal_map = {(d.lead.public_identifier, d.campaign_id): d for d in deals}
+    for o in items:
+        d = deal_map.get((o.prospect_public_id, o.campaign_id))
+        disp = resolve_prospect_display(o.prospect_public_id, deal=d, company_hint=o.prospect_company)
+        o.prospect_name = disp["name"]
+        o.prospect_company_display = disp["company"]
+        o.prospect_location = disp["location"]
+
     context = {
-        "outbound_list": queryset[:100],
+        "outbound_list": items,
         "counts": counts,
         "status_filter": status_filter,
         "kind_filter": kind_filter,
@@ -922,6 +946,50 @@ def _persona_slug_for_outbound(outbound: PendingOutbound) -> str:
         if p.label in name:
             return p.slug
     return ""
+
+
+def _requeue_invitation_approved(deal) -> PendingOutbound | None:
+    """Cree (ou reutilise) un PendingOutbound INVITATION APPROVED pour ce deal.
+
+    Appele apres requalify : Richard a tranche, on saute l'etape ML scoring
+    et la validation manuelle. L'invitation part au prochain cycle daemon.
+
+    Idempotent : si un PendingOutbound non-terminal existe deja, on le bascule
+    en APPROVED. Aucun doublon.
+    """
+    from ekoalu.prospect_display import extract_company
+
+    prospect_slug = deal.lead.public_identifier
+    company = extract_company(deal.profile_summary) or (deal.reason or "")[:140]
+    # Tentative de recuperer une company concrete (le reason fallback est moche
+    # mais evite d'envoyer chaine vide quand profile_summary pas encore materialise)
+    if "EKOALU" in company or len(company) > 140:
+        company = ""
+
+    # Reutilise un PendingOutbound non-terminal si present
+    existing = PendingOutbound.objects.filter(
+        prospect_public_id=prospect_slug,
+        campaign_id=deal.campaign_id,
+        kind=OutboundKind.INVITATION,
+    ).exclude(status__in=[OutboundStatus.SENT, OutboundStatus.REJECTED]).first()
+
+    if existing:
+        existing.status = OutboundStatus.APPROVED
+        existing.approved_at = timezone.now()
+        existing.rejection_reason = ""
+        existing.save()
+        return existing
+
+    return PendingOutbound.objects.create(
+        prospect_public_id=prospect_slug,
+        prospect_company=company,
+        campaign_id=deal.campaign_id,
+        campaign_name=deal.campaign.name if deal.campaign else "",
+        kind=OutboundKind.INVITATION,
+        ai_draft="(Invitation LinkedIn sans note)",
+        status=OutboundStatus.APPROVED,
+        approved_at=timezone.now(),
+    )
 
 
 def _capture_correction_example(
@@ -1096,6 +1164,18 @@ def outbound_detail(request, pk: int):
                 )
             return redirect("ekoalu:outbound_detail", pk=pk)
 
+    from crm.models import Deal
+    from ekoalu.prospect_display import resolve_prospect_display
+    deal = (
+        Deal.objects
+        .filter(lead__public_identifier=outbound.prospect_public_id, campaign_id=outbound.campaign_id)
+        .select_related("lead", "campaign")
+        .first()
+    )
+    display = resolve_prospect_display(
+        outbound.prospect_public_id, deal=deal, company_hint=outbound.prospect_company,
+    )
+
     context = {
         "outbound": outbound,
         "linkedin_url": f"https://www.linkedin.com/in/{outbound.prospect_public_id}/",
@@ -1103,6 +1183,7 @@ def outbound_detail(request, pk: int):
         "is_approved": outbound.status == OutboundStatus.APPROVED,
         "can_regenerate": outbound.kind != OutboundKind.INVITATION
             and outbound.status == OutboundStatus.PENDING,
+        "prospect_display": display,
     }
     return render(request, "ekoalu/outbound_detail.html", context)
 
@@ -1152,6 +1233,7 @@ def deals_filtered(request):
                 richard_explanation=explanation,
                 kind=QualificationFeedback.Kind.REQUALIFY,
             )
+            target_deal = None
             if target and target.pk != deal.campaign_id:
                 # Reaffectation : on cree un Deal Qualified sur la campagne cible,
                 # on laisse le Failed historique sur l'ancienne.
@@ -1167,8 +1249,9 @@ def deals_filtered(request):
                         existing.outcome = ""
                         existing.reason = f"Reaffecte depuis « {deal.campaign.name} » : {explanation[:300]}"
                         existing.save()
+                        target_deal = existing
                     else:
-                        Deal.objects.create(
+                        target_deal = Deal.objects.create(
                             lead=deal.lead, campaign=target, state="Qualified",
                             reason=f"Reaffecte depuis « {deal.campaign.name} » : {explanation[:300]}",
                         )
@@ -1182,11 +1265,31 @@ def deals_filtered(request):
                 deal.state = "Qualified"
                 deal.outcome = ""
                 deal.save()
+                target_deal = deal
                 django_messages.success(
                     request,
                     f"{deal.lead.public_identifier} remis en file Qualified sur la meme campagne. "
                     "Claude apprendra de cette correction.",
                 )
+            # Trigger automatique : on met une invitation directement APPROVED
+            # dans la file (Richard a tranche, pas de re-validation manuelle).
+            if target_deal is not None:
+                try:
+                    po = _requeue_invitation_approved(target_deal)
+                    if po:
+                        django_messages.info(
+                            request,
+                            f"Invitation LinkedIn programmee (PendingOutbound #{po.pk}, APPROVED) — "
+                            "partira au prochain cycle daemon dans la limite du cap journalier.",
+                        )
+                except Exception as e:
+                    import logging
+                    logging.exception("Auto-requeue invitation failed: %s", e)
+                    django_messages.warning(
+                        request,
+                        f"Requalif OK mais auto-requeue invitation a echoue : {e}. "
+                        "Tu peux la creer manuellement depuis la fiche prospect.",
+                    )
         elif action == "confirm_reject":
             QualificationFeedback.objects.create(
                 prospect_public_id=deal.lead.public_identifier,
@@ -1262,10 +1365,18 @@ def deals_filtered(request):
             Campaign.objects.filter(name__startswith="EKOALU - ").order_by("name")
         )
 
+    from ekoalu.prospect_display import resolve_prospect_display
+    deals_list = list(qs[:200])
+    for d in deals_list:
+        disp = resolve_prospect_display(d.lead.public_identifier, deal=d)
+        d.prospect_name = disp["name"]
+        d.prospect_company_display = disp["company"]
+        d.prospect_location = disp["location"]
+
     context = {
         "state_filter": state,
         "title": cfg["title"],
-        "deals": qs[:200],
+        "deals": deals_list,
         "total": qs.count(),
         "state_filter_map": _STATE_FILTER_MAP,
         "already_feedback_slugs": feedback_slugs,
