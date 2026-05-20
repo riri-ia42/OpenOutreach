@@ -119,20 +119,19 @@ def apply_outbound_validation_patch() -> None:
 
     def patched_send_connection_request(session, profile):
         from ekoalu.company_validation.config import is_company_validation_enabled
-        from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
+        from ekoalu.company_validation.models import ApprovedCompany
         from ekoalu.outbound_validation.config import is_approval_required
-        from ekoalu.outbound_validation.generator import generate_invitation_note
         from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
 
         if not is_approval_required():
             return original_send_connection(session, profile)
 
-        # Mode require_approval : on crée PendingOutbound au lieu d'envoyer
+        # Mode require_approval + invitations sans note (acte 13/05 - LinkedIn Free
+        # limite a ~5 notes/mois) : on cree juste un PendingOutbound marqueur,
+        # le sender enverra l'invitation sans note. Pas de generation Claude.
         public_id = profile.get("public_identifier", "")
         urn = profile.get("urn", "")
         company = profile.get("company", "") or profile.get("company_name", "")
-        headline = profile.get("headline", "")
-        summary = ""
 
         campaign_id_early = getattr(getattr(session, "campaign", None), "pk", None)
         if _has_open_outbound(public_id, campaign_id_early, OutboundKind.INVITATION):
@@ -142,26 +141,14 @@ def apply_outbound_validation_patch() -> None:
             )
             return ProfileState.QUALIFIED
 
-        # Enrichissement depuis Lead/Deal si pas dans profile dict
-        if not company or not summary:
-            ec, eh, es = _enrich_from_lead(public_id)
+        # Enrichissement company depuis Lead/Deal si pas dans profile dict
+        if not company:
+            ec, _, _ = _enrich_from_lead(public_id)
             company = company or ec
-            headline = headline or eh
-            summary = summary or es
 
         campaign = getattr(session, "campaign", None)
         campaign_id = getattr(campaign, "pk", None)
         campaign_name = getattr(campaign, "name", "") if campaign else ""
-
-        # Generer la note via Claude
-        ai_draft = generate_invitation_note(
-            prospect_public_id=public_id,
-            prospect_company=company,
-            prospect_headline=headline,
-            prospect_summary=summary,
-        )
-        if not ai_draft:
-            ai_draft = "(Invitation sans note — generation Claude echouee)"
 
         # Vérif entreprise (si validation entreprise activée)
         initial_status = OutboundStatus.PENDING
@@ -171,7 +158,6 @@ def apply_outbound_validation_patch() -> None:
                     "EKOALU: invitation pour %s SKIP - entreprise '%s' refusee",
                     public_id, company,
                 )
-                # Tracée comme rejected directement
                 PendingOutbound.objects.create(
                     prospect_public_id=public_id,
                     prospect_urn=urn,
@@ -179,14 +165,13 @@ def apply_outbound_validation_patch() -> None:
                     campaign_id=campaign_id,
                     campaign_name=campaign_name,
                     kind=OutboundKind.INVITATION,
-                    ai_draft=ai_draft,
+                    ai_draft="(Invitation LinkedIn sans note)",
                     status=OutboundStatus.REJECTED,
                     rejection_reason=f"Entreprise refusee: {company}",
                 )
                 return ProfileState.QUALIFIED
 
             if not ApprovedCompany.is_approved(company):
-                # Pas approuvée → bloquée + créer ApprovedCompany pending
                 ApprovedCompany.find_or_create_pending(company)
                 initial_status = OutboundStatus.BLOCKED_COMPANY
                 logger.info(

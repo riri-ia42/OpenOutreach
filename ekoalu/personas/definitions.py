@@ -35,15 +35,16 @@ class Persona:
 
 # Description produit/société EKOALU commune (réutilisée par toutes les campagnes)
 _EKOALU_PRODUCT_BASE = """\
-EKOALU est une menuiserie aluminium basee a Chasselay (Rhone, 69380), specialisee
-dans la fabrication et la pose de menuiseries alu sur-mesure pour le marche
-tertiaire (bureaux, ERP, equipements publics, hotellerie, industries).
+EKOALU est une menuiserie technique basee a Chasselay (Rhone, 69380), specialisee
+dans la fabrication et la pose de menuiseries alu, acier et bois technique sur-mesure
+pour le marche tertiaire (bureaux, ERP, equipements publics, hotellerie, industries).
 
 Expertise technique reconnue sur les produits niches :
 - Coupe-feu EI30, EI60, EI120 (PV d essais fournis, jonctions documentees)
 - Desenfumage DENFC, exutoires, facades a amenees d air (NF EN 12101)
+- Mur-rideau (facades rideaux, integration verriere)
 - Pare-balles BC1 a BC4 (banques, ambassades, sites sensibles)
-- Grandes dimensions (coulissants > 3m, facades rideaux, baies monumentales)
+- Grandes dimensions (coulissants > 3m, baies monumentales)
 - Acoustique elevee (Rw > 40 dB, etude POA, vitrages speciaux)
 
 Gammes fournisseurs : Cortizo, Sepalumic, SAPA, Wicona.
