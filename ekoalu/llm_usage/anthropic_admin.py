@@ -113,6 +113,18 @@ def _parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
+def _cache_creation_total(result: dict) -> int:
+    """Anthropic renvoie cache_creation imbrique :
+    {ephemeral_1h_input_tokens, ephemeral_5m_input_tokens}."""
+    cc = result.get("cache_creation")
+    if isinstance(cc, dict):
+        return int((cc.get("ephemeral_1h_input_tokens") or 0)
+                   + (cc.get("ephemeral_5m_input_tokens") or 0))
+    if isinstance(cc, (int, float)):
+        return int(cc)
+    return int(result.get("cache_creation_input_tokens", 0) or 0)
+
+
 def fetch_usage_messages(start: date, end: date, bucket_width: str = "1d") -> list[UsageBucket]:
     """Recupere l'usage en tokens, agrege par jour (defaut) sur [start, end)."""
     starting_at = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
@@ -122,7 +134,7 @@ def fetch_usage_messages(start: date, end: date, bucket_width: str = "1d") -> li
         "ending_at": ending_at,
         "bucket_width": bucket_width,
         "group_by[]": ["model", "api_key_id", "workspace_id"],
-        "limit": 1000,
+        "limit": 31,
     }
     buckets: list[UsageBucket] = []
     for item in _iter_paginated("/v1/organizations/usage_report/messages", params):
@@ -135,32 +147,58 @@ def fetch_usage_messages(start: date, end: date, bucket_width: str = "1d") -> li
                 workspace_id=result.get("workspace_id") or "",
                 input_tokens=int(result.get("uncached_input_tokens", 0) or 0),
                 output_tokens=int(result.get("output_tokens", 0) or 0),
-                cache_creation_tokens=int(result.get("cache_creation_input_tokens", 0) or 0),
+                cache_creation_tokens=_cache_creation_total(result),
                 cache_read_tokens=int(result.get("cache_read_input_tokens", 0) or 0),
             ))
     return buckets
 
 
+def _safe_float(v) -> float:
+    """Parse amount qui peut etre string '0.3354' ou dict {value: '0.33'}."""
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except ValueError:
+            return 0.0
+    if isinstance(v, dict):
+        return _safe_float(v.get("value", 0))
+    return 0.0
+
+
+# UNITE Admin API : malgre "currency": "USD", le champ "amount" est en cents
+# (sous-unite de la devise nommee). Verifie sur le 20/05 :
+# sonnet-4-6 input 736087 tokens * 3$/M = 2,21$ attendu / API renvoie 220.8261.
+# Ratio 100 confirme. On divise systematiquement.
+COST_AMOUNT_DIVISOR = 100.0
+
+
 def fetch_cost(start: date, end: date) -> list[CostBucket]:
-    """Recupere le cout USD agrege par jour sur [start, end)."""
+    """Recupere le cout USD agrege par jour+modele+type sur [start, end).
+
+    La reponse Anthropic donne UNE LIGNE par (model, token_type) -- input,
+    output, cache_read, cache_creation. On agrege ensuite cote sync.
+    """
     starting_at = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
     ending_at = datetime.combine(end, datetime.min.time(), tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
     params = {
         "starting_at": starting_at,
         "ending_at": ending_at,
         "group_by[]": ["workspace_id", "description"],
-        "limit": 1000,
+        "limit": 31,
     }
     buckets: list[CostBucket] = []
     for item in _iter_paginated("/v1/organizations/cost_report", params):
         for result in item.get("results", []):
-            amount = result.get("amount") or {}
             buckets.append(CostBucket(
                 starts_at=_parse_dt(item["starting_at"]),
                 ends_at=_parse_dt(item["ending_at"]),
-                model=result.get("description") or "",
+                model=result.get("model") or result.get("description") or "",
                 workspace_id=result.get("workspace_id") or "",
-                amount_usd=float(amount.get("value", 0) or 0),
+                amount_usd=_safe_float(result.get("amount")) / COST_AMOUNT_DIVISOR,
             ))
     return buckets
 
