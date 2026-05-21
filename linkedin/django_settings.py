@@ -12,12 +12,20 @@ os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-# Charge le .env du projet parent (prospection-ia/.env) puis du root openoutreach/.env
-# pour exposer EMAIL_HOST / EMAIL_HOST_PASSWORD / etc. aux settings ci-dessous.
+# Charge les .env. Ordre de priorite (premier charge gagne via override=False) :
+#   1. .env.local     (overrides perso non commités)
+#   2. .env.production (credentials reels — GRAPH_*, EKOALU_LINKEDIN_*, ANTHROPIC_API_KEY)
+#   3. .env           (defaults dev)
+#   4. openoutreach/.env (defaults projet upstream)
 try:
     from dotenv import load_dotenv
 
-    for env_path in (ROOT_DIR.parent / ".env", ROOT_DIR / ".env"):
+    for env_path in (
+        ROOT_DIR.parent / ".env.local",
+        ROOT_DIR.parent / ".env.production",
+        ROOT_DIR.parent / ".env",
+        ROOT_DIR / ".env",
+    ):
         if env_path.exists():
             load_dotenv(env_path, override=False)
 except ImportError:

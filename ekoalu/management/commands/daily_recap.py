@@ -262,10 +262,24 @@ class Command(BaseCommand):
         self.stdout.write(f"Recap HTML dump: {recap_path}")
         logger.info("Recap %s ecrit dans %s", day, recap_path)
 
-        # Tentative envoi SMTP si configure
-        if settings.EMAIL_HOST and settings.EMAIL_HOST_USER:
-            recipient = settings.RECAP_RECIPIENT
-            subject = f"EKOALU prospection - recap {day:%d/%m/%Y} ({stats.invitations_sent} envois, {stats.leads_total} leads)"
+        # Tentative envoi via Microsoft Graph (préféré — partagé avec mail-assistant)
+        sent = False
+        recipient = settings.RECAP_RECIPIENT
+        subject = f"EKOALU prospection - recap {day:%d/%m/%Y} ({stats.invitations_sent} envois, {stats.leads_total} leads)"
+
+        try:
+            from ekoalu.notifications.graph_mailer import send_mail, is_configured
+            if is_configured():
+                send_mail(subject=subject, html_body=html, to=recipient)
+                self.stdout.write(self.style.SUCCESS(f"Envoye via Graph a {recipient}"))
+                logger.info("Recap %s envoye via Graph a %s", day, recipient)
+                sent = True
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"Envoi Graph echoue : {exc}"))
+            logger.warning("Recap %s : envoi Graph echoue : %s", day, exc)
+
+        # Fallback SMTP si Graph KO et SMTP configure
+        if not sent and settings.EMAIL_HOST and settings.EMAIL_HOST_USER:
             try:
                 msg = EmailMultiAlternatives(
                     subject=subject,
@@ -275,13 +289,15 @@ class Command(BaseCommand):
                 )
                 msg.attach_alternative(html, "text/html")
                 msg.send(fail_silently=False)
-                self.stdout.write(self.style.SUCCESS(f"Envoye a {recipient}"))
-                logger.info("Recap %s envoye a %s", day, recipient)
+                self.stdout.write(self.style.SUCCESS(f"Envoye via SMTP a {recipient}"))
+                logger.info("Recap %s envoye via SMTP a %s", day, recipient)
+                sent = True
             except Exception as exc:
                 self.stdout.write(self.style.WARNING(f"Envoi SMTP echoue : {exc}"))
                 logger.warning("Recap %s : envoi SMTP echoue : %s", day, exc)
-        else:
+
+        if not sent:
             self.stdout.write(
-                "EMAIL_HOST non configure -- recap dispo uniquement dans data/recaps/. "
-                "Pour activer l'envoi, ajoute EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD au .env"
+                "Aucun canal d'envoi configure -- recap dispo uniquement dans data/recaps/. "
+                "Pour activer : remplir GRAPH_* dans .env.production."
             )

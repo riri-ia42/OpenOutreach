@@ -4,6 +4,7 @@ from __future__ import annotations
 from django.urls import path
 
 from ekoalu import views
+from ekoalu.monitoring import views as monitoring_views
 
 app_name = "ekoalu"
 
@@ -22,4 +23,7 @@ urlpatterns = [
     path("usage/", views.usage, name="usage"),
     path("recap/", views.daily_recap_today, name="recap_today"),
     path("recap/<str:day>/", views.daily_recap_view, name="recap_day"),
+    # Monitoring live
+    path("health.json", monitoring_views.health_json, name="health_json"),
+    path("live/", monitoring_views.live_dashboard, name="live_dashboard"),
 ]

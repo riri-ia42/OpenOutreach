@@ -1,0 +1,128 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>EKOALU prospection — monitoring live</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0;
+         margin: 0; padding: 16px; }
+  h1 { color: #f1f5f9; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; margin-top: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+  .card { background: #1e293b; border-radius: 10px; padding: 14px; }
+  .card .lbl { color: #94a3b8; font-size: 13px; margin-bottom: 4px; }
+  .card .val { color: #f1f5f9; font-size: 28px; font-weight: 700; }
+  .card .sub { color: #64748b; font-size: 12px; margin-top: 4px; }
+  .status-bar { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 14px;
+                border-radius: 10px; font-size: 16px; }
+  .status-HEALTHY    { background: #14532d; color: #bbf7d0; }
+  .status-OUT_OF_HOURS { background: #1e3a8a; color: #bfdbfe; }
+  .status-ZOMBIE_ASYNCIO, .status-ZOMBIE_NO_PROGRESS { background: #7f1d1d; color: #fecaca; }
+  .status-UNKNOWN    { background: #422006; color: #fde68a; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+  .age-recent { color: #22c55e; }
+  .age-stale { color: #facc15; }
+  .age-critical { color: #ef4444; }
+  .muted { color: #64748b; }
+  pre { background: #020617; padding: 10px; border-radius: 6px; color: #cbd5e1; overflow-x: auto;
+        font-size: 12px; }
+  a { color: #60a5fa; }
+  .refresh-info { color: #64748b; font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Monitoring live — prospection-ia</h1>
+
+<div id="status-bar" class="status-bar status-UNKNOWN">
+  <span class="dot"></span><strong id="status-label">Chargement…</strong>
+  <span id="status-msg" class="muted"></span>
+</div>
+
+<div class="grid">
+  <div class="card"><div class="lbl">Dernière interaction</div>
+    <div class="val" id="last-interaction-age">—</div>
+    <div class="sub" id="last-interaction-detail"></div></div>
+
+  <div class="card"><div class="lbl">Tasks complétées (24h)</div>
+    <div class="val" id="tasks-24h-completed">—</div>
+    <div class="sub">Aujourd'hui : <span id="tasks-today-completed">—</span></div></div>
+
+  <div class="card"><div class="lbl">Tasks échouées (24h)</div>
+    <div class="val" id="tasks-24h-failed">—</div>
+    <div class="sub">Aujourd'hui : <span id="tasks-today-failed">—</span></div></div>
+
+  <div class="card"><div class="lbl">File d'attente</div>
+    <div class="val" id="tasks-pending">—</div>
+    <div class="sub">tasks pending</div></div>
+
+  <div class="card"><div class="lbl">Envois aujourd'hui</div>
+    <div class="val" id="outbound-today-sent">—</div>
+    <div class="sub">invitations + follow-ups</div></div>
+
+  <div class="card"><div class="lbl">À valider</div>
+    <div class="val" id="outbound-pending">—</div>
+    <div class="sub">messages en attente</div></div>
+</div>
+
+<div class="card" style="margin-top: 16px;">
+  <div class="lbl">Détail healthcheck</div>
+  <pre id="raw-json">—</pre>
+</div>
+
+<p class="refresh-info">Polling toutes les 30s. <a href="/ekoalu/">← Dashboard prospection</a>
+&nbsp;&middot;&nbsp; <a href="/ekoalu/health.json" target="_blank">/health.json (JSON brut)</a></p>
+
+<script>
+function fmtAge(minutes) {
+  if (minutes === null || minutes === undefined) return "—";
+  if (minutes < 60) return minutes + " min";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h + "h" + (m < 10 ? "0" : "") + m;
+}
+function ageClass(minutes) {
+  if (minutes === null || minutes === undefined) return "muted";
+  if (minutes < 60) return "age-recent";
+  if (minutes < 240) return "age-stale";
+  return "age-critical";
+}
+async function refresh() {
+  try {
+    const r = await fetch("/ekoalu/health.json", {cache: "no-store"});
+    const data = await r.json();
+    const h = data.health || {};
+    const live = data.live || {};
+
+    const bar = document.getElementById("status-bar");
+    bar.className = "status-bar status-" + (h.status || "UNKNOWN");
+    document.getElementById("status-label").textContent = h.status || "UNKNOWN";
+    document.getElementById("status-msg").textContent = h.message || "";
+
+    const m = live.minutes_since_last_interaction;
+    const el = document.getElementById("last-interaction-age");
+    el.textContent = fmtAge(m);
+    el.className = "val " + ageClass(m);
+    document.getElementById("last-interaction-detail").textContent =
+      live.last_interaction_label
+        ? (live.last_interaction_label + " — " + (live.last_interaction_at || ""))
+        : "(aucune)";
+
+    document.getElementById("tasks-24h-completed").textContent = live.tasks_24h_completed ?? "—";
+    document.getElementById("tasks-today-completed").textContent = live.tasks_today_completed ?? "—";
+    document.getElementById("tasks-24h-failed").textContent = live.tasks_24h_failed ?? "—";
+    document.getElementById("tasks-today-failed").textContent = live.tasks_today_failed ?? "—";
+    document.getElementById("tasks-pending").textContent = live.tasks_pending ?? "—";
+    document.getElementById("outbound-today-sent").textContent = live.outbound_today_sent ?? "—";
+    document.getElementById("outbound-pending").textContent = live.outbound_pending_validation ?? "—";
+
+    document.getElementById("raw-json").textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    document.getElementById("status-msg").textContent = "Erreur fetch: " + e;
+  }
+}
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
