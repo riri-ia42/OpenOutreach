@@ -191,29 +191,9 @@ def apply_claude_logging_patch() -> None:
 
     _PATCH_APPLIED = True
 
-    # 4. Filet de secours : patch pydantic_ai au cas ou il a deja resolu les
-    # references aux methodes avant qu'on les wrappe.
-    try:
-        from pydantic_ai.models.anthropic import AnthropicModel
-        original_pa = AnthropicModel._messages_create
-
-        async def patched_pa(self, messages, stream, model_settings, model_request_parameters):
-            t0 = time.perf_counter()
-            resp = await original_pa(self, messages, stream, model_settings, model_request_parameters)
-            dt = int((time.perf_counter() - t0) * 1000)
-            # stream=True renvoie un AsyncStream sans usage immediat -- on skip ;
-            # le wrapper SDK captera l'event final.
-            if not stream:
-                model = getattr(resp, "model", "") or getattr(self, "model_name", "")
-                usage = getattr(resp, "usage", None)
-                if usage is not None:
-                    _safe_log(model, usage, dt, _guess_context() or "pydantic_ai")
-            return resp
-
-        AnthropicModel._messages_create = patched_pa
-        _PYDANTIC_PATCH_APPLIED = True
-        logger.info("EKOALU patch: pydantic_ai AnthropicModel._messages_create wrapped")
-    except ImportError:
-        logger.info("pydantic_ai non installe -- skip filet de secours")
-    except AttributeError as exc:
-        logger.warning("pydantic_ai AnthropicModel patch failed: %s", exc)
+    # 4. PAS de patch pydantic_ai : le filet de securite est superflu puisque
+    # pydantic_ai appelle in fine `self.client.beta.messages.create` qui EST
+    # patche par (3). Patcher les 2 niveaux genere du double-counting (verifie
+    # 2026-05-21 : chaque appel etait enregistre 2x dans ClaudeUsageLog).
+    # Si un jour pydantic_ai bypasse les niveaux beta, on remettra ce filet.
+    logger.info("EKOALU patch: pydantic_ai filet de secours desactive (double-count)")
