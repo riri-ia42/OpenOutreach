@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 # ── Low-level enqueue ─────────────────────────────────────────────────
 
 
+MAX_FAILED_RETRIES = 2
+RETRY_WINDOW_HOURS = 24
+
+
 def _insert_task(
     task_type: "Task.TaskType",
     payload: dict,
@@ -54,15 +58,39 @@ def _insert_task(
     Duplicate = same ``task_type``, status=PENDING, and matching payload on
     ``dedup_keys`` (defaults to all payload keys). Returns True if a row
     was inserted.
+
+    Retry cap : si plus de MAX_FAILED_RETRIES tasks FAILED avec le meme
+    payload dans les RETRY_WINDOW_HOURS dernieres heures, on n'enqueue PAS
+    (bornage risque catastrophe type zombie). Pour relancer manuellement,
+    supprimer les FAILED en Django Admin.
     """
-    filter_kwargs = {
+    keys = dedup_keys if dedup_keys is not None else list(payload.keys())
+
+    # 1. Dedup PENDING
+    pending_filter = {
         "task_type": task_type,
         "status": Task.Status.PENDING,
     }
-    for key in (dedup_keys if dedup_keys is not None else payload):
-        filter_kwargs[f"payload__{key}"] = payload[key]
+    for key in keys:
+        pending_filter[f"payload__{key}"] = payload[key]
+    if Task.objects.filter(**pending_filter).exists():
+        return False
 
-    if Task.objects.filter(**filter_kwargs).exists():
+    # 2. Retry cap : compte les FAILED recents sur meme payload
+    since = timezone.now() - timedelta(hours=RETRY_WINDOW_HOURS)
+    failed_filter = {
+        "task_type": task_type,
+        "status": Task.Status.FAILED,
+        "completed_at__gte": since,
+    }
+    for key in keys:
+        failed_filter[f"payload__{key}"] = payload[key]
+    failed_count = Task.objects.filter(**failed_filter).count()
+    if failed_count >= MAX_FAILED_RETRIES:
+        logger.warning(
+            "Task %s SKIPPED (retry cap): %d failed in last %dh, payload=%s",
+            task_type, failed_count, RETRY_WINDOW_HOURS, payload,
+        )
         return False
 
     Task.objects.create(

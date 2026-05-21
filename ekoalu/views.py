@@ -1593,12 +1593,80 @@ def usage(request):
     )
     recent = ClaudeUsageLog.objects.order_by("-timestamp")[:30]
 
+    # ─── Reconciliation Admin API (vérité officielle Anthropic) ────────────
+    # Compare tracker interne vs Admin API sur 7 jours pour detecter les fuites.
+    from datetime import date, timedelta as td
+    from ekoalu.llm_usage.models import AnthropicUsageDaily
+
+    last_7d_start = (now - timedelta(days=7)).date()
+    today_date = now.date()
+
+    # Admin API par jour
+    admin_daily = (
+        AnthropicUsageDaily.objects.filter(date__gte=last_7d_start)
+        .values("date")
+        .annotate(cost=Sum("cost_usd"), in_tok=Sum("input_tokens"), out_tok=Sum("output_tokens"))
+        .order_by("-date")
+    )
+    admin_by_day = {row["date"].isoformat(): row for row in admin_daily}
+
+    # Tracker interne par jour (meme periode)
+    tracker_daily = (
+        ClaudeUsageLog.objects.filter(timestamp__gte=now - timedelta(days=7))
+        .extra(select={"day": "DATE(timestamp)"})
+        .values("day")
+        .annotate(cost=Sum("cost_usd"), n=Count("id"))
+        .order_by("-day")
+    )
+    tracker_by_day = {row["day"]: row for row in tracker_daily}
+
+    # Reconciliation jour par jour (7 derniers jours)
+    reconciliation = []
+    for offset in range(7):
+        d = today_date - td(days=offset)
+        d_iso = d.isoformat()
+        admin = admin_by_day.get(d_iso)
+        tracker = tracker_by_day.get(d_iso) or tracker_by_day.get(d) or {}
+        admin_cost = (admin or {}).get("cost", 0.0) or 0.0
+        tracker_cost = tracker.get("cost", 0.0) or 0.0
+        gap = admin_cost - tracker_cost
+        gap_pct = (gap / admin_cost * 100) if admin_cost else None
+        reconciliation.append({
+            "date": d,
+            "admin_cost": admin_cost,
+            "tracker_cost": tracker_cost,
+            "gap_usd": gap,
+            "gap_pct": gap_pct,
+            "tracker_calls": tracker.get("n", 0),
+        })
+
+    # Totaux 7j
+    admin_7d_total = sum(r["admin_cost"] for r in reconciliation)
+    tracker_7d_total = sum(r["tracker_cost"] for r in reconciliation)
+    gap_7d_pct = (
+        (admin_7d_total - tracker_7d_total) / admin_7d_total * 100
+        if admin_7d_total else None
+    )
+
+    # État source admin
+    admin_api_has_data = AnthropicUsageDaily.objects.exists()
+    admin_last_sync = (
+        AnthropicUsageDaily.objects.order_by("-synced_at").first()
+    )
+
     return render(request, "ekoalu/usage.html", {
         "today_rows": list(today_rows),
         "month_rows": list(month_rows),
         "daily": list(daily),
         "total_all": total_all,
         "recent": recent,
+        # Reconciliation
+        "reconciliation": reconciliation,
+        "admin_7d_total": admin_7d_total,
+        "tracker_7d_total": tracker_7d_total,
+        "gap_7d_pct": gap_7d_pct,
+        "admin_api_has_data": admin_api_has_data,
+        "admin_last_sync": admin_last_sync,
     })
 
 

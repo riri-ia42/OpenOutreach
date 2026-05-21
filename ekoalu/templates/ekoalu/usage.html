@@ -29,6 +29,66 @@
     </div>
 </div>
 
+<!-- Reconciliation Admin API vs Tracker interne -->
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-4 py-2 border-b bg-gray-50 text-sm font-semibold text-gray-700">
+        Réconciliation 7 jours — Admin API Anthropic (vérité) vs Tracker interne
+        {% if admin_last_sync %}
+        <span class="text-xs text-gray-500 ml-2">Dernier sync : {{ admin_last_sync.synced_at|date:"d/m H:i" }}</span>
+        {% endif %}
+    </div>
+    {% if not admin_api_has_data %}
+    <div class="p-4 bg-yellow-50 border-l-4 border-yellow-400">
+        <p class="text-sm text-yellow-800">
+            <strong>Admin API non encore synchronisée.</strong>
+            Pour activer la vérité officielle, crée une Admin API Key sur
+            <a href="https://console.anthropic.com/settings/admin-keys" class="underline" target="_blank">console.anthropic.com/settings/admin-keys</a>,
+            mets-la dans <code>.env.production</code> sous <code>ANTHROPIC_ADMIN_API_KEY</code>,
+            puis lance <code>python manage.py sync_anthropic_usage</code>.
+            Sans elle, seul le tracker interne est affiché (peut sous-estimer si patch incomplet).
+        </p>
+    </div>
+    {% else %}
+    <table class="min-w-full text-sm">
+        <thead class="bg-gray-50">
+            <tr class="text-xs text-gray-500 uppercase">
+                <th class="px-3 py-2 text-left">Date</th>
+                <th class="px-3 py-2 text-right">Admin API (officiel)</th>
+                <th class="px-3 py-2 text-right">Tracker interne</th>
+                <th class="px-3 py-2 text-right">Écart $</th>
+                <th class="px-3 py-2 text-right">Écart %</th>
+                <th class="px-3 py-2 text-right">Appels tracker</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in reconciliation %}
+            <tr class="border-t {% if r.gap_pct and r.gap_pct > 10 %}bg-red-50{% endif %}">
+                <td class="px-3 py-2">{{ r.date|date:"D d/m" }}</td>
+                <td class="px-3 py-2 text-right font-semibold">${{ r.admin_cost|floatformat:4 }}</td>
+                <td class="px-3 py-2 text-right">${{ r.tracker_cost|floatformat:4 }}</td>
+                <td class="px-3 py-2 text-right">${{ r.gap_usd|floatformat:4 }}</td>
+                <td class="px-3 py-2 text-right">{% if r.gap_pct is not None %}{{ r.gap_pct|floatformat:1 }}%{% else %}—{% endif %}</td>
+                <td class="px-3 py-2 text-right text-gray-500">{{ r.tracker_calls }}</td>
+            </tr>
+        {% endfor %}
+            <tr class="border-t-2 bg-gray-50 font-semibold">
+                <td class="px-3 py-2">Total 7j</td>
+                <td class="px-3 py-2 text-right">${{ admin_7d_total|floatformat:4 }}</td>
+                <td class="px-3 py-2 text-right">${{ tracker_7d_total|floatformat:4 }}</td>
+                <td class="px-3 py-2 text-right">${{ admin_7d_total|default:0|floatformat:4 }} - ${{ tracker_7d_total|default:0|floatformat:4 }}</td>
+                <td class="px-3 py-2 text-right {% if gap_7d_pct and gap_7d_pct > 10 %}text-red-700{% else %}text-green-700{% endif %}">
+                    {% if gap_7d_pct is not None %}{{ gap_7d_pct|floatformat:1 }}%{% else %}—{% endif %}
+                </td>
+                <td></td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="px-4 py-2 text-xs text-gray-500 bg-gray-50">
+        Écart &lt; 10% = tracker fiable. Au-delà, il manque des hooks (vérifier patch SDK + pydantic_ai + namespace beta).
+    </div>
+    {% endif %}
+</section>
+
 <!-- Today / Month breakdown -->
 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
