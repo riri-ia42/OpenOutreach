@@ -148,11 +148,29 @@ def _guess_context() -> str:
     return ""
 
 
+def _handle_exception(exc: BaseException) -> None:
+    """Side-effect sur les exceptions Anthropic critiques (cap usage).
+
+    Best-effort : si la detection ou le mail echoue, on ne perturbe pas le
+    flow normal -- l'exception sera relancee de toute facon.
+    """
+    try:
+        from ekoalu.llm_usage.api_limit_guard import is_usage_limit_error, trigger_limit_reached
+        if is_usage_limit_error(exc):
+            trigger_limit_reached(exc)
+    except Exception:
+        logger.debug("api_limit_guard side-effect failed", exc_info=True)
+
+
 def _make_sync_wrapper(original):
     def patched(self, *args, **kwargs):
         kwargs = _inject_cache_control(kwargs)
         t0 = time.perf_counter()
-        resp = original(self, *args, **kwargs)
+        try:
+            resp = original(self, *args, **kwargs)
+        except Exception as exc:
+            _handle_exception(exc)
+            raise
         dt = int((time.perf_counter() - t0) * 1000)
         model = kwargs.get("model") or getattr(resp, "model", "")
         usage = getattr(resp, "usage", None)
@@ -166,7 +184,11 @@ def _make_async_wrapper(original):
     async def patched(self, *args, **kwargs):
         kwargs = _inject_cache_control(kwargs)
         t0 = time.perf_counter()
-        resp = await original(self, *args, **kwargs)
+        try:
+            resp = await original(self, *args, **kwargs)
+        except Exception as exc:
+            _handle_exception(exc)
+            raise
         dt = int((time.perf_counter() - t0) * 1000)
         model = kwargs.get("model") or getattr(resp, "model", "")
         usage = getattr(resp, "usage", None)

@@ -355,6 +355,21 @@ def run_daemon(session):
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
+        # Garde-fou cap Anthropic : si l'API a refuse un appel pour cause
+        # d'usage limit, on bascule en pause jusqu'a la date de reprise
+        # (auto-purge du sentinel). Voir ekoalu/llm_usage/api_limit_guard.py.
+        from ekoalu.llm_usage.api_limit_guard import is_limit_active
+        if is_limit_active():
+            logger.warning(
+                colored("API_LIMIT_ACTIVE", "yellow", attrs=["bold"])
+                + " - cap Anthropic atteint, daemon en pause"
+                + " (sentinel data/api_limit_reached.json auto-purge a la date de reprise)",
+            )
+            sleep_with_heartbeat(
+                300, heartbeat, "API_LIMIT_ACTIVE - cap Anthropic, pause auto",
+            )
+            continue
+
         pause = seconds_until_active()
         if pause > 0:
             h, m = int(pause // 3600), int(pause % 3600 // 60)

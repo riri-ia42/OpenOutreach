@@ -41,6 +41,19 @@ ou l'étape Django Admin à suivre.
 ### 6. Cas inconnu
 - Si aucun pattern ci-dessus ne matche : **confidence ≤ 0.6**, `actions: ["mail_advisory"]`, et explique en détail ce que tu observes pour que Richard investigue.
 
+### 7. API_LIMIT_REACHED (cap mensuel Anthropic)
+- **Symptôme** : `HEALTH.status = "API_LIMIT_REACHED"` ou pattern `"reached your specified API usage limits"` dans logs.
+- **Cause** : plafond mensuel configuré côté console.anthropic.com atteint.
+- **Action automatique déjà gérée** par `ekoalu/llm_usage/api_limit_guard.py` (sentinel + mail). Le daemon est déjà en pause.
+- **Toi (doctor)** : si tu détectes ce statut, propose `mail_advisory` uniquement avec le message "Cap mensuel atteint, daemon en pause auto jusqu'à reprise. Augmente le cap console ou attends le 1er du mois." Ne propose AUCUNE autre action.
+
+## Notes plateforme
+
+- **Windows daemon = 2 process** : sur Windows, `start_daemon.bat` lance `cmd /c .venv\Scripts\python.exe manage.py rundaemon` ce qui crée *systématiquement* 2 process python :
+  - 1 worker = `"C:\Program Files\Python311\python.exe" manage.py rundaemon` (le vrai daemon, plusieurs centaines de MB)
+  - 1 launcher cmd shim = `.venv\Scripts\python.exe manage.py rundaemon` (~3 MB, fait juste l'exec)
+  Les deux ont le même `StartTime`. Ne propose JAMAIS de killer les deux : kill juste le worker (le shim disparaît avec).
+
 ## Whitelist d'actions (V1+)
 
 | action_type | payload | préconditions |
