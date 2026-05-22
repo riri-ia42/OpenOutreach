@@ -4,22 +4,129 @@ Single boundary for LLM construction. Call sites import `get_llm_model()` and
 hand the result to `pydantic_ai.Agent(...)`. Provider-specific routing lives
 here so the rest of the codebase stays provider-agnostic.
 
-Importing this module also applies ``nest_asyncio`` once. pydantic-ai's
-``Agent.run_sync`` wraps an async ``run`` in ``loop.run_until_complete``;
-something in its internals (anyio task group / portal) leaves the daemon
-thread's running-loop slot populated across calls, which trips the
-re-entrancy guard in ``BaseEventLoop._check_running`` on every subsequent
-``run_sync`` (``RuntimeError: This/Cannot run the event loop``). The
-official pydantic-ai troubleshooting recipe — same one used for Jupyter /
-Colab / Marimo — is ``nest_asyncio.apply()``, which patches the loop to
-allow nested ``run_until_complete``. See:
-https://pydantic.dev/docs/ai/overview/troubleshooting/
+Importing this module applies DEUX patches au boot :
+
+1. ``nest_asyncio.apply()`` -- autorise un ``loop.run_until_complete`` imbrique.
+   pydantic-ai's ``Agent.run_sync`` wraps an async ``run`` in
+   ``loop.run_until_complete``; something in its internals (anyio task group
+   / portal) leaves the running-loop slot populated. Sans nest_asyncio, le
+   2eme appel leve ``RuntimeError: This event loop is already running``.
+
+2. ``Agent.run_sync`` execute dans un thread dedie -- absolument necessaire
+   pour cohabiter avec Playwright Sync (browser automation OpenOutreach).
+   Sans cette isolation, anyio laisse le slot "running loop" du thread
+   principal populé apres retour, et Playwright Sync detecte cette boucle
+   au prochain appel : ``Playwright Sync API inside the asyncio loop``
+   (regression observee 2026-05-22 : zombie loop ~30h, ~18 USD/jour brules
+   en replay de qualif a chaque crash/restart).
+
+   Le thread worker (max_workers=1, sequence preservee) cree sa propre
+   boucle, l'execute, la libere ; le thread principal n'en voit jamais
+   l'execution. Cout : 1 thread switch par appel LLM (~ms negligeable).
+
+Voir aussi : https://pydantic.dev/docs/ai/overview/troubleshooting/
 """
 from __future__ import annotations
+
+import contextvars
+import inspect
+from concurrent.futures import ThreadPoolExecutor
 
 import nest_asyncio
 
 nest_asyncio.apply()
+
+
+# ── Asyncio isolation pour cohabiter avec Playwright Sync ──
+
+_LLM_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyai")
+_ORIGINAL_RUN_SYNC = None
+
+
+# ContextVar pose dans le thread caller (ou la stack metier est intacte) et
+# propage au thread worker via copy_context(). Le wrapper Anthropic SDK
+# (ekoalu/llm_usage/patch.py) lit ce var en priorite -- 99% des appels passent
+# par pydantic-ai donc l'inspection de stack dans le worker echoue (frames
+# metier inexistantes dans le thread worker).
+LLM_CONTEXT_VAR: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "ekoalu_llm_context", default="",
+)
+
+
+# Mapping (substring du chemin fichier) -> label de contexte. Centralise ici
+# pour eviter la duplication avec ekoalu/llm_usage/patch.py:_guess_context().
+_CONTEXT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("ekoalu/inbox_assist", "inbox_assist"),
+    ("ekoalu/outbound_validation", "outbound_invitation"),
+    ("ekoalu/company_validation", "company_suggester"),
+    ("linkedin/agents/follow_up", "follow_up_agent"),
+    ("ekoalu/follow_up", "follow_up_ekoalu"),
+    ("linkedin/pipeline/qualify", "qualifier"),
+    ("linkedin/ml/qualifier", "qualifier_ml"),
+    ("linkedin/db/summaries", "summary"),
+    ("linkedin/pipeline/search_keywords", "search_keywords"),
+    ("linkedin/daemon", "daemon"),
+    ("ekoalu/sourcing_filter", "sourcing_filter"),
+)
+
+
+def _detect_caller_context() -> str:
+    """Detecte le module metier appelant via la stack du thread caller.
+
+    Appele DANS le thread principal (avant submit dans le worker), ou la
+    stack contient encore les frames metier. Le worker pyai herite ensuite
+    de cette valeur via contextvars.
+    """
+    try:
+        for frame_info in inspect.stack()[2:25]:
+            fname = frame_info.filename.replace("\\", "/").lower()
+            for needle, label in _CONTEXT_PATTERNS:
+                if needle in fname:
+                    return label
+    except Exception:
+        pass
+    return ""
+
+
+def _isolated_run_sync(self, *args, **kwargs):
+    """Execute pydantic-ai Agent.run_sync dans un thread dedie.
+
+    Le thread worker absorbe toute la machinerie anyio/asyncio de pydantic-ai
+    et la libere a la fin de l'appel. Le thread principal (qui pilote
+    Playwright Sync) ne voit jamais de "running loop", ce qui evite la
+    regression ``Playwright Sync API inside the asyncio loop``.
+
+    Capture aussi le contexte metier appelant et le propage au worker via
+    contextvars.copy_context() : sans ca le wrapper Anthropic SDK ne pourrait
+    pas tagger les appels (la stack du worker ne contient pas les frames
+    metier).
+    """
+    # Priorite : valeur posee explicitement par le caller > auto-detect.
+    # Permet aux call sites de forcer un tag specifique si la detection
+    # auto ne suffit pas (sous-modules, helpers partages, etc).
+    explicit = LLM_CONTEXT_VAR.get()
+    ctx_label = explicit or _detect_caller_context() or "pydantic_ai_unknown"
+
+    def _run():
+        LLM_CONTEXT_VAR.set(ctx_label)
+        return _ORIGINAL_RUN_SYNC(self, *args, **kwargs)
+
+    captured_ctx = contextvars.copy_context()
+    return _LLM_EXECUTOR.submit(captured_ctx.run, _run).result()
+
+
+def _apply_asyncio_isolation_patch() -> None:
+    """Monkey-patch ``pydantic_ai.Agent.run_sync`` une seule fois (idempotent)."""
+    global _ORIGINAL_RUN_SYNC
+    if _ORIGINAL_RUN_SYNC is not None:
+        return
+    from pydantic_ai import Agent
+
+    _ORIGINAL_RUN_SYNC = Agent.run_sync
+    Agent.run_sync = _isolated_run_sync
+
+
+_apply_asyncio_isolation_patch()
 
 
 # Override the SDK default of 2. Each retry uses the SDK's built-in jittered

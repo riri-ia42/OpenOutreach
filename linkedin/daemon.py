@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import threading
 import time
@@ -288,11 +289,35 @@ def seconds_until_active() -> float:
 # ------------------------------------------------------------------
 
 
+def _tasks_disabled() -> bool:
+    """Kill-switch : si EKOALU_DAEMON_TASKS_DISABLED=true le daemon ne traite
+    aucune task (ni connect, ni follow-up, ni qualif, ni sourcing). Il dort en
+    boucle avec un heartbeat. Permet de figer le systeme sans tuer le process
+    (le watchdog reste vert), notamment pour stopper l'emballement de cout LLM
+    cause par la regression asyncio sans risquer une boucle relance->crash."""
+    return os.environ.get("EKOALU_DAEMON_TASKS_DISABLED", "false").lower() in (
+        "1", "true", "yes",
+    )
+
+
 def run_daemon(session):
     from django.apps import apps
     from linkedin.ml.hub import fetch_kit
     from linkedin.setup.freemium import import_freemium_campaign
     from linkedin.models import Campaign
+
+    if _tasks_disabled():
+        logger.warning(
+            colored("DAEMON_DISABLED", "yellow", attrs=["bold"])
+            + " - EKOALU_DAEMON_TASKS_DISABLED=true : aucune task ne sera traitee."
+            + " Le daemon reste idle pour preserver HEALTHY sans toucher Anthropic/Playwright."
+            + " Pour reactiver : EKOALU_DAEMON_TASKS_DISABLED=false dans .env.production puis relance.",
+        )
+        heartbeat = Heartbeat()
+        while True:
+            sleep_with_heartbeat(
+                300, heartbeat, "DAEMON_DISABLED - kill-switch actif",
+            )
 
     cfg = CAMPAIGN_CONFIG
 

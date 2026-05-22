@@ -97,11 +97,26 @@ def _safe_log(model, usage_obj, duration_ms, context=""):
 
 
 def _guess_context() -> str:
-    """Devine le contexte d'appel via la stack (sans crash).
+    """Devine le contexte d'appel.
 
-    Scanne plus profond (2..15) pour gerer les wrappers pydantic_ai (request ->
-    _messages_create -> client.beta.messages.create) qui ajoutent 4-6 frames.
+    Priorite 1 : ContextVar pose par ``linkedin/llm.py:_isolated_run_sync`` dans
+    le thread caller (ou la stack metier est intacte). Couvre 99% des appels
+    Anthropic puisqu'ils passent par pydantic-ai -> thread worker pyai (dont la
+    stack ne contient pas les frames metier).
+
+    Priorite 2 : stack inspect (fallback pour les rares appels SDK Anthropic
+    directs, sans pydantic-ai).
     """
+    # 1. ContextVar (couvre les appels via pydantic-ai patches)
+    try:
+        from linkedin.llm import LLM_CONTEXT_VAR
+        ctx = LLM_CONTEXT_VAR.get()
+        if ctx:
+            return ctx
+    except Exception:
+        pass
+
+    # 2. Fallback stack inspect (appels SDK directs hors pydantic-ai)
     try:
         import inspect
         for frame_info in inspect.stack()[2:15]:
