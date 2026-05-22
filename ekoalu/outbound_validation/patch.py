@@ -98,10 +98,18 @@ def apply_outbound_validation_patch() -> None:
 
     _PENDING_OUTBOUND_OPEN_STATUSES = None  # filled lazily
 
-    def _has_open_outbound(public_id, campaign_id, kind):
-        """Vrai si un PendingOutbound non-terminal existe deja pour ce
-        (prospect, campaign, kind). Evite les doublons quand le daemon
-        re-traite un Deal reste a l'etat Qualified apres interception."""
+    def _has_open_outbound(public_id, campaign_id, kind, ignore_campaign=False):
+        """Vrai si un PendingOutbound non-terminal existe deja pour ce prospect.
+
+        Avec ignore_campaign=True (defaut metier ABM EKOALU) : dedup sur
+        (public_id, kind) toutes campagnes confondues. C'est ce qu'on veut
+        car un meme prospect peut etre cible par N campagnes ABM mais on
+        ne veut JAMAIS lui envoyer 2 invitations / follow-ups en parallele
+        (risque ban LinkedIn + multiplication couts IA par N).
+
+        Avec ignore_campaign=False : dedup intra-campagne uniquement
+        (comportement OpenOutreach upstream).
+        """
         from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
         nonlocal _PENDING_OUTBOUND_OPEN_STATUSES
         if _PENDING_OUTBOUND_OPEN_STATUSES is None:
@@ -110,12 +118,14 @@ def apply_outbound_validation_patch() -> None:
                 OutboundStatus.APPROVED,
                 OutboundStatus.BLOCKED_COMPANY,
             ]
-        return PendingOutbound.objects.filter(
+        filter_kwargs = dict(
             prospect_public_id=public_id,
-            campaign_id=campaign_id,
             kind=kind,
             status__in=_PENDING_OUTBOUND_OPEN_STATUSES,
-        ).exists()
+        )
+        if not ignore_campaign:
+            filter_kwargs["campaign_id"] = campaign_id
+        return PendingOutbound.objects.filter(**filter_kwargs).exists()
 
     def patched_send_connection_request(session, profile):
         from ekoalu.company_validation.config import is_company_validation_enabled
@@ -134,10 +144,12 @@ def apply_outbound_validation_patch() -> None:
         company = profile.get("company", "") or profile.get("company_name", "")
 
         campaign_id_early = getattr(getattr(session, "campaign", None), "pk", None)
-        if _has_open_outbound(public_id, campaign_id_early, OutboundKind.INVITATION):
+        if _has_open_outbound(public_id, campaign_id_early, OutboundKind.INVITATION,
+                               ignore_campaign=True):
             logger.info(
-                "EKOALU: PendingOutbound invitation deja en file pour %s (campaign=%s) - skip dedup",
-                public_id, campaign_id_early,
+                "EKOALU: PendingOutbound invitation deja en file pour %s "
+                "(toutes campagnes confondues) - skip dedup ABM",
+                public_id,
             )
             return ProfileState.QUALIFIED
 
@@ -213,10 +225,12 @@ def apply_outbound_validation_patch() -> None:
         campaign_id = getattr(campaign, "pk", None)
         campaign_name = getattr(campaign, "name", "") if campaign else ""
 
-        if _has_open_outbound(public_id, campaign_id, OutboundKind.FOLLOW_UP):
+        if _has_open_outbound(public_id, campaign_id, OutboundKind.FOLLOW_UP,
+                               ignore_campaign=True):
             logger.info(
-                "EKOALU: PendingOutbound follow_up deja en file pour %s (campaign=%s) - skip dedup",
-                public_id, campaign_id,
+                "EKOALU: PendingOutbound follow_up deja en file pour %s "
+                "(toutes campagnes confondues) - skip dedup ABM",
+                public_id,
             )
             return False
 
