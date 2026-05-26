@@ -6,8 +6,10 @@ from django.db import models
 
 class OutboundKind(models.TextChoices):
     INVITATION = "invitation", "Invitation LinkedIn"
-    FOLLOW_UP = "follow_up", "Message follow-up"
+    FOLLOW_UP = "follow_up", "Message follow-up LinkedIn"
     REPLY = "reply", "Réponse à un prospect"
+    EMAIL_COLD = "email_cold", "Cold mail (1er contact)"
+    EMAIL_FOLLOW_UP = "email_follow_up", "Email follow-up"
 
 
 class OutboundStatus(models.TextChoices):

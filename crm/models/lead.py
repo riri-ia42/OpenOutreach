@@ -21,6 +21,15 @@ class Lead(models.Model):
     creation_date = models.DateTimeField(default=timezone.now)
     update_date = models.DateTimeField(auto_now=True)
 
+    # Canal email (ajouté 2026-05-26 pour Niveau 1 multicanal + Niveau 2 mail-only).
+    # Source = "bdd_prospect" (import depuis BDD PROSPECT EKOALU), "manual", "enrichment_api", etc.
+    contact_email = models.EmailField(null=True, blank=True, db_index=True)
+    contact_email_source = models.CharField(max_length=64, blank=True)
+    unsubscribed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Date de demande d'opposition (RGPD art 21) — exclu de tout envoi futur",
+    )
+
     def __str__(self):
         label = self.public_identifier or self.linkedin_url or f"Lead#{self.pk}"
         if self.disqualified:
