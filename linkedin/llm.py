@@ -4,25 +4,26 @@ Single boundary for LLM construction. Call sites import `get_llm_model()` and
 hand the result to `pydantic_ai.Agent(...)`. Provider-specific routing lives
 here so the rest of the codebase stays provider-agnostic.
 
-Importing this module applies DEUX patches au boot :
+Importing this module applique UN patch au boot :
 
-1. ``nest_asyncio.apply()`` -- autorise un ``loop.run_until_complete`` imbrique.
-   pydantic-ai's ``Agent.run_sync`` wraps an async ``run`` in
-   ``loop.run_until_complete``; something in its internals (anyio task group
-   / portal) leaves the running-loop slot populated. Sans nest_asyncio, le
-   2eme appel leve ``RuntimeError: This event loop is already running``.
+``Agent.run_sync`` execute dans un thread dedie -- absolument necessaire pour
+cohabiter avec Playwright Sync (browser automation OpenOutreach). Sans cette
+isolation, anyio laisse le slot "running loop" du thread principal populé
+apres retour, et Playwright Sync detecte cette boucle au prochain appel :
+``Playwright Sync API inside the asyncio loop`` (regression observee
+2026-05-22 : zombie loop ~30h, ~18 USD/jour brules en replay de qualif a
+chaque crash/restart).
 
-2. ``Agent.run_sync`` execute dans un thread dedie -- absolument necessaire
-   pour cohabiter avec Playwright Sync (browser automation OpenOutreach).
-   Sans cette isolation, anyio laisse le slot "running loop" du thread
-   principal populé apres retour, et Playwright Sync detecte cette boucle
-   au prochain appel : ``Playwright Sync API inside the asyncio loop``
-   (regression observee 2026-05-22 : zombie loop ~30h, ~18 USD/jour brules
-   en replay de qualif a chaque crash/restart).
+Le thread worker (max_workers=1, sequence preservee) cree sa propre boucle,
+l'execute, la libere ; le thread principal n'en voit jamais l'execution.
+Cout : 1 thread switch par appel LLM (~ms negligeable).
 
-   Le thread worker (max_workers=1, sequence preservee) cree sa propre
-   boucle, l'execute, la libere ; le thread principal n'en voit jamais
-   l'execution. Cout : 1 thread switch par appel LLM (~ms negligeable).
+Note historique (2026-05-26) : un ``nest_asyncio.apply()`` etait posé en plus
+au boot pour autoriser un ``loop.run_until_complete`` imbrique dans le thread
+principal. Devenu inutile avec le fix thread isolation ET contre-productif :
+nest_asyncio rendait persistantes les "running loops" entre appels, ce qui
+maintenait la regression Playwright meme avec le worker thread (zombies
+residuels observes 23-25/05 -> cap Anthropic sature le 25/05). Patch retire.
 
 Voir aussi : https://pydantic.dev/docs/ai/overview/troubleshooting/
 """
@@ -31,10 +32,6 @@ from __future__ import annotations
 import contextvars
 import inspect
 from concurrent.futures import ThreadPoolExecutor
-
-import nest_asyncio
-
-nest_asyncio.apply()
 
 
 # ── Asyncio isolation pour cohabiter avec Playwright Sync ──
