@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from django.conf import settings
@@ -32,6 +32,10 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 SENTINEL_PATH = Path(settings.ROOT_DIR) / "data" / "api_limit_reached.json"
+
+# Probe model : Haiku 4.5 -- input 1 token, max_tokens=1 = cout < 0.0001 $/probe
+PROBE_MODEL = "claude-haiku-4-5-20251001"
+PROBE_COOLDOWN = timedelta(hours=1)
 
 # Message Anthropic typique :
 #   "You have reached your specified API usage limits. You will regain access
@@ -67,25 +71,123 @@ def is_limit_active() -> bool:
     Si la date est passee, on supprime le sentinel et on renvoie False (reset
     automatique). Si pas de date dans le sentinel (cas exotique), on traite
     comme actif pour rester safe.
+
+    En plus de l'auto-purge a la date de reprise, on probe l'API toutes les
+    PROBE_COOLDOWN (1h par defaut) avec un appel Haiku minimal (~0.0001 $/probe)
+    pour detecter une montee du cap dans la console Anthropic avant la date.
+    Si le probe passe (200) -> purge du sentinel + mail "reprise auto".
     """
     if not SENTINEL_PATH.exists():
         return False
     try:
         data = json.loads(SENTINEL_PATH.read_text(encoding="utf-8"))
-        regain_iso = data.get("regain_at_utc", "")
-        if not regain_iso:
+    except (OSError, json.JSONDecodeError):
+        # Fichier illisible : on reste prudent, on bloque
+        return True
+
+    regain_iso = data.get("regain_at_utc", "")
+    if regain_iso:
+        try:
+            regain_at = datetime.fromisoformat(regain_iso)
+        except ValueError:
             return True
-        regain_at = datetime.fromisoformat(regain_iso)
         if datetime.now(timezone.utc) >= regain_at:
             SENTINEL_PATH.unlink()
             logger.info(
                 "API limit sentinel auto-purge (regain=%s atteint)", regain_iso,
             )
             return False
+
+    # Probe Anthropic si cooldown ecoule
+    if _probe_due(data):
+        if _run_probe():
+            SENTINEL_PATH.unlink()
+            logger.info("API limit probe OK -- cap remonte, reprise auto")
+            _send_recovery_mail()
+            return False
+        # Echec : on note la tentative pour respecter le cooldown
+        data["last_probe_at"] = datetime.now(timezone.utc).isoformat()
+        SENTINEL_PATH.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8",
+        )
+    return True
+
+
+def _probe_due(sentinel_data: dict) -> bool:
+    """True si on doit faire un nouveau probe (cooldown ecoule).
+
+    Fallback sur `triggered_at_utc` pour ne pas re-probe immediatement apres
+    la creation du sentinel (on vient justement de se prendre un 400, inutile
+    de re-tester dans la foulee).
+    """
+    ref_iso = sentinel_data.get("last_probe_at") or sentinel_data.get("triggered_at_utc", "")
+    if not ref_iso:
         return True
-    except (OSError, json.JSONDecodeError, ValueError):
-        # Fichier illisible / date corrompue : on reste prudent, on bloque
+    try:
+        ref_at = datetime.fromisoformat(ref_iso)
+    except ValueError:
         return True
+    return datetime.now(timezone.utc) - ref_at >= PROBE_COOLDOWN
+
+
+def _run_probe() -> bool:
+    """Appelle Anthropic avec un payload minimal. True si 200, False sinon.
+
+    Best-effort : toute erreur autre que succes est traitee comme cap toujours
+    actif (par securite -- on prefere rester en pause que reprendre par erreur).
+    """
+    try:
+        from anthropic import Anthropic
+
+        from linkedin.models import SiteConfig
+        cfg = SiteConfig.load()
+        api_key = cfg.llm_api_key
+        if not api_key:
+            logger.warning("Probe API limit : pas d'API key configuree")
+            return False
+        client = Anthropic(api_key=api_key, max_retries=0)
+        client.messages.create(
+            model=PROBE_MODEL,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ok"}],
+        )
+        return True
+    except Exception as exc:
+        if is_usage_limit_error(exc):
+            logger.info("Probe API limit : cap toujours actif (400 attendu)")
+        else:
+            logger.warning("Probe API limit : erreur inattendue %s", exc)
+        return False
+
+
+def _send_recovery_mail() -> None:
+    """Mail best-effort quand le cap est remonte (reprise auto)."""
+    try:
+        from ekoalu.notifications.graph_mailer import is_configured, send_mail
+
+        if not is_configured():
+            return
+
+        subject = "[OK] EKOALU prospection - cap Anthropic remonte, reprise auto"
+        html = """<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,Segoe UI,sans-serif;max-width:700px;margin:0 auto;padding:20px;">
+<h2 style="color:#16a34a;border-bottom:2px solid #16a34a;padding-bottom:6px;">
+  Cap Anthropic remonte -- reprise prospection
+</h2>
+<p>Le probe horaire Anthropic vient de passer 200. Le sentinel a ete purge
+automatiquement, le daemon va reprendre les envois LinkedIn au prochain cycle
+(max 5 min).</p>
+<ul>
+  <li><a href="http://ekoalu-prospection:3210/ekoalu/live/">Monitoring live</a></li>
+  <li><a href="http://ekoalu-prospection:3210/ekoalu/usage/">Conso Anthropic</a></li>
+</ul>
+</body></html>
+"""
+        send_mail(subject=subject, html_body=html)
+        logger.info("Mail API_LIMIT recovery envoye a Richard")
+    except Exception:
+        logger.exception("Mail API_LIMIT recovery echoue (sentinel deja purge)")
 
 
 def trigger_limit_reached(exc: BaseException) -> None:
