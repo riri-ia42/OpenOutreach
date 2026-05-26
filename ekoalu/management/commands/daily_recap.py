@@ -1,15 +1,19 @@
-"""Genere et envoie le recap quotidien de l'activite prospection.
+"""Genere et envoie le recap d'activite prospection.
 
-Envoi SMTP si EMAIL_HOST configure dans le settings, sinon dump du HTML dans
-data/recaps/YYYY-MM-DD.html. Toujours loggue le resultat.
+Deux modes :
+- `--period day`     (defaut) recap complet de la journee, envoye le soir
+- `--period morning` point midi : activite du matin + etat systeme (sentinel API,
+  zombies recents, daemon DOWN), avec recommandations de relance si blocage
 
-Usage : python manage.py daily_recap [--date YYYY-MM-DD]
+Envoi via Microsoft Graph si configure, fallback SMTP, sinon dump fichier dans
+data/recaps/YYYY-MM-DD[-morning].html. Toujours loggue le resultat.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from django.conf import settings
@@ -31,8 +35,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class SystemStatus:
+    """Etat live du systeme pour alerte de relance."""
+    health_status: str            # HEALTHY / DAEMON_DISABLED / API_LIMIT_REACHED / ZOMBIE_ASYNCIO / DOWN / OUT_OF_HOURS / UNKNOWN
+    health_message: str
+    health_checked_minutes_ago: int | None
+    api_limit_active: bool
+    api_limit_regain_text: str
+    blocking: bool                # True si action humaine recommandee (point midi)
+
+
+@dataclass
 class DailyStats:
     day: date
+    period: str                   # "day" ou "morning"
+    range_end: datetime           # borne sup (exclusive) de la fenetre comptee
     leads_total: int
     leads_qualified: int
     leads_disqualified: int
@@ -46,12 +63,71 @@ class DailyStats:
     claude_cost_usd: float
     by_campaign: list[dict]
     recent_activity: list[str]
+    system: SystemStatus
 
 
-def compute_stats(day: date) -> DailyStats:
+def read_system_status() -> SystemStatus:
+    """Lit data/HEALTH.json + sentinel API limit pour donner l'etat live.
+
+    Best-effort : si un fichier est absent ou illisible, on retourne UNKNOWN
+    plutot que de planter le recap.
+    """
+    health_path = Path(settings.ROOT_DIR) / "data" / "HEALTH.json"
+    sentinel_path = Path(settings.ROOT_DIR) / "data" / "api_limit_reached.json"
+
+    status = "UNKNOWN"
+    message = "HEALTH.json absent"
+    minutes_ago: int | None = None
+    if health_path.exists():
+        try:
+            data = json.loads(health_path.read_text(encoding="utf-8"))
+            status = data.get("status", "UNKNOWN")
+            message = data.get("message", "")
+            checked_iso = data.get("checked_at", "")
+            if checked_iso:
+                checked_at = datetime.fromisoformat(checked_iso)
+                if checked_at.tzinfo is None:
+                    checked_at = checked_at.replace(tzinfo=timezone.utc)
+                delta = datetime.now(timezone.utc) - checked_at
+                minutes_ago = int(delta.total_seconds() / 60)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            message = f"HEALTH.json illisible : {exc}"
+
+    limit_active = False
+    regain_text = ""
+    if sentinel_path.exists():
+        try:
+            sentinel = json.loads(sentinel_path.read_text(encoding="utf-8"))
+            limit_active = True
+            regain_text = sentinel.get("regain_text", "")
+        except (OSError, json.JSONDecodeError):
+            limit_active = True
+
+    # Critere "blocking" pour le point midi : on alerte si action humaine utile
+    blocking = (
+        limit_active
+        or status in {"API_LIMIT_REACHED", "DAEMON_DISABLED", "ZOMBIE_ASYNCIO", "DOWN"}
+        or (minutes_ago is not None and minutes_ago > 30)
+    )
+
+    return SystemStatus(
+        health_status=status,
+        health_message=message,
+        health_checked_minutes_ago=minutes_ago,
+        api_limit_active=limit_active,
+        api_limit_regain_text=regain_text,
+        blocking=blocking,
+    )
+
+
+def compute_stats(day: date, period: str = "day") -> DailyStats:
     tz = dj_tz.get_current_timezone()
     day_start = dj_tz.make_aware(datetime.combine(day, datetime.min.time()), tz)
-    day_end = day_start + timedelta(days=1)
+    if period == "morning":
+        # De minuit a maintenant (pour le point midi)
+        day_end = dj_tz.localtime()
+    else:
+        day_end = day_start + timedelta(days=1)
 
     leads_today = Lead.objects.filter(creation_date__gte=day_start, creation_date__lt=day_end)
     leads_total = leads_today.count()
@@ -114,6 +190,8 @@ def compute_stats(day: date) -> DailyStats:
 
     return DailyStats(
         day=day,
+        period=period,
+        range_end=day_end,
         leads_total=leads_total,
         leads_qualified=leads_qualified,
         leads_disqualified=leads_disqualified,
@@ -127,6 +205,74 @@ def compute_stats(day: date) -> DailyStats:
         claude_cost_usd=cost_today,
         by_campaign=by_campaign,
         recent_activity=recent_activity,
+        system=read_system_status(),
+    )
+
+
+def _render_system_banner(sys_status: SystemStatus, period: str) -> str:
+    """Bandeau d'etat systeme + recommandations de relance (mode morning surtout)."""
+    if sys_status.blocking:
+        color = "#dc2626"
+        label = "BLOCAGE"
+    elif sys_status.health_status in {"OUT_OF_HOURS"}:
+        color = "#6b7280"
+        label = "HORS PLAGE"
+    elif sys_status.health_status == "HEALTHY":
+        color = "#16a34a"
+        label = "OK"
+    else:
+        color = "#ea580c"
+        label = "DEGRADE"
+
+    msg = sys_status.health_message or sys_status.health_status
+    if sys_status.api_limit_active:
+        regain = sys_status.api_limit_regain_text or "?"
+        msg = (
+            f"Cap Anthropic atteint -- pause auto, reprise prevue {regain}. "
+            "Probe horaire active, daemon reprend des cap remonte (cf "
+            "<code>data/api_limit_reached.json</code>)."
+        )
+
+    age = ""
+    if sys_status.health_checked_minutes_ago is not None:
+        age = f" (HEALTH check il y a {sys_status.health_checked_minutes_ago} min)"
+
+    actions_html = ""
+    if period == "morning" and sys_status.blocking:
+        actions = []
+        if sys_status.api_limit_active:
+            actions.append(
+                "Remonter le cap dans la <a href='https://console.anthropic.com/settings/limits'>"
+                "console Anthropic</a> -- le probe horaire detectera et relancera dans l'heure."
+            )
+        if sys_status.health_status == "DAEMON_DISABLED":
+            actions.append(
+                "Kill-switch actif (<code>EKOALU_DAEMON_TASKS_DISABLED=true</code>). "
+                "Retirer la variable dans <code>.env.production</code> + relancer le daemon."
+            )
+        if sys_status.health_status in {"ZOMBIE_ASYNCIO", "DOWN"}:
+            actions.append(
+                "Daemon zombie/DOWN -- le watchdog auto-relance toutes les 2 min. "
+                "Si persiste : verifier <code>data/daemon.log</code> et la session RDP."
+            )
+        if sys_status.health_checked_minutes_ago is not None and sys_status.health_checked_minutes_ago > 30:
+            actions.append(
+                f"HEALTH.json non rafraichi depuis {sys_status.health_checked_minutes_ago} min -- "
+                "le watchdog Task Scheduler ne tourne probablement plus (session RDP coupee ?). "
+                "Se reconnecter au TSE pour redemarrer la chaine."
+            )
+        if actions:
+            items = "".join(f"<li>{a}</li>" for a in actions)
+            actions_html = (
+                "<div style='background:#fef3c7;border-left:4px solid #f59e0b;"
+                "padding:12px 16px;border-radius:8px;margin:12px 0;'>"
+                f"<strong>Actions de relance :</strong><ol>{items}</ol></div>"
+            )
+
+    return (
+        f"<div style='background:{color};color:white;padding:12px 16px;"
+        f"border-radius:8px;margin:16px 0;'>"
+        f"<strong>Etat outil :</strong> {label} -- {msg}{age}</div>{actions_html}"
     )
 
 
@@ -138,14 +284,13 @@ def render_html(s: DailyStats) -> str:
         "October", "octobre").replace("November", "novembre").replace("December", "decembre")
 
     accept = f"{s.accept_rate_today}%" if s.accept_rate_today is not None else "n/a"
-    health = "OK"
-    health_color = "#16a34a"
-    if s.tasks_failed > 0 and s.tasks_completed == 0:
-        health = "ALERTE - aucune tache reussie, daemon possiblement KO"
-        health_color = "#dc2626"
-    elif s.tasks_failed > s.tasks_completed * 2:
-        health = "DEGRADE - beaucoup d'echecs"
-        health_color = "#ea580c"
+    title = "Recap prospection EKOALU"
+    subtitle = day_str
+    if s.period == "morning":
+        title = "Point midi prospection EKOALU"
+        subtitle = f"{day_str} -- activite jusqu'a {s.range_end:%H:%M}"
+    activity_label = "Activite du matin" if s.period == "morning" else "Activite du jour"
+    banner = _render_system_banner(s.system, s.period)
 
     rows_campaign = "\n".join(
         f"<tr><td>{c['name']}</td><td style='text-align:right'>{c['leads']}</td>"
@@ -156,16 +301,14 @@ def render_html(s: DailyStats) -> str:
     recent = "<br>".join(s.recent_activity) or "(aucune action terminee)"
 
     return f"""<!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8"><title>Recap EKOALU {s.day}</title></head>
+<html lang="fr"><head><meta charset="utf-8"><title>{title} {s.day}</title></head>
 <body style="font-family: -apple-system, Segoe UI, sans-serif; max-width: 700px; margin: 0 auto; padding: 20px; color: #111827;">
-<h1 style="border-bottom: 2px solid #3b82f6; padding-bottom: 8px;">Recap prospection EKOALU</h1>
-<p style="color: #6b7280; margin-top: 0;">{day_str}</p>
+<h1 style="border-bottom: 2px solid #3b82f6; padding-bottom: 8px;">{title}</h1>
+<p style="color: #6b7280; margin-top: 0;">{subtitle}</p>
 
-<div style="background: {health_color}; color: white; padding: 12px 16px; border-radius: 8px; margin: 16px 0;">
-  <strong>Etat outil :</strong> {health}
-</div>
+{banner}
 
-<h2 style="color: #1f2937;">Activite du jour</h2>
+<h2 style="color: #1f2937;">{activity_label}</h2>
 <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
   <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Nouveaux prospects scrapes</td>
       <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: bold;">{s.leads_total}</td></tr>
@@ -216,8 +359,15 @@ A valider : <a href="http://ekoalu-prospection:3210/ekoalu/messages/?status=pend
 
 def render_text(s: DailyStats) -> str:
     accept = f"{s.accept_rate_today}%" if s.accept_rate_today is not None else "n/a"
+    title = "Point midi prospection EKOALU" if s.period == "morning" else "Recap prospection EKOALU"
+    period_hint = f" (activite jusqu'a {s.range_end:%H:%M})" if s.period == "morning" else ""
+    sys_line = f"Etat outil          : {s.system.health_status} -- {s.system.health_message}"
+    if s.system.api_limit_active:
+        sys_line += f" [CAP ANTHROPIC actif, reprise {s.system.api_limit_regain_text or '?'}]"
     lines = [
-        f"Recap prospection EKOALU - {s.day}",
+        f"{title} - {s.day}{period_hint}",
+        "",
+        sys_line,
         "",
         f"Nouveaux prospects   : {s.leads_total} (qualifies {s.leads_qualified}, disqualifies {s.leads_disqualified})",
         f"Deals crees          : {s.deals_created}",
@@ -243,29 +393,56 @@ class Command(BaseCommand):
             default=None,
             help="Date du recap au format YYYY-MM-DD (defaut: aujourd'hui)",
         )
+        parser.add_argument(
+            "--period",
+            choices=["day", "morning"],
+            default="day",
+            help="day = recap complet (defaut, le soir), morning = point midi (activite matin + etat systeme)",
+        )
+        parser.add_argument(
+            "--no-send",
+            action="store_true",
+            help="Dump le HTML mais n'envoie pas le mail (debug)",
+        )
 
     def handle(self, *args, **opts):
         if opts["date"]:
             day = datetime.strptime(opts["date"], "%Y-%m-%d").date()
         else:
             day = dj_tz.localdate()
+        period = opts["period"]
 
-        stats = compute_stats(day)
+        stats = compute_stats(day, period=period)
         html = render_html(stats)
         text = render_text(stats)
 
         # Dump fichier (always)
         recaps_dir = Path(settings.ROOT_DIR) / "data" / "recaps"
         recaps_dir.mkdir(parents=True, exist_ok=True)
-        recap_path = recaps_dir / f"{day:%Y-%m-%d}.html"
+        suffix = "-morning" if period == "morning" else ""
+        recap_path = recaps_dir / f"{day:%Y-%m-%d}{suffix}.html"
         recap_path.write_text(html, encoding="utf-8")
         self.stdout.write(f"Recap HTML dump: {recap_path}")
-        logger.info("Recap %s ecrit dans %s", day, recap_path)
+        logger.info("Recap %s (%s) ecrit dans %s", day, period, recap_path)
+
+        if opts["no_send"]:
+            self.stdout.write(self.style.WARNING("--no-send : pas d'envoi"))
+            return
 
         # Tentative envoi via Microsoft Graph (préféré — partagé avec mail-assistant)
         sent = False
         recipient = settings.RECAP_RECIPIENT
-        subject = f"EKOALU prospection - recap {day:%d/%m/%Y} ({stats.invitations_sent} envois, {stats.leads_total} leads)"
+        if period == "morning":
+            blocking_flag = " [BLOCAGE]" if stats.system.blocking else ""
+            subject = (
+                f"EKOALU prospection - point midi {day:%d/%m/%Y}{blocking_flag} "
+                f"({stats.invitations_sent} envois ce matin)"
+            )
+        else:
+            subject = (
+                f"EKOALU prospection - recap {day:%d/%m/%Y} "
+                f"({stats.invitations_sent} envois, {stats.leads_total} leads)"
+            )
 
         try:
             from ekoalu.notifications.graph_mailer import send_mail, is_configured
