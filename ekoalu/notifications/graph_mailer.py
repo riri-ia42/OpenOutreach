@@ -157,6 +157,65 @@ def is_configured() -> bool:
         return False
 
 
+def send_reply(*, original_message_id: str, body_html: str) -> None:
+    """Envoie une réponse threadée à un message existant via Graph reply.
+
+    Graph gère automatiquement les headers In-Reply-To / References / threading
+    Conversation Outlook : on a juste à fournir l'ID Graph du message source et
+    le corps du commentaire. Les destinataires sont déduits du message original
+    (équivalent du bouton "Répondre" dans Outlook).
+
+    Args:
+        original_message_id: ID Graph du message auquel on répond
+            (= PendingReply.inbound_message_id).
+        body_html: corps HTML de la réponse (inclura un footer "On <date>, X wrote:"
+            automatique côté Outlook).
+
+    Raises:
+        GraphConfigError, GraphAuthError, GraphSendError.
+    """
+    if not original_message_id:
+        raise GraphSendError("original_message_id vide")
+
+    user_email = _required("GRAPH_USER_EMAIL")
+    token = _get_access_token()
+
+    payload = {
+        "comment": body_html,
+        # On peut surcharger le message (subject, toRecipients) si besoin via "message":
+        # ici on laisse Graph reprendre l'original et on injecte juste notre comment.
+    }
+
+    resp = requests.post(
+        f"{GRAPH_BASE}/users/{user_email}/messages/{original_message_id}/reply",
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        timeout=30,
+    )
+    if resp.status_code == 401:
+        # Token vient peut-être d'expirer — on invalide et on retente une fois
+        global _cached_token, _token_expires_at
+        with _token_lock:
+            _cached_token = None
+            _token_expires_at = 0.0
+        token = _get_access_token()
+        resp = requests.post(
+            f"{GRAPH_BASE}/users/{user_email}/messages/{original_message_id}/reply",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+    if not resp.ok and resp.status_code != 202:
+        raise GraphSendError(f"reply {resp.status_code}: {resp.text[:300]}")
+    logger.info("Reply Graph envoyée (msg_id=%s)", original_message_id)
+
+
 def list_inbox_messages(*, since_iso_utc: str, max_n: int = 50) -> list[dict]:
     """Récupère les messages de la boîte de réception depuis `since_iso_utc`.
 

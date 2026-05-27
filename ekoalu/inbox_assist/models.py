@@ -28,7 +28,9 @@ class PendingReply(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "En attente validation"
+        APPROVED = "approved", "Approuvé (à envoyer)"
         SENT = "sent", "Envoyé"
+        FAILED = "failed", "Échec envoi"
         DISCARDED = "discarded", "Abandonné"
 
     # Note : on ne FK pas directement à Lead/Deal de crm pour découpler
@@ -66,6 +68,11 @@ class PendingReply(models.Model):
         max_length=16,
         choices=Status.choices,
         default=Status.PENDING,
+    )
+
+    error_message = models.TextField(
+        blank=True, default="",
+        help_text="Détail erreur si status=FAILED",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
