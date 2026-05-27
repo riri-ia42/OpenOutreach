@@ -30,12 +30,15 @@
     <a href="?status=rejected" class="px-4 py-2 rounded text-sm {% if status_filter == 'rejected' %}bg-gray-200 text-gray-800 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
         Refusés ({{ counts.rejected }})
     </a>
+    <a href="?status=failed" class="px-4 py-2 rounded text-sm {% if status_filter == 'failed' %}bg-red-100 text-red-800 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+        Échecs envoi ({{ counts.failed }})
+    </a>
     <a href="?status=" class="px-4 py-2 rounded text-sm {% if not status_filter %}bg-gray-200 text-gray-800 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
         Tous
     </a>
 </div>
 
-{% if outbound_list and status_filter in 'pending,approved' %}
+{% if outbound_list and status_filter in 'pending,approved,failed' %}
 <div class="bg-white rounded-lg p-3 border border-gray-200 flex items-center gap-3 flex-wrap text-sm">
     <label class="inline-flex items-center gap-2 cursor-pointer">
         <input type="checkbox" id="bulk-all" class="w-4 h-4 accent-blue-600">
@@ -52,7 +55,7 @@
             {% for o in outbound_list %}
             <li class="p-4 hover:bg-gray-50">
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-3 sm:gap-4">
-                    {% if o.status == 'pending' or o.status == 'approved' %}
+                    {% if o.status == 'pending' or o.status == 'approved' or o.status == 'failed' %}
                     <input type="checkbox" class="bulk-cb mt-1 w-4 h-4 accent-blue-600" data-id="{{ o.pk }}">
                     {% endif %}
                     <div class="flex-1 min-w-0">
@@ -94,6 +97,11 @@
                         {% if o.rejection_reason %}
                         <p class="text-xs text-red-600 mt-1">Refus : {{ o.rejection_reason|truncatechars:120 }}</p>
                         {% endif %}
+                        {% if o.status == 'failed' and o.error_message %}
+                        <p class="text-xs text-red-700 mt-1 font-mono bg-red-50 border border-red-200 rounded px-2 py-1">
+                            Échec envoi : {{ o.error_message|truncatechars:200 }}
+                        </p>
+                        {% endif %}
                     </div>
                     <a href="{% url 'ekoalu:outbound_detail' o.pk %}"
                        class="block text-center px-4 py-3 sm:px-3 sm:py-1 bg-blue-600 text-white text-base sm:text-sm font-medium rounded hover:bg-blue-700 whitespace-nowrap sm:self-start">
@@ -113,7 +121,7 @@
     {% endif %}
 </div>
 
-{% if outbound_list and status_filter in 'pending,approved' %}
+{% if outbound_list and status_filter in 'pending,approved,failed' %}
 <form method="post" id="bulk-form" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-white shadow-xl border-t border-gray-700 px-4 py-3 z-50 hidden">
     {% csrf_token %}
     <input type="hidden" name="selected_ids" id="bulk-ids" value="">
@@ -131,6 +139,13 @@
                 onclick="return confirm('Marquer ' + document.getElementById('bulk-count').textContent + ' message(s) comme envoyés ?');"
                 class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium">
             Marquer envoyé
+        </button>
+        {% endif %}
+        {% if status_filter == 'failed' %}
+        <button type="submit" name="bulk_action" value="bulk_requeue"
+                onclick="return confirm('Remettre ' + document.getElementById('bulk-count').textContent + ' message(s) en file approuvés ?\nIls seront ré-envoyés au prochain cycle daemon.');"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium">
+            ⟲ Remettre en file
         </button>
         {% endif %}
         <button type="submit" name="bulk_action" value="bulk_reject"

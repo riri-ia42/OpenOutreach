@@ -101,6 +101,9 @@ def dashboard(request):
     approved_outbound_count = PendingOutbound.objects.filter(
         status=OutboundStatus.APPROVED,
     ).count()
+    failed_outbound_count = PendingOutbound.objects.filter(
+        status=OutboundStatus.FAILED,
+    ).count()
 
     # ---- Tasks en queue ----
     tasks_pending = Task.objects.filter(status="pending").count()
@@ -172,6 +175,7 @@ def dashboard(request):
         "pending_outbound": pending_outbound,
         "pending_outbound_count": pending_outbound_count,
         "approved_outbound_count": approved_outbound_count,
+        "failed_outbound_count": failed_outbound_count,
         "approval_mode": get_approval_mode().value,
         "tasks": {
             "pending": tasks_pending,
@@ -1000,6 +1004,12 @@ def outbound_list(request):
                 sent_at=timezone.now(),
             )
             django_messages.success(request, f"{n} message(s) marqué(s) envoyés manuellement.")
+        elif bulk_action == "bulk_requeue":
+            n = qs.filter(status=OutboundStatus.FAILED).update(
+                status=OutboundStatus.APPROVED,
+                error_message="",
+            )
+            django_messages.success(request, f"⟲ {n} message(s) remis en file — partiront au prochain cycle daemon.")
         else:
             django_messages.error(request, f"Action en masse inconnue : {bulk_action}")
         return redirect(request.path + "?" + request.GET.urlencode())
@@ -1018,6 +1028,7 @@ def outbound_list(request):
         "approved": PendingOutbound.objects.filter(status=OutboundStatus.APPROVED).count(),
         "sent": PendingOutbound.objects.filter(status=OutboundStatus.SENT).count(),
         "rejected": PendingOutbound.objects.filter(status=OutboundStatus.REJECTED).count(),
+        "failed": PendingOutbound.objects.filter(status=OutboundStatus.FAILED).count(),
     }
 
     items = list(queryset[:100])

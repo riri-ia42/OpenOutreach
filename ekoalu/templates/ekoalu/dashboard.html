@@ -46,7 +46,7 @@
 </section>
 
     <!-- Messages sortants en attente de validation -->
-    {% if pending_outbound_count > 0 or approved_outbound_count > 0 %}
+    {% if pending_outbound_count > 0 or approved_outbound_count > 0 or failed_outbound_count > 0 %}
     <section>
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-gray-900">
@@ -64,7 +64,7 @@
                 Tout voir →
             </a>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <a href="/ekoalu/messages/?status=pending" class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 hover:bg-yellow-100">
                 <div class="text-xs text-yellow-800 uppercase tracking-wide">En attente validation</div>
                 <div class="text-3xl font-bold text-yellow-900 mt-1">{{ pending_outbound_count }}</div>
@@ -74,6 +74,11 @@
                 <div class="text-xs text-blue-800 uppercase tracking-wide">Approuvés à envoyer</div>
                 <div class="text-3xl font-bold text-blue-900 mt-1">{{ approved_outbound_count }}</div>
                 <div class="text-xs text-blue-700 mt-1">en attente d'envoi par le daemon</div>
+            </a>
+            <a href="/ekoalu/messages/?status=failed" class="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 {% if failed_outbound_count == 0 %}opacity-50{% endif %}">
+                <div class="text-xs text-red-800 uppercase tracking-wide">Échecs envoi</div>
+                <div class="text-3xl font-bold text-red-900 mt-1">{{ failed_outbound_count }}</div>
+                <div class="text-xs text-red-700 mt-1">erreur technique — à requeue</div>
             </a>
         </div>
     </section>
