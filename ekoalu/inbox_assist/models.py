@@ -13,7 +13,18 @@ from ekoalu.inbox_assist.intent_classifier import Intent
 
 
 class PendingReply(models.Model):
-    """Brouillon de réponse en attente de validation Richard."""
+    """Brouillon de réponse en attente de validation Richard.
+
+    Supporte 2 canaux : LinkedIn (depuis V1) et Email (depuis brique D 27/05/2026).
+    Pour le canal email :
+    - `inbound_message_id` = ID Graph du mail original (idempotence sur poll)
+    - `sender_email` = adresse de l'expéditeur (matché au Lead.contact_email)
+    - `inbound_subject` = sujet du mail entrant (pour reply "Re: ...")
+    """
+
+    CHANNEL_LINKEDIN = "linkedin"
+    CHANNEL_EMAIL = "email"
+    CHANNEL_CHOICES = [(CHANNEL_LINKEDIN, "LinkedIn"), (CHANNEL_EMAIL, "Email")]
 
     class Status(models.TextChoices):
         PENDING = "pending", "En attente validation"
@@ -24,6 +35,19 @@ class PendingReply(models.Model):
     # (lazy reference par identifiant LinkedIn)
     prospect_public_id = models.CharField(max_length=128, db_index=True)
     campaign_id = models.IntegerField(null=True, blank=True, db_index=True)
+
+    # Canal de la conversation
+    channel = models.CharField(
+        max_length=16, choices=CHANNEL_CHOICES,
+        default=CHANNEL_LINKEDIN, db_index=True,
+    )
+    # Spécifique email — vide si channel=linkedin
+    inbound_message_id = models.CharField(
+        max_length=200, blank=True, db_index=True,
+        help_text="ID Graph du message email entrant (idempotence sur poll)",
+    )
+    inbound_subject = models.CharField(max_length=300, blank=True)
+    sender_email = models.CharField(max_length=255, blank=True, db_index=True)
 
     inbound_message = models.TextField(help_text="Message du prospect")
     intent = models.CharField(
@@ -52,10 +76,11 @@ class PendingReply(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["channel", "status"]),
         ]
 
     def __str__(self) -> str:
-        return f"PendingReply({self.prospect_public_id}, {self.intent}, {self.status})"
+        return f"PendingReply({self.channel}, {self.prospect_public_id}, {self.intent}, {self.status})"
 
 
 class CorrectionExample(models.Model):

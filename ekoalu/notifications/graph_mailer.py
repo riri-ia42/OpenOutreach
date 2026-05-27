@@ -155,3 +155,58 @@ def is_configured() -> bool:
         return True
     except GraphConfigError:
         return False
+
+
+def list_inbox_messages(*, since_iso_utc: str, max_n: int = 50) -> list[dict]:
+    """Récupère les messages de la boîte de réception depuis `since_iso_utc`.
+
+    Args:
+        since_iso_utc: borne basse au format ISO 8601 UTC, ex "2026-05-27T08:00:00Z".
+            Tous les messages avec `receivedDateTime >= since_iso_utc` sont retournés.
+        max_n: nombre max de messages à récupérer (cap Graph $top, défaut 50).
+
+    Returns:
+        Liste de dicts normalisés : `{id, subject, from_email, from_name,
+        received_at, body_text, body_html, is_read}`. Ordre = plus récent d'abord.
+
+    Raises:
+        GraphConfigError, GraphAuthError, GraphSendError (mauvais nom mais réutilisé).
+    """
+    user_email = _required("GRAPH_USER_EMAIL")
+    token = _get_access_token()
+
+    # On filtre côté serveur pour limiter le volume. $select pour économiser bande.
+    params = {
+        "$filter": f"receivedDateTime ge {since_iso_utc}",
+        "$orderby": "receivedDateTime desc",
+        "$top": str(min(max_n, 100)),
+        "$select": "id,subject,from,receivedDateTime,bodyPreview,body,isRead",
+    }
+    resp = requests.get(
+        f"{GRAPH_BASE}/users/{user_email}/mailFolders/Inbox/messages",
+        params=params,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Prefer": "outlook.body-content-type='text'",  # body en text plain
+        },
+        timeout=30,
+    )
+    if not resp.ok:
+        raise GraphSendError(f"list_inbox_messages {resp.status_code}: {resp.text[:300]}")
+
+    data = resp.json()
+    messages = []
+    for raw in data.get("value", []):
+        from_addr = (raw.get("from") or {}).get("emailAddress") or {}
+        body = raw.get("body") or {}
+        messages.append({
+            "id": raw.get("id", ""),
+            "subject": raw.get("subject", "") or "",
+            "from_email": (from_addr.get("address") or "").lower(),
+            "from_name": from_addr.get("name") or "",
+            "received_at": raw.get("receivedDateTime", ""),
+            "body_text": body.get("content", "") or raw.get("bodyPreview", ""),
+            "body_html": "",  # on a forcé content-type=text via Prefer
+            "is_read": bool(raw.get("isRead", False)),
+        })
+    return messages
