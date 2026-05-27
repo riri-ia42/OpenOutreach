@@ -46,6 +46,14 @@ class AccountSession:
 
         if not self.page or self.page.is_closed():
             logger.debug("Launching/recovering browser for %s", self)
+            # Si une instance Playwright precedente est encore vivante (page
+            # morte sur timeout mais self.playwright pas stoppe), sa loop
+            # asyncio tourne toujours dans le greenlet. sync_playwright().start()
+            # detecte cette loop running et leve :
+            #   "Playwright Sync API inside the asyncio loop"
+            # Cf. scripts/test_asyncio_relaunch_bug.py pour la reproduction.
+            if self.playwright is not None:
+                self.close()
             start_browser_session(session=self)
         else:
             self._maybe_refresh_cookies()

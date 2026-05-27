@@ -16,7 +16,9 @@ ou l'étape Django Admin à suivre.
 
 ### 1. ZOMBIE_ASYNCIO
 - **Symptôme** : `HEALTH.status = "ZOMBIE_ASYNCIO"`, pattern `"Playwright Sync API inside the asyncio loop"` dans `daemon_log_tail`.
-- **Cause racine fixée le 22/05/2026** par isolation thread `pydantic_ai.Agent.run_sync` dans `linkedin/llm.py`. Si ça revient, c'est qu'un nouveau code touche Playwright sync depuis un thread qui a une boucle asyncio populée.
+- **Cause racine #1 fixée le 22/05/2026** par isolation thread `pydantic_ai.Agent.run_sync` dans `linkedin/llm.py`.
+- **Cause racine #2 fixée le 27/05/2026** : `session.ensure_browser()` relançait `sync_playwright().start()` sans fermer l'instance précédente. La loop asyncio de l'ancienne instance (vivante dans son greenlet) faisait planter la nouvelle. Fix dans `linkedin/browser/session.py:ensure_browser` (close avant relance). Repro : `scripts/test_asyncio_relaunch_bug.py`.
+- **Si ça revient malgré ces 2 fixes** : un nouveau chemin de relance Playwright a été ajouté sans `close()` préalable, OU un autre code touche Playwright sync depuis un thread qui a une boucle asyncio populée. Chercher tous les `sync_playwright()` et `start_browser_session` ajoutés récemment.
 - **Action immédiate** : `toggle_kill_switch_on` pour stopper l'emballement coût + mail escalate à Richard pour investigation code.
 
 ### 2. ZOMBIE_NO_PROGRESS
