@@ -37,6 +37,10 @@ class PendingOutbound(models.Model):
 
     # Message
     kind = models.CharField(max_length=16, choices=OutboundKind.choices, db_index=True)
+    subject = models.CharField(
+        max_length=300, blank=True,
+        help_text="Objet email (rempli uniquement pour kind=email_*, vide sinon)",
+    )
     ai_draft = models.TextField(help_text="Message généré par l'IA (Claude)")
     final_content = models.TextField(
         blank=True,

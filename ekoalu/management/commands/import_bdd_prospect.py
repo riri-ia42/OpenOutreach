@@ -174,6 +174,7 @@ class Command(BaseCommand):
 
         # Insertion réelle
         from crm.models import Lead
+        from ekoalu.email_canal.models import EmailLeadData
         created = 0
         skipped_dup = 0
         errors = 0
@@ -189,11 +190,26 @@ class Command(BaseCommand):
                     skipped_dup += 1
                     continue
                 try:
-                    Lead.objects.create(
+                    lead = Lead.objects.create(
                         linkedin_url=url,
                         public_identifier=public_id,
                         contact_email=c.email,
                         contact_email_source=CONTACT_EMAIL_SOURCE,
+                    )
+                    EmailLeadData.objects.create(
+                        lead=lead,
+                        source=EmailLeadData.SOURCE_BDD_PROSPECT,
+                        siren=c.siren,
+                        entreprise=c.entreprise,
+                        dirigeant=c.dirigeant,
+                        code_naf=c.code_naf,
+                        activite=c.activite,
+                        cp=c.cp,
+                        dpt=c.dpt,
+                        ville=c.ville,
+                        effectif_min=c.effectif_min,
+                        effectif_max=c.effectif_max,
+                        raw_json=c.raw,
                     )
                     created += 1
                 except Exception as exc:  # noqa: BLE001 — on log + compte, on continue

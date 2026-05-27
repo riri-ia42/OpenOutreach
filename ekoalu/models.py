@@ -5,6 +5,7 @@ Re-exporte les modèles des sous-modules pour que Django les détecte.
 from ekoalu.company_validation.abm import AbmCampaignLink
 from ekoalu.company_validation.models import ApprovedCompany
 from ekoalu.doctor.models import DoctorAction, DoctorIncident
+from ekoalu.email_canal.models import EmailLeadData
 from ekoalu.follow_up.models import CampaignDmConfig
 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
 from ekoalu.llm_usage.models import ClaudeUsageLog
@@ -22,4 +23,5 @@ __all__ = [
     "QualificationFeedback",
     "DoctorIncident",
     "DoctorAction",
+    "EmailLeadData",
 ]

@@ -304,6 +304,25 @@ class TestImportCommand:
         assert alice.linkedin_url == "https://bdd-prospect.local/siren/111111111"
         assert alice.contact_email_source == CONTACT_EMAIL_SOURCE
 
+    def test_email_lead_data_persistee(self, fixture_source, db):
+        """L'import crée aussi un EmailLeadData avec NAF/dirigeant/effectif."""
+        from crm.models import Lead
+        from ekoalu.email_canal.models import EmailLeadData
+
+        call_command("import_bdd_prospect", source=str(fixture_source), stdout=StringIO())
+        alice = Lead.objects.get(contact_email="alice.martin@bat-pro.fr")
+        data = alice.email_data  # related_name="email_data"
+        assert data.source == EmailLeadData.SOURCE_BDD_PROSPECT
+        assert data.siren == "111111111"
+        assert data.code_naf == "41.20B"
+        assert data.dirigeant == "ALICE MARTIN"
+        assert data.entreprise == "ACME BAT"
+        assert data.effectif_min == 15
+        assert data.effectif_max == 49
+        assert data.ville == "LYON"
+        # raw_json conservé pour debug/retraitement
+        assert data.raw_json["email"] == "alice.martin@bat-pro.fr"
+
     def test_idempotence_skip_doublon_email(self, fixture_source, db):
         from crm.models import Lead
         # 1er import : crée 2 leads
