@@ -96,7 +96,18 @@ def process_message(msg: dict, *, generate_draft=True) -> str:
         pass
 
     body_text = msg.get("body_text", "") or ""
-    intent: Intent = classify_intent(body_text)
+    intent = classify_intent(body_text)
+
+    # RGPD : intent OPT_OUT déclenche un désabonnement IMMÉDIAT du Lead.
+    # On ne dépend pas de la validation de Richard pour cesser tout envoi futur.
+    # Le brouillon de réponse continue à être généré (Richard confirme au prospect),
+    # mais aucun cold mail ni reply ne partira plus à ce contact entretemps.
+    if intent.value == "opt_out" and lead.unsubscribed_at is None:
+        from django.utils import timezone
+        lead.unsubscribed_at = timezone.now()
+        lead.save(update_fields=["unsubscribed_at"])
+        logger.info("Lead %s auto-désinscrit (intent OPT_OUT détecté sur msg %s)",
+                    lead.public_identifier, msg_id)
 
     if generate_draft:
         draft = generate_email_reply(

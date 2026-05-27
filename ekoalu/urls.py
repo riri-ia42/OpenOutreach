@@ -18,6 +18,7 @@ urlpatterns = [
     path("leads/<str:slug>/", views.lead_detail, name="lead_detail"),
     path("companies/", views.companies_list, name="companies_list"),
     path("inbox/", views.inbox, name="inbox"),
+    path("inbox/reply/<int:pk>/action/", views.email_reply_action, name="email_reply_action"),
     path("companies-validation/", views.companies_validation, name="companies_validation"),
     path("deals/", views.deals_filtered, name="deals_filtered"),
     path("usage/", views.usage, name="usage"),

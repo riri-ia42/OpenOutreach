@@ -423,6 +423,12 @@ def inbox(request):
         status=PendingReply.Status.PENDING,
     ).order_by("-created_at")[:20]
 
+    # Pipeline canal email : APPROVED + FAILED (en plus des PENDING ci-dessus)
+    email_in_flight = PendingReply.objects.filter(
+        channel=PendingReply.CHANNEL_EMAIL,
+        status__in=[PendingReply.Status.APPROVED, PendingReply.Status.FAILED],
+    ).order_by("-created_at")[:10]
+
     # Conversations actives : derniers messages reçus (is_outgoing=False)
     lead_ct = ContentType.objects.get_for_model(Lead)
     recent_inbound = (
@@ -453,8 +459,49 @@ def inbox(request):
     return render(request, "ekoalu/inbox.html", {
         "pending_replies": pending_replies,
         "pending_count": pending_replies.count(),
+        "email_in_flight": email_in_flight,
         "conversations": conversations_list,
     })
+
+
+@staff_member_required
+@require_POST
+def email_reply_action(request, pk: int):
+    """Actions sur un PendingReply EMAIL : approve / discard / save_draft.
+
+    Restreint à `channel=email` — pour les PR LinkedIn, Richard utilise
+    encore l'admin Django (envoi manuel hors pipeline).
+    """
+    pr = get_object_or_404(PendingReply, pk=pk)
+    if pr.channel != PendingReply.CHANNEL_EMAIL:
+        django_messages.error(request, "Action réservée aux brouillons email.")
+        return redirect("ekoalu:inbox")
+
+    action = request.POST.get("action", "")
+    final_sent = request.POST.get("final_sent", "").strip()
+
+    if action == "approve":
+        pr.final_sent = final_sent  # peut être vide → reply_sender prendra ai_draft
+        pr.status = PendingReply.Status.APPROVED
+        pr.error_message = ""
+        pr.save(update_fields=["final_sent", "status", "error_message"])
+        django_messages.success(
+            request,
+            f"Réponse #{pr.pk} approuvée — sera envoyée au prochain "
+            f"`send_approved_email_replies`.",
+        )
+    elif action == "discard":
+        pr.status = PendingReply.Status.DISCARDED
+        pr.save(update_fields=["status"])
+        django_messages.warning(request, f"Réponse #{pr.pk} abandonnée.")
+    elif action == "save_draft":
+        pr.final_sent = final_sent
+        pr.save(update_fields=["final_sent"])
+        django_messages.info(request, f"Brouillon #{pr.pk} sauvegardé.")
+    else:
+        django_messages.error(request, f"Action inconnue : {action!r}.")
+
+    return redirect("ekoalu:inbox")
 
 
 @staff_member_required

@@ -57,6 +57,12 @@ class DailyStats:
     invitations_sent: int
     follow_ups_sent: int
     messages_pending_validation: int
+    # Canal email (brique F)
+    email_cold_sent: int
+    email_replies_received: int
+    email_replies_pending: int
+    email_replies_sent: int
+    email_unsubscribed: int
     tasks_completed: int
     tasks_failed: int
     accept_rate_today: float | None
@@ -142,7 +148,28 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
     )
     invitations_sent = outbound_today.filter(kind="invitation").count()
     follow_ups_sent = outbound_today.filter(kind="follow_up").count()
+    email_cold_sent = outbound_today.filter(kind="email_cold").count()
     messages_pending_validation = PendingOutbound.objects.filter(status=OutboundStatus.PENDING).count()
+
+    # Canal email — réponses (PendingReply) reçues / envoyées / pending
+    from ekoalu.inbox_assist.models import PendingReply
+    email_replies_received = PendingReply.objects.filter(
+        channel=PendingReply.CHANNEL_EMAIL,
+        created_at__gte=day_start, created_at__lt=day_end,
+    ).count()
+    email_replies_sent = PendingReply.objects.filter(
+        channel=PendingReply.CHANNEL_EMAIL,
+        status=PendingReply.Status.SENT,
+        sent_at__gte=day_start, sent_at__lt=day_end,
+    ).count()
+    email_replies_pending = PendingReply.objects.filter(
+        channel=PendingReply.CHANNEL_EMAIL,
+        status=PendingReply.Status.PENDING,
+    ).count()
+    email_unsubscribed = Lead.objects.filter(
+        unsubscribed_at__gte=day_start, unsubscribed_at__lt=day_end,
+        contact_email__isnull=False,
+    ).exclude(contact_email="").count()
 
     tasks_today_completed = Task.objects.filter(
         completed_at__gte=day_start, completed_at__lt=day_end, status="completed"
@@ -199,6 +226,11 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         invitations_sent=invitations_sent,
         follow_ups_sent=follow_ups_sent,
         messages_pending_validation=messages_pending_validation,
+        email_cold_sent=email_cold_sent,
+        email_replies_received=email_replies_received,
+        email_replies_pending=email_replies_pending,
+        email_replies_sent=email_replies_sent,
+        email_unsubscribed=email_unsubscribed,
         tasks_completed=tasks_today_completed,
         tasks_failed=tasks_today_failed,
         accept_rate_today=accept_rate,
@@ -335,6 +367,20 @@ def render_html(s: DailyStats) -> str:
       </td></tr>
 </table>
 
+<h2 style="color: #1f2937;">Canal email</h2>
+<table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;"><strong>Cold mails envoyes</strong></td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: bold; color: #7c3aed;">{s.email_cold_sent}</td></tr>
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Reponses recues</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #16a34a;">{s.email_replies_received}</td></tr>
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Reponses envoyees</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">{s.email_replies_sent}</td></tr>
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Brouillons reponse en attente validation</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #ea580c;">{s.email_replies_pending}</td></tr>
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Desabonnements (RGPD)</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #6b7280;">{s.email_unsubscribed}</td></tr>
+</table>
+
 <h2 style="color: #1f2937;">Par campagne</h2>
 <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
   <thead><tr style="background: #f3f4f6;">
@@ -376,6 +422,13 @@ def render_text(s: DailyStats) -> str:
         f"En attente validation: {s.messages_pending_validation}",
         f"Taux acceptation     : {accept}",
         f"Cout Claude          : {s.claude_cost_usd:.3f} $",
+        "",
+        "-- Canal email --",
+        f"Cold mails envoyes   : {s.email_cold_sent}",
+        f"Reponses recues      : {s.email_replies_received}",
+        f"Reponses envoyees    : {s.email_replies_sent}",
+        f"Brouillons en attente: {s.email_replies_pending}",
+        f"Desabonnements RGPD  : {s.email_unsubscribed}",
         f"Tasks completed/failed: {s.tasks_completed} / {s.tasks_failed}",
         "",
         "Dashboard : http://ekoalu-prospection:3210/ekoalu/",
