@@ -151,6 +151,7 @@ class Command(BaseCommand):
                 subject=draft.subject,
                 ai_draft=draft.body,
                 status=OutboundStatus.PENDING,
+                prompt_variant=draft.variant_used,
             )
             created += 1
 

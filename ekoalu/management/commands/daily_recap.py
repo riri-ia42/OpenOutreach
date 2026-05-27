@@ -63,6 +63,8 @@ class DailyStats:
     email_replies_pending: int
     email_replies_sent: int
     email_unsubscribed: int
+    # A/B testing brique H : compte cold mails envoyés par variante (cumulatif total)
+    email_cold_by_variant: dict[str, int]
     tasks_completed: int
     tasks_failed: int
     accept_rate_today: float | None
@@ -171,6 +173,19 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         contact_email__isnull=False,
     ).exclude(contact_email="").count()
 
+    # A/B testing : breakdown des cold mails envoyés par variante (TOUT historique,
+    # pas seulement du jour, car on veut comparer sur des volumes significatifs)
+    email_cold_by_variant_qs = (
+        PendingOutbound.objects
+        .filter(kind="email_cold", status=OutboundStatus.SENT)
+        .exclude(prompt_variant="")
+        .values("prompt_variant")
+        .annotate(n=Count("id"))
+        .order_by("prompt_variant")
+    )
+    email_cold_by_variant = {row["prompt_variant"]: row["n"]
+                              for row in email_cold_by_variant_qs}
+
     tasks_today_completed = Task.objects.filter(
         completed_at__gte=day_start, completed_at__lt=day_end, status="completed"
     ).count()
@@ -231,6 +246,7 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         email_replies_pending=email_replies_pending,
         email_replies_sent=email_replies_sent,
         email_unsubscribed=email_unsubscribed,
+        email_cold_by_variant=email_cold_by_variant,
         tasks_completed=tasks_today_completed,
         tasks_failed=tasks_today_failed,
         accept_rate_today=accept_rate,
@@ -308,6 +324,17 @@ def _render_system_banner(sys_status: SystemStatus, period: str) -> str:
     )
 
 
+def _render_ab_rows(by_variant: dict[str, int]) -> str:
+    if not by_variant:
+        return ("<tr><td colspan='2' style='color:#6b7280;padding:6px'>"
+                "(aucun cold mail envoye, A/B testing en attente de donnees)</td></tr>")
+    return "\n".join(
+        f"<tr><td style='padding:6px'>{v}</td>"
+        f"<td style='padding:6px;text-align:right;font-weight:bold'>{n}</td></tr>"
+        for v, n in sorted(by_variant.items())
+    )
+
+
 def render_html(s: DailyStats) -> str:
     day_str = s.day.strftime("%A %d %B %Y").replace("January", "janvier").replace(
         "February", "fevrier").replace("March", "mars").replace("April", "avril").replace(
@@ -381,6 +408,15 @@ def render_html(s: DailyStats) -> str:
       <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #6b7280;">{s.email_unsubscribed}</td></tr>
 </table>
 
+<h3 style="color: #1f2937; margin-top: 16px;">A/B testing prompts cold mail (cumul)</h3>
+<table style="width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px;">
+  <thead><tr style="background: #f3f4f6;">
+    <th style="padding: 6px; text-align: left;">Variante</th>
+    <th style="padding: 6px; text-align: right;">Cold mails envoyés</th>
+  </tr></thead>
+  <tbody>{_render_ab_rows(s.email_cold_by_variant)}</tbody>
+</table>
+
 <h2 style="color: #1f2937;">Par campagne</h2>
 <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
   <thead><tr style="background: #f3f4f6;">
@@ -429,6 +465,12 @@ def render_text(s: DailyStats) -> str:
         f"Reponses envoyees    : {s.email_replies_sent}",
         f"Brouillons en attente: {s.email_replies_pending}",
         f"Desabonnements RGPD  : {s.email_unsubscribed}",
+        "",
+        "A/B prompts (cumul):",
+        *(
+            [f"  - {v:8} : {n} envoyes" for v, n in sorted(s.email_cold_by_variant.items())]
+            or ["  (aucun envoi avec variante)"]
+        ),
         f"Tasks completed/failed: {s.tasks_completed} / {s.tasks_failed}",
         "",
         "Dashboard : http://ekoalu-prospection:3210/ekoalu/",

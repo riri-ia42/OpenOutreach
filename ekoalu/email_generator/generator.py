@@ -14,7 +14,12 @@ import re
 
 from ekoalu import conf
 from ekoalu.email_generator.models import ColdEmailDraft
-from ekoalu.email_generator.prompts import build_user_message, render_system_prompt
+from ekoalu.email_generator.prompts import (
+    DEFAULT_VARIANT,
+    build_user_message,
+    pick_variant,
+    render_system_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,18 +82,25 @@ def generate_cold_email(
     effectif_max: int = 0,
     model: str | None = None,
     max_tokens: int = 900,
+    variant: str | None = None,
 ) -> ColdEmailDraft:
     """Génère un cold mail EKOALU pour les données prospect fournies.
 
-    Retourne `ColdEmailDraft(subject="", body="")` si la génération a échoué
-    (pas d'API key, erreur réseau, parse foiré).
+    Args:
+        variant: id de la variante de prompt à utiliser (cf. PROMPT_VARIANTS).
+            Si None, tirage aléatoire pondéré via pick_variant() (A/B testing).
+
+    Retourne `ColdEmailDraft(subject="", body="")` si la génération a échoué.
+    `variant_used` est rempli systématiquement (même en cas d'échec) pour audit.
     """
+    chosen_variant = variant or pick_variant()
+
     client = _get_anthropic_client()
     if not client:
         logger.warning("Pas de client Anthropic, génération impossible")
-        return ColdEmailDraft(subject="", body="")
+        return ColdEmailDraft(subject="", body="", variant_used=chosen_variant)
 
-    system = render_system_prompt()
+    system = render_system_prompt(chosen_variant)
     user_msg = build_user_message(
         entreprise=entreprise, dirigeant=dirigeant, code_naf=code_naf,
         activite=activite, ville=ville, dpt=dpt,
@@ -106,9 +118,10 @@ def generate_cold_email(
         raw = (resp.content[0].text if resp.content else "").strip()
     except Exception as exc:  # noqa: BLE001 — on log + retourne vide pour que l'appelant skip
         logger.exception("Échec génération cold mail : %s", exc)
-        return ColdEmailDraft(subject="", body="")
+        return ColdEmailDraft(subject="", body="", variant_used=chosen_variant)
 
     draft = parse_response(raw)
+    draft.variant_used = chosen_variant
     if not draft.is_valid():
         logger.warning("Cold mail parse vide ou incomplet (subject=%r, body chars=%d)",
                        draft.subject, len(draft.body))

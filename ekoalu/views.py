@@ -226,6 +226,31 @@ def lead_detail(request, slug: str):
             lead.save()
             django_messages.success(request, "Prospect requalifié.")
             return redirect("ekoalu:lead_detail", slug=slug)
+        elif action == "unsubscribe_email":
+            # Désinscription RGPD canal email — empêche tout envoi futur
+            # (cold mail et reply). Conserve toute la trace en DB pour audit.
+            if lead.unsubscribed_at is None:
+                lead.unsubscribed_at = timezone.now()
+                lead.save(update_fields=["unsubscribed_at"])
+                django_messages.warning(
+                    request,
+                    "Lead désinscrit du canal email (RGPD). Aucun envoi futur.",
+                )
+            else:
+                django_messages.info(
+                    request,
+                    f"Lead déjà désinscrit depuis {lead.unsubscribed_at:%d/%m/%Y %H:%M}.",
+                )
+            return redirect("ekoalu:lead_detail", slug=slug)
+        elif action == "resubscribe_email":
+            # Annule la désinscription (cas erreur Richard / changement d'avis prospect)
+            if lead.unsubscribed_at is not None:
+                lead.unsubscribed_at = None
+                lead.save(update_fields=["unsubscribed_at"])
+                django_messages.success(
+                    request, "Lead réabonné au canal email (envois autorisés).",
+                )
+            return redirect("ekoalu:lead_detail", slug=slug)
         elif action == "reassign":
             # G1 : creer un Deal Qualified sur une campagne existante
             target_id = request.POST.get("target_campaign_id")
@@ -485,6 +510,21 @@ def email_reply_action(request, pk: int):
         pr.status = PendingReply.Status.APPROVED
         pr.error_message = ""
         pr.save(update_fields=["final_sent", "status", "error_message"])
+
+        # Apprentissage : si Richard a édité (final != draft), capture l'exemple
+        # pour few-shot dans les prochaines générations (groupé par intent).
+        learn_note = request.POST.get("learn_note", "").strip()
+        if final_sent.strip() and final_sent.strip() != pr.ai_draft.strip():
+            try:
+                CorrectionExample.from_pending(
+                    pr,
+                    persona_slug=f"email_reply_{pr.intent}",
+                    explanation=learn_note,
+                )
+            except Exception:  # noqa: BLE001 — apprentissage best-effort
+                import logging
+                logging.exception("CorrectionExample (email reply) creation failed")
+
         django_messages.success(
             request,
             f"Réponse #{pr.pk} approuvée — sera envoyée au prochain "

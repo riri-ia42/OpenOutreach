@@ -47,7 +47,7 @@
             <div>{{ lead.update_date|date:"d/m/Y H:i" }}</div>
         </div>
     </div>
-    <form method="post" class="mt-4 pt-4 border-t border-gray-200 flex gap-2">
+    <form method="post" class="mt-4 pt-4 border-t border-gray-200 flex gap-2 flex-wrap">
         {% csrf_token %}
         {% if lead.disqualified %}
         <button type="submit" name="action" value="requalify"
@@ -60,11 +60,42 @@
             ✗ Disqualifier (permanent)
         </button>
         {% endif %}
+
+        {% if lead.contact_email %}
+            {% if lead.unsubscribed_at %}
+            <button type="submit" name="action" value="resubscribe_email"
+                    class="px-4 py-2 bg-green-100 text-green-800 text-sm rounded hover:bg-green-200"
+                    title="Réabonne le lead au canal email (annule la désinscription du {{ lead.unsubscribed_at|date:'d/m/Y H:i' }}).">
+                ↺ Réabonner canal email
+            </button>
+            {% else %}
+            <button type="submit" name="action" value="unsubscribe_email"
+                    onclick="return confirm('Désinscrire ce lead du canal email ? Plus aucun cold mail ni reply ne partira (RGPD). Réversible.')"
+                    class="px-4 py-2 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
+                    title="Bloque tout envoi futur côté canal email (RGPD art. 21). Réversible.">
+                ✉ Désinscrire canal email
+            </button>
+            {% endif %}
+        {% endif %}
+
         <a href="{{ linkedin_url }}" target="_blank"
            class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
             Voir sur LinkedIn ↗
         </a>
     </form>
+
+    {% if lead.contact_email %}
+    <div class="mt-3 text-xs text-gray-600">
+        Canal email : <span class="font-mono">{{ lead.contact_email }}</span>
+        {% if lead.unsubscribed_at %}
+        <span class="ml-2 px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+            désinscrit depuis le {{ lead.unsubscribed_at|date:"d/m/Y H:i" }}
+        </span>
+        {% else %}
+        <span class="ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-800">actif</span>
+        {% endif %}
+    </div>
+    {% endif %}
 </section>
 
 <!-- G1 + G2 : Affectation campagnes -->

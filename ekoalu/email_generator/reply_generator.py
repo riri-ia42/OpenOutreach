@@ -96,6 +96,47 @@ def _render_reply_system_prompt(intent: Intent) -> str:
     )
 
 
+def _build_few_shot_for_intent(intent: Intent, limit: int = 6) -> str:
+    """Construit un bloc few-shot depuis les CorrectionExample passés.
+
+    Filtré sur persona_slug=`email_reply_{intent}` — Richard a édité un brouillon
+    pour ce type d'intent dans le passé, on apprend de sa version.
+    Renvoie une chaîne vide si pas d'exemples.
+    """
+    try:
+        from ekoalu.inbox_assist.models import CorrectionExample
+    except Exception:  # noqa: BLE001 — bootstrap (Django pas prêt)
+        return ""
+
+    slug = f"email_reply_{intent.value}"
+    qs = (
+        CorrectionExample.objects
+        .filter(persona_slug=slug)
+        .select_related("pending_reply")
+        .order_by("-created_at")[:limit]
+    )
+    examples = list(qs)
+    if not examples:
+        return ""
+
+    lines = [
+        "",
+        "=== EXEMPLES DE RÉÉCRITURE RICHARD (apprends de ces corrections) ===",
+        "Pour cet intent, Richard a déjà retravaillé des brouillons précédents.",
+        "Inspire-toi de son style, pas du brouillon IA initial.",
+    ]
+    for ex in examples:
+        pr = ex.pending_reply
+        lines.append("---")
+        lines.append(f"Message reçu : {pr.inbound_message[:300]}")
+        lines.append(f"Brouillon IA : {pr.ai_draft[:300]}")
+        if pr.final_sent:
+            lines.append(f"Version Richard : {pr.final_sent[:300]}")
+        if ex.explanation:
+            lines.append(f"Raison de la correction : {ex.explanation[:200]}")
+    return "\n".join(lines)
+
+
 def _build_user_message(*, inbound_subject: str, inbound_message: str,
                         entreprise: str, dirigeant: str) -> str:
     parts = [
@@ -133,7 +174,7 @@ def generate_email_reply(
         logger.warning("Pas de client Anthropic, génération reply impossible")
         return ColdEmailDraft(subject="", body="")
 
-    system = _render_reply_system_prompt(intent)
+    system = _render_reply_system_prompt(intent) + _build_few_shot_for_intent(intent)
     user_msg = _build_user_message(
         inbound_subject=inbound_subject,
         inbound_message=inbound_message,

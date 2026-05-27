@@ -2,15 +2,23 @@
 
 Distille la BIBLE COMMERCIALE EKOALU (cf. C:\\...\\BIBLE_COMMERCIALE_EKOALU.md) :
 posture directe, vocabulaire technique, mots bannis, wedge niches techniques.
+
+A/B testing (brique H) :
+- `PROMPT_VARIANTS` registry : plusieurs system prompts différents
+- `pick_variant()` : tirage aléatoire pondéré pour assigner une variante au moment
+  de la génération. Permet de mesurer plus tard le taux de réponse par variante.
 """
 from __future__ import annotations
+
+import random
 
 from ekoalu import conf
 
 # Pondération : on inclut TOUJOURS la signature dans le prompt mais on l'ajoute
 # en post-traitement par sécurité (cf. generator.py).
 
-BASE_SYSTEM_PROMPT = """Tu rédiges des cold mails B2B pour Richard Gros, Président d'EKOALU
+# === VARIANTE V1 : posture wedge technique (focus niches/normes) =============
+BASE_SYSTEM_PROMPT_V1 = """Tu rédiges des cold mails B2B pour Richard Gros, Président d'EKOALU
 (menuiserie aluminium, acier et bois technique, Chasselay 69, tertiaire).
 
 CONTEXTE EKOALU :
@@ -74,10 +82,62 @@ BOOKING_URL : {booking_url_or_none}
 """
 
 
-def render_system_prompt() -> str:
-    """Injecte signature + booking URL dans le BASE_SYSTEM_PROMPT."""
+# === VARIANTE V2 : posture preuves chiffrées (focus livraisons concrètes) ====
+# Différence avec V1 : insiste sur les chiffres (atelier, livraisons réalisées,
+# délais respectés) plutôt que sur l'expertise technique abstraite.
+# Hypothèse Richard : dirigeants industriels accrochent plus aux faits concrets
+# qu'aux normes techniques. À mesurer sur 4-6 semaines.
+BASE_SYSTEM_PROMPT_V2 = BASE_SYSTEM_PROMPT_V1.replace(
+    "[Bloc 3 — EKOALU + niche (2-3 phrases)]\n"
+    "Présentation EKOALU avec MENTION OBLIGATOIRE d'au moins 1 produit niche technique\n"
+    "(coupe-feu EI30/60/120, désenfumage, mur-rideau, pare-balles BC1-4, grandes dimensions,\n"
+    "acoustique Rw>40). Adapte la niche au profil du prospect quand c'est pertinent\n"
+    "(ex : pour un constructeur tertiaire → coupe-feu + désenfumage ;\n"
+    "pour un architecte → mur-rideau + acoustique ; pour un BET → grandes dimensions + Rw).",
+
+    "[Bloc 3 — EKOALU + preuves chiffrées (2-3 phrases)]\n"
+    "Présentation EKOALU avec MENTION OBLIGATOIRE d'au moins 1 produit niche technique\n"
+    "(coupe-feu EI30/60/120, désenfumage, pare-balles BC1-4, mur-rideau, grandes dimensions,\n"
+    "acoustique Rw>40) ET au moins UNE preuve chiffrée concrète :\n"
+    "  - 'atelier intégré 20 personnes à Chasselay'\n"
+    "  - 'nous livrons une vingtaine de chantiers tertiaires/an en Rhône-Alpes'\n"
+    "  - 'PV essais coupe-feu/désenfumage/pare-balles disponibles sur demande'\n"
+    "  - 'délais tenus à 95 % sur les 50 derniers chantiers' (si pertinent au prospect)\n"
+    "Adapte la niche au profil (constructeur tertiaire → coupe-feu/désenfumage ;\n"
+    "architecte → mur-rideau/acoustique ; BET → grandes dimensions/Rw).",
+)
+
+
+# === Registre des variantes A/B ==============================================
+# Format : { variant_id: (prompt_template, weight) }
+# Le poids contrôle la fréquence de tirage. Ex : (1, 1) = 50/50.
+PROMPT_VARIANTS: dict[str, tuple[str, float]] = {
+    "v1": (BASE_SYSTEM_PROMPT_V1, 1.0),  # wedge technique pur
+    "v2": (BASE_SYSTEM_PROMPT_V2, 1.0),  # preuves chiffrées
+}
+
+DEFAULT_VARIANT = "v1"
+
+
+def pick_variant(variants: dict[str, tuple[str, float]] | None = None) -> str:
+    """Tire une variante au hasard, pondérée par les poids du registry.
+
+    Permet équilibrage A/B sur les 4-6 semaines de test. Renvoie l'id de
+    variante (ex "v1", "v2") pour stockage sur PendingOutbound.prompt_variant.
+    """
+    reg = variants if variants is not None else PROMPT_VARIANTS
+    if not reg:
+        return DEFAULT_VARIANT
+    ids = list(reg.keys())
+    weights = [reg[i][1] for i in ids]
+    return random.choices(ids, weights=weights, k=1)[0]
+
+
+def render_system_prompt(variant: str = DEFAULT_VARIANT) -> str:
+    """Injecte signature + booking URL dans la variante choisie."""
+    template, _weight = PROMPT_VARIANTS.get(variant, PROMPT_VARIANTS[DEFAULT_VARIANT])
     booking = conf.CALENDAR_BOOKING_URL or ""
-    return BASE_SYSTEM_PROMPT.format(
+    return template.format(
         signature_block=conf.render_signature(),
         booking_url=booking or "(aucun)",
         booking_url_or_none=booking or "(aucun lien fourni, ne pas inclure de lien)",

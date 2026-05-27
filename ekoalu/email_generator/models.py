@@ -11,6 +11,7 @@ class ColdEmailDraft:
     subject: str
     body: str
     model_used: str = ""
+    variant_used: str = ""  # id de la variante de prompt (A/B testing, brique H)
 
     def is_valid(self) -> bool:
         return bool(self.subject.strip()) and bool(self.body.strip())

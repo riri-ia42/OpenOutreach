@@ -41,6 +41,10 @@ class PendingOutbound(models.Model):
         max_length=300, blank=True,
         help_text="Objet email (rempli uniquement pour kind=email_*, vide sinon)",
     )
+    prompt_variant = models.CharField(
+        max_length=32, blank=True, db_index=True,
+        help_text="Variante de prompt Claude utilisée (A/B testing brique H, ex 'v1', 'v2')",
+    )
     ai_draft = models.TextField(help_text="Message généré par l'IA (Claude)")
     final_content = models.TextField(
         blank=True,
