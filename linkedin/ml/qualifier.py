@@ -5,12 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Protocol, runtime_checkable
 
-import jinja2
 import numpy as np
 from pydantic import BaseModel, Field
 from scipy.stats import norm
 
-from linkedin.conf import CAMPAIGN_CONFIG, PROMPTS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -44,30 +42,50 @@ class QualificationDecision(BaseModel):
     reason: str = Field(description="Brief explanation for the decision")
 
 
+_QUALIFY_SYSTEM_TEMPLATE = """You are a B2B lead qualification expert. Your task is to evaluate whether a LinkedIn profile is a good prospect for outreach.
+
+## Our Product/Service
+{product_docs}
+
+## Campaign Objective
+{campaign_objective}
+
+## Instructions
+Based on the LinkedIn profile provided by the user, determine if this person is a good prospect for our campaign objective.
+
+Consider:
+- Does their role/title align with our target audience?
+- Is their industry relevant to our product/service?
+- Do they have decision-making authority or influence?
+- Is their company size/type a good fit?"""
+
+
 def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: str) -> tuple[int, str]:
     """Call LLM to qualify a profile. Returns (label, reason).
 
     label: 1 = accept, 0 = reject.
+
+    Le prompt est decoupe en system stable (product_docs + objective + instructions)
+    pour beneficier du prompt caching Anthropic (auto-injecte via ekoalu/llm_usage/
+    patch.py:_inject_cache_control). Le profile_text variable passe en user prompt.
     """
     from pydantic_ai import Agent
 
     from linkedin.llm import get_llm_model
 
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
-    template = env.get_template("qualify_lead.j2")
-
-    prompt = template.render(
+    system_prompt = _QUALIFY_SYSTEM_TEMPLATE.format(
         product_docs=product_docs,
         campaign_objective=campaign_objective,
-        profile_text=profile_text,
     )
+    user_prompt = f"## LinkedIn Profile\n{profile_text}"
 
     agent = Agent(
         get_llm_model(),
         output_type=QualificationDecision,
+        system_prompt=system_prompt,
         model_settings={"temperature": 0.7, "timeout": 60},
     )
-    decision = agent.run_sync(prompt).output
+    decision = agent.run_sync(user_prompt).output
 
     label = 1 if decision.qualified else 0
     return (label, decision.reason)

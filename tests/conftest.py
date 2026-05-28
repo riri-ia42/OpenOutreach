@@ -28,6 +28,15 @@ def _mock_embeddings(request):
             yield
 
 
+@pytest.fixture(autouse=True)
+def _ignore_qualifier_kill_switch():
+    """Empeche le sentinel data/qualifier_disabled.flag (kill-switch ingestion
+    pose en prod par Richard) de bloquer les tests qui exercent
+    run_qualification."""
+    with patch("linkedin.pipeline.qualify._qualifier_disabled", return_value=False):
+        yield
+
+
 class FakeAccountSession:
     """Minimal stand-in for AccountSession — exposes django_user + campaign."""
 

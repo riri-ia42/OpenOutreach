@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import numpy as np
 from termcolor import colored
@@ -10,6 +11,26 @@ from termcolor import colored
 from linkedin.ml.qualifier import BayesianQualifier
 
 logger = logging.getLogger(__name__)
+
+
+def _qualifier_disabled() -> bool:
+    """Kill-switch ingestion : evite la qualification LLM tout en laissant
+    le daemon traiter les Deals existants (Pending/Ready/Connected/Completed).
+
+    Active via :
+    - env var ``DAEMON_DISABLE_QUALIFIER=1`` (deploy permanent au boot)
+    - OU fichier sentinel ``data/qualifier_disabled.flag`` (toggle live, lu a
+      chaque appel, pas besoin de redemarrer le daemon)
+
+    Cas d'usage : pic de consommation API (cf. 26-27/05/2026, 2000 qualif/jour
+    a 7.6$c piece) ou mise en pause volontaire le temps de revoir l'ICP /
+    filtres amont. Supprimer le fichier ou unset l'env var pour reprendre.
+    """
+    if os.environ.get("DAEMON_DISABLE_QUALIFIER", "").lower() in ("1", "true", "yes"):
+        return True
+    from django.conf import settings
+    sentinel = os.path.join(getattr(settings, "BASE_DIR", "."), "data", "qualifier_disabled.flag")
+    return os.path.exists(sentinel)
 
 
 def fetch_qualification_candidates(session):
@@ -44,6 +65,13 @@ def fetch_qualification_candidates(session):
 def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
     """Qualify one unlabelled profile via BALD/auto-decision/LLM. Returns public_id or None."""
     from linkedin.ml.qualifier import qualify_with_llm, format_prediction
+
+    if _qualifier_disabled():
+        logger.info(
+            "qualifier disabled via DAEMON_DISABLE_QUALIFIER -- "
+            "ingestion paused, daemon continues on existing deals",
+        )
+        return None
 
     candidates = fetch_qualification_candidates(session)
     if not candidates:
