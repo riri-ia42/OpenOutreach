@@ -148,6 +148,88 @@ class TestOutboundViews:
         assert po.status == OutboundStatus.REJECTED
         assert po.rejection_reason == "pas pertinent"
 
+    def test_outbound_reject_disqualifie_lead_et_stoppe_deals(self, client_logged):
+        """Refus = exclusion permanente du prospect (cf. _disqualify_leads_from_reject).
+
+        Sans ca, le daemon regenererait un nouveau PendingOutbound au cycle
+        suivant car _has_open_outbound ignore le statut REJECTED.
+        """
+        from crm.models import Deal, Lead
+        from crm.models.deal import Outcome
+        from ekoalu.outbound_validation.models import (
+            OutboundKind,
+            PendingOutbound,
+        )
+        from linkedin.enums import ProfileState
+        from linkedin.models import Campaign
+
+        lead = Lead.objects.create(
+            public_identifier="fabien-test",
+            linkedin_url="https://www.linkedin.com/in/fabien-test/",
+        )
+        camp_a = Campaign.objects.create(name="EKOALU - ABM Acial")
+        camp_b = Campaign.objects.create(name="EKOALU - ABM Vinci")
+        deal_a = Deal.objects.create(lead=lead, campaign=camp_a, state=ProfileState.CONNECTED.value)
+        deal_b = Deal.objects.create(lead=lead, campaign=camp_b, state=ProfileState.PENDING.value)
+        po = PendingOutbound.objects.create(
+            prospect_public_id="fabien-test",
+            campaign_id=camp_a.pk,
+            kind=OutboundKind.FOLLOW_UP,
+            ai_draft="draft",
+        )
+        r = client_logged.post(
+            reverse("ekoalu:outbound_detail", args=[po.pk]),
+            data={"action": "reject", "rejection_reason": "pas interessé"},
+        )
+        assert r.status_code in (302, 303)
+
+        lead.refresh_from_db()
+        deal_a.refresh_from_db()
+        deal_b.refresh_from_db()
+        assert lead.disqualified is True
+        assert deal_a.state == ProfileState.FAILED.value
+        assert deal_a.outcome == Outcome.NOT_INTERESTED.value
+        assert "Refus Richard" in deal_a.reason
+        # Deal cross-campagne stoppé aussi (sinon ABM Vinci continuerait à relancer)
+        assert deal_b.state == ProfileState.FAILED.value
+        assert deal_b.outcome == Outcome.NOT_INTERESTED.value
+
+    def test_outbound_bulk_reject_disqualifie_leads(self, client_logged):
+        from crm.models import Lead
+        from ekoalu.outbound_validation.models import (
+            OutboundKind,
+            OutboundStatus,
+            PendingOutbound,
+        )
+
+        lead1 = Lead.objects.create(public_identifier="alice-bulk",
+                                    linkedin_url="https://www.linkedin.com/in/alice-bulk/")
+        lead2 = Lead.objects.create(public_identifier="bob-bulk",
+                                    linkedin_url="https://www.linkedin.com/in/bob-bulk/")
+        po1 = PendingOutbound.objects.create(
+            prospect_public_id="alice-bulk", kind=OutboundKind.INVITATION, ai_draft="d1",
+        )
+        po2 = PendingOutbound.objects.create(
+            prospect_public_id="bob-bulk", kind=OutboundKind.FOLLOW_UP, ai_draft="d2",
+        )
+        r = client_logged.post(
+            reverse("ekoalu:outbound_list"),
+            data={
+                "bulk_action": "bulk_reject",
+                "bulk_reason": "test masse",
+                "selected_ids": f"{po1.pk},{po2.pk}",
+            },
+        )
+        assert r.status_code in (302, 303)
+        po1.refresh_from_db()
+        po2.refresh_from_db()
+        lead1.refresh_from_db()
+        lead2.refresh_from_db()
+        assert po1.status == OutboundStatus.REJECTED
+        assert po2.status == OutboundStatus.REJECTED
+        assert lead1.disqualified is True
+        assert lead2.disqualified is True
+
 
 @pytest.mark.django_db
 class TestLeadsAddView:

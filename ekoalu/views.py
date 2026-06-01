@@ -1080,11 +1080,17 @@ def outbound_list(request):
             django_messages.success(request, f"✓ {n} message(s) approuvé(s) — partira au prochain cycle daemon.")
         elif bulk_action == "bulk_reject":
             reason = request.POST.get("bulk_reason", "").strip() or "(rejet en masse)"
-            n = qs.exclude(status__in=[OutboundStatus.SENT, OutboundStatus.REJECTED]).update(
+            qs_active = qs.exclude(status__in=[OutboundStatus.SENT, OutboundStatus.REJECTED])
+            public_ids = list(qs_active.values_list("prospect_public_id", flat=True).distinct())
+            n = qs_active.update(
                 status=OutboundStatus.REJECTED,
                 rejection_reason=reason,
             )
-            django_messages.warning(request, f"✗ {n} message(s) refusé(s).")
+            n_leads, _ = _disqualify_leads_from_reject(public_ids, reason)
+            django_messages.warning(
+                request,
+                f"✗ {n} message(s) refusé(s) — {n_leads} prospect(s) retiré(s) du pipeline.",
+            )
         elif bulk_action == "bulk_mark_sent":
             n = qs.filter(status=OutboundStatus.APPROVED).update(
                 status=OutboundStatus.SENT,
@@ -1144,6 +1150,40 @@ def outbound_list(request):
         "now": timezone.localtime(),
     }
     return render(request, "ekoalu/outbound_list.html", context)
+
+
+def _disqualify_leads_from_reject(public_ids: list[str], reason: str) -> tuple[int, int]:
+    """Refus = exclusion permanente du prospect (toutes campagnes confondues).
+
+    Sans cette cascade, le dedup `_has_open_outbound` ne regarde que les statuts
+    PENDING/APPROVED/BLOCKED_COMPANY : un PendingOutbound REJECTED ne bloque rien
+    et le daemon regenere un nouveau message au cycle suivant.
+
+    Marque Lead.disqualified=True (exclusion cross-campagne, definitif) ET passe
+    tous les Deals non-terminaux en FAILED outcome=NOT_INTERESTED.
+    """
+    from crm.models import Deal, Lead
+    from crm.models.deal import Outcome
+    from linkedin.enums import ProfileState
+
+    clean = list({pid for pid in public_ids if pid})
+    if not clean:
+        return 0, 0
+
+    n_leads = Lead.objects.filter(
+        public_identifier__in=clean,
+        disqualified=False,
+    ).update(disqualified=True)
+
+    terminal = [ProfileState.COMPLETED.value, ProfileState.FAILED.value]
+    n_deals = Deal.objects.filter(
+        lead__public_identifier__in=clean,
+    ).exclude(state__in=terminal).update(
+        state=ProfileState.FAILED.value,
+        outcome=Outcome.NOT_INTERESTED.value,
+        reason=f"Refus Richard: {reason}"[:500],
+    )
+    return n_leads, n_deals
 
 
 def _persona_slug_for_outbound(outbound: PendingOutbound) -> str:
@@ -1313,10 +1353,18 @@ def outbound_detail(request, pk: int):
             return redirect("ekoalu:outbound_list")
 
         elif action == "reject":
+            rejection_reason = request.POST.get("rejection_reason", "")
             outbound.status = OutboundStatus.REJECTED
-            outbound.rejection_reason = request.POST.get("rejection_reason", "")
+            outbound.rejection_reason = rejection_reason
             outbound.save()
-            django_messages.warning(request, "Message refusé.")
+            n_leads, _ = _disqualify_leads_from_reject(
+                [outbound.prospect_public_id],
+                rejection_reason or "(sans raison)",
+            )
+            msg = "Message refusé."
+            if n_leads:
+                msg += " Prospect retiré du pipeline (Lead disqualifié)."
+            django_messages.warning(request, msg)
             return redirect("ekoalu:outbound_list")
 
         elif action == "save_draft":
