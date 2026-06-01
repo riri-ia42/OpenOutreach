@@ -1676,6 +1676,29 @@ def deals_filtered(request):
     return render(request, "ekoalu/deals_filtered.html", context)
 
 
+# ---- Budget guard : acquittement manuel par Richard ------------------
+
+@staff_member_required
+def budget_resume(request):
+    """Supprime le sentinel budget journalier pour reprendre les appels Claude.
+
+    Trigger : mail "[STOP] EKOALU prospection - budget journalier depasse"
+    Cf. ekoalu/llm_usage/budget_guard.py.
+    """
+    from ekoalu.llm_usage.budget_guard import acknowledge, daily_budget_usd
+
+    purged = acknowledge()
+    if purged:
+        django_messages.success(
+            request,
+            f"Sentinel budget acquitte. Les appels Claude reprennent. "
+            f"Seuil actuel : ${daily_budget_usd():.2f}/jour. Garde un oeil sur /ekoalu/usage/.",
+        )
+    else:
+        django_messages.info(request, "Aucun sentinel budget actif a acquitter.")
+    return redirect("ekoalu:usage")
+
+
 # ---- D : page detail consommation Claude API --------------------------
 
 @staff_member_required

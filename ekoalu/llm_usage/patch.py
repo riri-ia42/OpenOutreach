@@ -95,6 +95,31 @@ def _safe_log(model, usage_obj, duration_ms, context=""):
     except Exception as exc:
         logger.debug("ClaudeUsageLog write failed: %s", exc)
 
+    # Apres chaque log : verifie si le budget journalier est depasse (best-effort).
+    # Le sentinel ainsi cree bloquera les appels suivants via _check_budget_guard.
+    try:
+        from ekoalu.llm_usage.budget_guard import check_and_trigger_if_exceeded
+        check_and_trigger_if_exceeded()
+    except Exception:
+        logger.debug("budget_guard post-log check failed", exc_info=True)
+
+
+def _check_budget_guard() -> None:
+    """Raise BudgetExceededError si le sentinel budget journalier est actif.
+
+    Appele en debut de chaque wrapper Claude. Court-circuite l'API call entier
+    pour eviter de continuer a depenser tant que Richard n'a pas decide.
+    """
+    try:
+        from ekoalu.llm_usage.budget_guard import BudgetExceededError, is_budget_exceeded
+        if is_budget_exceeded():
+            raise BudgetExceededError(
+                "Budget journalier Claude depasse -- voir mail + acquitter via "
+                "/ekoalu/budget/resume/ ou attendre minuit (auto-reset)."
+            )
+    except ImportError:
+        return
+
 
 def _guess_context() -> str:
     """Devine le contexte d'appel.
@@ -164,6 +189,7 @@ def _handle_exception(exc: BaseException) -> None:
 
 def _make_sync_wrapper(original):
     def patched(self, *args, **kwargs):
+        _check_budget_guard()
         kwargs = _inject_cache_control(kwargs)
         t0 = time.perf_counter()
         try:
@@ -182,6 +208,7 @@ def _make_sync_wrapper(original):
 
 def _make_async_wrapper(original):
     async def patched(self, *args, **kwargs):
+        _check_budget_guard()
         kwargs = _inject_cache_control(kwargs)
         t0 = time.perf_counter()
         try:
