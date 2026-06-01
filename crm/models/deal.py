@@ -13,6 +13,8 @@ class Outcome(models.TextChoices):
     HAS_SOLUTION = "has_solution"
     BAD_TIMING = "bad_timing"
     UNRESPONSIVE = "unresponsive"
+    PRE_EXISTING_RELATION = "pre_existing_relation"
+    DUPLICATE_CAMPAIGN = "duplicate_campaign"
     UNKNOWN = "unknown"
 
 
@@ -34,7 +36,7 @@ class Deal(models.Model):
         default=ProfileState.QUALIFIED,
     )
     outcome = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=Outcome.choices,
         blank=True,
         default="",

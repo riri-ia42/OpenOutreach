@@ -82,14 +82,29 @@ def get_leads_for_qualification(session) -> list:
     """Leads eligible for qualification in the current campaign.
 
     Returns profile dicts for leads that are not permanently disqualified
-    and have no Deal in this campaign.
+    and have no Deal in this campaign. Also exclut les leads avec un Deal
+    deja "actif" dans une AUTRE campagne (QUALIFIED/READY/PENDING/CONNECTED/
+    COMPLETED) -- on evite de re-qualifier un meme contact pour chaque
+    campagne ABM (cf. cas Coline Bechu × 53 campagnes 06/01). Un Deal FAILED
+    dans une autre campagne ne bloque pas : un autre angle ABM est legitime.
     """
     from crm.models import Lead
+    from linkedin.enums import ProfileState
+
+    active_states = [
+        ProfileState.QUALIFIED.value,
+        ProfileState.READY_TO_CONNECT.value,
+        ProfileState.PENDING.value,
+        ProfileState.CONNECTED.value,
+        ProfileState.COMPLETED.value,
+    ]
 
     leads = Lead.objects.filter(
         disqualified=False,
     ).exclude(
         deal__campaign=session.campaign,
+    ).exclude(
+        deal__state__in=active_states,
     )
 
     return [lead.to_profile_dict() for lead in leads]

@@ -194,6 +194,42 @@ class TestGetLeadsForQualification:
         )
         assert len(get_leads_for_qualification(fake_session)) == 2
 
+    def test_excludes_lead_avec_deal_actif_autre_campagne(self, fake_session):
+        """Cross-campagne : un Lead Connected ailleurs ne doit pas etre re-qualifie.
+
+        Sinon le meme contact serait propose en parallele sur N campagnes ABM
+        (cas Coline Bechu × 53 le 06/01). Cf. get_leads_for_qualification.
+        """
+        from crm.models import Deal, Lead
+        from linkedin.models import Campaign
+
+        create_enriched_lead(
+            fake_session,
+            "https://www.linkedin.com/in/alice/",
+            SAMPLE_PROFILE,
+        )
+        other = Campaign.objects.create(name="Other ABM")
+        alice = Lead.objects.get(linkedin_url="https://www.linkedin.com/in/alice/")
+        Deal.objects.create(lead=alice, campaign=other, state=ProfileState.CONNECTED.value)
+        assert len(get_leads_for_qualification(fake_session)) == 0
+
+    def test_deal_failed_autre_campagne_ne_bloque_pas(self, fake_session):
+        """Un rejet LLM ailleurs n'empeche pas un autre angle ABM legitime."""
+        from crm.models import Deal, Lead
+        from linkedin.models import Campaign
+
+        create_enriched_lead(
+            fake_session,
+            "https://www.linkedin.com/in/alice/",
+            SAMPLE_PROFILE,
+        )
+        other = Campaign.objects.create(name="Other ABM rejected")
+        alice = Lead.objects.get(linkedin_url="https://www.linkedin.com/in/alice/")
+        Deal.objects.create(lead=alice, campaign=other, state=ProfileState.FAILED.value)
+        leads = get_leads_for_qualification(fake_session)
+        assert len(leads) == 1
+        assert leads[0]["public_identifier"] == "alice"
+
 
 @pytest.mark.django_db
 class TestSetProfileState:
@@ -311,8 +347,12 @@ class TestMultiCampaignQualification:
         assert len(leads) == 1
         assert leads[0]["public_identifier"] == "alice"
 
-    def test_promoted_in_other_campaign_still_eligible(self, fake_session):
-        """A lead promoted in campaign A is still eligible for campaign B."""
+    def test_promoted_in_other_campaign_NOT_eligible(self, fake_session):
+        """Changement de politique (06/01) : un Lead deja en pipeline actif sur
+        une autre campagne (QUALIFIED/READY/PENDING/CONNECTED/COMPLETED) est
+        EXCLU des autres campagnes. Evite de re-qualifier un meme contact pour
+        chaque campagne ABM (cf. cas Coline Bechu × 53).
+        """
         create_enriched_lead(
             fake_session,
             "https://www.linkedin.com/in/alice/",
@@ -322,4 +362,4 @@ class TestMultiCampaignQualification:
 
         other_session = self._make_other_session(fake_session)
         leads = get_leads_for_qualification(other_session)
-        assert len(leads) == 1
+        assert len(leads) == 0
