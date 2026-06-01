@@ -393,6 +393,36 @@ class TestHandleFollowUp:
         assert Task.objects.filter(task_type=Task.TaskType.FOLLOW_UP, status=Task.Status.PENDING).exists()
 
     @patch("linkedin.agents.follow_up.run_follow_up_agent")
+    def test_skip_si_pending_outbound_en_file(self, mock_agent, fake_session):
+        """EKOALU patch 01/06 : un PO non valide doit court-circuiter le cycle
+        follow_up pour eviter la boucle daemon -> agent -> generator (~$10/jour
+        de pertes detectees sur les contacts en attente Richard).
+        """
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+        _make_connected(fake_session)
+        PendingOutbound.objects.create(
+            prospect_public_id="alice",
+            kind=OutboundKind.FOLLOW_UP,
+            status=OutboundStatus.PENDING,
+            ai_draft="draft",
+        )
+
+        task = _make_task(
+            Task.TaskType.FOLLOW_UP,
+            {"campaign_id": fake_session.campaign.pk, "public_id": "alice"},
+        )
+        qualifiers = _build_context(fake_session)
+        handle_follow_up(task, fake_session, qualifiers)
+
+        # L-agent (couteux Claude) ne doit PAS avoir tourne
+        mock_agent.assert_not_called()
+        # Et un follow_up re-enqueue dans 4h doit etre en attente
+        assert Task.objects.filter(
+            task_type=Task.TaskType.FOLLOW_UP, status=Task.Status.PENDING,
+        ).exists()
+
+    @patch("linkedin.agents.follow_up.run_follow_up_agent")
     def test_noop_when_deal_missing(self, mock_agent, fake_session):
         task = _make_task(
             Task.TaskType.FOLLOW_UP,

@@ -31,6 +31,29 @@ def _build_send_profile(deal) -> dict:
     }
 
 
+def _has_pending_validation(public_id: str) -> bool:
+    """True si un PendingOutbound FOLLOW_UP non terminal existe pour ce contact.
+
+    Evite la boucle daemon -> agent (Claude) -> patched_send_raw_message
+    -> generator (Claude) -> retourne False -> set_state(QUALIFIED) -> reconcile
+    -> retour ici, qui faisait ~$10/jour en pertes pures sur les contacts en
+    attente Richard (cf. analyse conso 01/06/2026).
+    """
+    try:
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+        return PendingOutbound.objects.filter(
+            prospect_public_id=public_id,
+            kind=OutboundKind.FOLLOW_UP,
+            status__in=[
+                OutboundStatus.PENDING,
+                OutboundStatus.APPROVED,
+                OutboundStatus.BLOCKED_COMPANY,
+            ],
+        ).exists()
+    except Exception:
+        return False
+
+
 def _too_soon_to_nudge(deal) -> bool:
     """Wait `unanswered_count * MIN_DAYS_PER_UNANSWERED` days between nudges."""
     from chat.models import ChatMessage
@@ -87,6 +110,17 @@ def handle_follow_up(task, session, qualifiers):
     if _too_soon_to_nudge(deal):
         logger.info("[%s] follow_up %s: too soon to nudge — re-enqueuing", session.campaign, public_id)
         enqueue_follow_up(campaign_id, public_id, delay_seconds=24 * 3600)
+        return
+
+    # EKOALU : si un PendingOutbound est deja en file de validation pour ce
+    # contact, inutile d'appeler agent + generator (~$0.02 par cycle x 30 cycles/
+    # jour avant fix). On attend que Richard valide/refuse/supprime via l-UI.
+    if _has_pending_validation(public_id):
+        logger.info(
+            "[%s] follow_up %s skip: PendingOutbound deja en file (attente validation)",
+            session.campaign, public_id,
+        )
+        enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600)
         return
 
     materialize_profile_summary_if_missing(deal, session)
