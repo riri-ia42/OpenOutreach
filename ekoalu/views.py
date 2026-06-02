@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from ekoalu import conf
+from ekoalu.dedup.consolidator import SHADOW_OUTCOMES
 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
 from ekoalu.outbound_validation.config import get_approval_mode
 from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
@@ -43,6 +44,7 @@ def dashboard(request):
 
         deals_by_state = (
             Deal.objects.filter(campaign=campaign)
+            .exclude(outcome__in=SHADOW_OUTCOMES)
             .values("state")
             .annotate(n=Count("id"))
         )
@@ -63,7 +65,12 @@ def dashboard(request):
         })
 
     # ---- KPI globaux ----
-    all_deals = Deal.objects.filter(campaign__name__startswith="EKOALU - ")
+    # Exclusion globale des Deals shadows (duplicate_campaign / pre_existing_relation)
+    # → ils existent en base pour audit mais n'apparaissent jamais dans les compteurs.
+    all_deals = (
+        Deal.objects.filter(campaign__name__startswith="EKOALU - ")
+        .exclude(outcome__in=SHADOW_OUTCOMES)
+    )
     total_qualified = all_deals.filter(state="Qualified").count()
     total_ready = all_deals.filter(state="Ready_to_connect").count()
     total_pending = all_deals.filter(state="Pending").count()
@@ -921,7 +928,7 @@ def campaigns_list(request):
 
     campaigns_data = []
     for campaign in queryset:
-        deals = Deal.objects.filter(campaign=campaign)
+        deals = Deal.objects.filter(campaign=campaign).exclude(outcome__in=SHADOW_OUTCOMES)
         state_counts = {}
         for d in deals.values("state").annotate(n=Count("id")):
             state_counts[d["state"]] = d["n"]
@@ -1115,6 +1122,19 @@ def outbound_list(request):
         queryset = queryset.filter(status=status_filter)
     if kind_filter:
         queryset = queryset.filter(kind=kind_filter)
+
+    # Exclusion des PO dont le Deal est shadow (duplicate_campaign / pre_existing_relation)
+    # : on ne doit pas faire valider à Richard des messages pour des contacts
+    # déjà gérés sur une autre campagne (dedup cross-campagne, decision 02/06/2026).
+    if status_filter in ("pending", "approved", ""):
+        shadow_q = Q()
+        for pid, camp_id in (
+            Deal.objects.filter(outcome__in=SHADOW_OUTCOMES)
+            .values_list("lead__public_identifier", "campaign_id")
+        ):
+            shadow_q |= Q(prospect_public_id=pid, campaign_id=camp_id)
+        if shadow_q:
+            queryset = queryset.exclude(shadow_q)
 
     counts = {
         "pending": PendingOutbound.objects.filter(status=OutboundStatus.PENDING).count(),
@@ -1451,7 +1471,8 @@ _STATE_FILTER_MAP = {
     "qualified":    {"states": ["Qualified"],                     "title": "Qualifiés"},
     "ready":        {"states": ["Ready_to_connect"],              "title": "Prêts à inviter"},
     "pending":      {"states": ["Pending"],                       "title": "Invités (en attente)"},
-    "connected":    {"states": ["Connected", "Completed"],        "title": "Connectés"},
+    "connected":    {"states": ["Connected"],                     "title": "Connectés"},
+    "completed":    {"states": ["Completed"],                     "title": "Clôturés"},
     "disqualified": {"states": ["Failed"],                        "title": "Disqualifiés / Échec"},
 }
 
@@ -1612,6 +1633,7 @@ def deals_filtered(request):
             campaign__name__startswith="EKOALU - ",
             state__in=cfg["states"],
         )
+        .exclude(outcome__in=SHADOW_OUTCOMES)
         .select_related("lead", "campaign")
         .order_by("-update_date")
     )

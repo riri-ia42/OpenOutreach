@@ -197,13 +197,42 @@ def _create_deal(
     *, lead, state, session,
     outcome="", reason="",
 ):
-    """Shared Deal creation with common defaults."""
-    from crm.models import Deal
+    """Shared Deal creation with common defaults.
+
+    Cross-campaign dedup guard: si le Lead a déjà un Deal actif sur une autre
+    campagne, le nouveau Deal naît directement en shadow (Completed +
+    outcome=duplicate_campaign) pour préserver la règle métier
+    "1 contact = 1 campagne active maximum" (décision Richard 02/06/2026).
+    """
+    from crm.models import Deal, Outcome
+    from ekoalu.dedup.consolidator import has_active_deal_elsewhere
+    from linkedin.enums import ProfileState
+
+    other = None
+    target_state = state
+    target_outcome = outcome
+    target_reason = reason
+    # On ne court-circuite que les nouveaux Deals qui voudraient être actifs.
+    # Les créations FAILED (LLM rejection) coexistent normalement.
+    if str(state) != ProfileState.FAILED.value:
+        other = has_active_deal_elsewhere(lead=lead, campaign=session.campaign)
+    if other is not None:
+        target_state = ProfileState.COMPLETED.value
+        target_outcome = Outcome.DUPLICATE_CAMPAIGN.value
+        target_reason = (
+            f"Auto-bloque: Deal actif #{other.pk} existe deja sur "
+            f"« {other.campaign.name if other.campaign_id else '?'} » "
+            f"(etat {other.state}). Pas de doublon cross-campagne."
+        )[:500]
+        logger.warning(
+            "[dedup] %s deja actif sur campagne %s -> nouveau Deal force en duplicate_campaign",
+            lead.public_identifier, other.campaign_id,
+        )
 
     return Deal.objects.create(
         lead=lead,
         campaign=session.campaign,
-        state=state,
-        outcome=outcome,
-        reason=reason,
+        state=target_state,
+        outcome=target_outcome,
+        reason=target_reason,
     )
