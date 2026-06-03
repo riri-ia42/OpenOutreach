@@ -225,10 +225,19 @@ class PendingOutboundAdmin(admin.ModelAdmin):
 
     @admin.action(description="Refuser")
     def rejeter(self, request, queryset):
-        updated = queryset.filter(status=OutboundStatus.PENDING).update(
-            status=OutboundStatus.REJECTED,
+        from ekoalu.lead_exclusion import disqualify_leads
+
+        qs_pending = queryset.filter(status=OutboundStatus.PENDING)
+        public_ids = list(qs_pending.values_list("prospect_public_id", flat=True).distinct())
+        updated = qs_pending.update(status=OutboundStatus.REJECTED)
+        # Refus = exclusion permanente cross-campagne (cf. lead_exclusion).
+        # Sans cette cascade le daemon régénère le message au cycle suivant.
+        n_leads, _ = disqualify_leads(public_ids, "(refus Django Admin)")
+        self.message_user(
+            request,
+            f"{updated} message(s) refusé(s) — {n_leads} prospect(s) retiré(s) du pipeline.",
+            messages.WARNING,
         )
-        self.message_user(request, f"{updated} message(s) refusé(s).", messages.WARNING)
 
     @admin.action(description="Marquer comme envoyé manuellement")
     def marquer_envoye(self, request, queryset):

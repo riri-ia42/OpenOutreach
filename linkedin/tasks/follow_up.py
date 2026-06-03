@@ -107,6 +107,20 @@ def handle_follow_up(task, session, qualifiers):
         logger.warning("follow_up: no Deal for %s — skipping", public_id)
         return
 
+    # Defense en profondeur : un lead disqualifie (refus Richard, exclusion
+    # permanente) ne doit JAMAIS regenerer de message. Si un Deal est encore
+    # actif sur ce lead, on le cloture et on s'arrete (zero appel Claude).
+    if getattr(deal.lead, "disqualified", False):
+        from crm.models.deal import Outcome
+        if deal.state not in (ProfileState.COMPLETED.value, ProfileState.FAILED.value):
+            set_profile_state(
+                session, public_id, ProfileState.FAILED.value,
+                outcome=Outcome.NOT_INTERESTED.value,
+                reason="Lead disqualifie (refus) — follow_up annule",
+            )
+        logger.info("[%s] follow_up %s skip: lead disqualifie", session.campaign, public_id)
+        return
+
     if _too_soon_to_nudge(deal):
         logger.info("[%s] follow_up %s: too soon to nudge — re-enqueuing", session.campaign, public_id)
         enqueue_follow_up(campaign_id, public_id, delay_seconds=24 * 3600)

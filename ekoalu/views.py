@@ -1175,35 +1175,11 @@ def outbound_list(request):
 def _disqualify_leads_from_reject(public_ids: list[str], reason: str) -> tuple[int, int]:
     """Refus = exclusion permanente du prospect (toutes campagnes confondues).
 
-    Sans cette cascade, le dedup `_has_open_outbound` ne regarde que les statuts
-    PENDING/APPROVED/BLOCKED_COMPANY : un PendingOutbound REJECTED ne bloque rien
-    et le daemon regenere un nouveau message au cycle suivant.
-
-    Marque Lead.disqualified=True (exclusion cross-campagne, definitif) ET passe
-    tous les Deals non-terminaux en FAILED outcome=NOT_INTERESTED.
+    Wrapper historique : délègue à `ekoalu.lead_exclusion.disqualify_leads`
+    (source of truth unique, partagée avec l'action Django Admin).
     """
-    from crm.models import Deal, Lead
-    from crm.models.deal import Outcome
-    from linkedin.enums import ProfileState
-
-    clean = list({pid for pid in public_ids if pid})
-    if not clean:
-        return 0, 0
-
-    n_leads = Lead.objects.filter(
-        public_identifier__in=clean,
-        disqualified=False,
-    ).update(disqualified=True)
-
-    terminal = [ProfileState.COMPLETED.value, ProfileState.FAILED.value]
-    n_deals = Deal.objects.filter(
-        lead__public_identifier__in=clean,
-    ).exclude(state__in=terminal).update(
-        state=ProfileState.FAILED.value,
-        outcome=Outcome.NOT_INTERESTED.value,
-        reason=f"Refus Richard: {reason}"[:500],
-    )
-    return n_leads, n_deals
+    from ekoalu.lead_exclusion import disqualify_leads
+    return disqualify_leads(public_ids, reason)
 
 
 def _persona_slug_for_outbound(outbound: PendingOutbound) -> str:
