@@ -218,3 +218,18 @@ def get_llm_model():
     if builder is None:
         raise ValueError(f"Unknown LLM provider: {cfg.llm_provider!r}")
     return builder(cfg)
+
+
+def get_named_anthropic_model(model_name: str):
+    """Build an Anthropic `Model` for an explicit model id, reusing the SiteConfig key.
+
+    Utilise pour l'A/B qualifier (challenger Haiku vs champion Sonnet) : on garde
+    la meme cle/provider que la prod, on ne change que le nom du modele.
+    """
+    cfg = _validated_site_config()
+    from anthropic import AsyncAnthropic
+    from pydantic_ai.models.anthropic import AnthropicModel
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+
+    client = AsyncAnthropic(api_key=cfg.llm_api_key, max_retries=_MAX_RETRIES)
+    return AnthropicModel(model_name, provider=AnthropicProvider(anthropic_client=client))

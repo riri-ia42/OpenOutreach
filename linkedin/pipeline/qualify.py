@@ -119,11 +119,19 @@ def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
         return public_id
 
     campaign = session.campaign
-    label, reason = qualify_with_llm(
-        profile_text,
-        product_docs=campaign.product_docs,
-        campaign_objective=campaign.campaign_objective,
-    )
+    from ekoalu.qualifier_ab.runner import ab_is_active, run_ab_qualification
+    if ab_is_active():
+        # Mode A/B : champion (Sonnet) decide, challenger (Haiku) logge en parallele.
+        label, reason = run_ab_qualification(
+            profile_text, campaign.product_docs, campaign.campaign_objective,
+            public_id, campaign.id,
+        )
+    else:
+        label, reason = qualify_with_llm(
+            profile_text,
+            product_docs=campaign.product_docs,
+            campaign_objective=campaign.campaign_objective,
+        )
     _save_qualification_result(session, qualifier, lead_id, public_id, embedding, label, reason)
     return public_id
 
