@@ -102,7 +102,7 @@ Three apps in `INSTALLED_APPS`:
 - **`pipeline/ready_pool.py`** — GP confidence gate, `promote_to_ready()`.
 - **`pipeline/pools.py`** — Composable generators: `search_source` → `qualify_source` → `ready_source`.
 - **`pipeline/freemium_pool.py`** — Seed priority + undiscovered pool, ranked by qualifier.
-- **`ml/qualifier.py`** — `Qualifier` protocol, `BayesianQualifier`, `KitQualifier`, `qualify_with_llm()`.
+- **`ml/qualifier.py`** — `Qualifier` protocol, `BayesianQualifier`, `KitQualifier`, `qualify_with_llm()`. Le system prompt est `_QUALIFY_SYSTEM_RUBRIC` : gros (>4000 chars) et campagne-agnostique pour que `ekoalu/llm_usage/patch.py:_inject_cache_control` le mette en cache Anthropic et le relise sur les rafales de qualif (les variables `product_docs`/`objective` passent dans le message user, jamais dans le system — sinon le préfixe diffère par campagne et le cache ne se relit pas).
 - **`ml/embeddings.py`** — FastEmbed utilities, `embed_text()`, `embed_texts()`.
 - **`ml/profile_text.py`** — `build_profile_text()`.
 - **`ml/hub.py`** — HuggingFace kit loader (`fetch_kit()`).
