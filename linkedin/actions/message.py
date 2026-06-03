@@ -60,6 +60,33 @@ def _find(page, key: str, timeout: int = 5000) -> Locator:
     raise PlaywrightError(f"No selector matched for '{key}'. Tried: {tried}")
 
 
+def _safe_url(session) -> str:
+    """URL courante de la page, jamais levante (diagnostic best-effort)."""
+    try:
+        return session.page.url
+    except Exception:  # noqa: BLE001 -- le diagnostic ne doit jamais casser l'envoi
+        return "?"
+
+
+def _dump_failure_html(session, public_identifier: str) -> None:
+    """Snapshot HTML d'un echec d'envoi message, pour diagnostic.
+
+    Toujours actif (independant de DUMP_PAGES) car ces echecs sont rares et
+    ciblent un bug precis ; ecrit dans ``<fixtures>/pages/message_fail/``.
+    """
+    try:
+        from linkedin.conf import FIXTURE_PAGES_DIR
+
+        dest = FIXTURE_PAGES_DIR / "message_fail"
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / f"{public_identifier}.html").write_text(
+            session.page.content(), encoding="utf-8",
+        )
+        logger.info("Saved message-fail snapshot → %s/%s.html", dest, public_identifier)
+    except Exception:  # noqa: BLE001 -- le diagnostic ne doit jamais casser l'envoi
+        logger.debug("message-fail snapshot failed", exc_info=True)
+
+
 # ── Public entry point ────────────────────────────────────────────
 
 
@@ -93,6 +120,11 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
     if not target_urn:
         logger.error("Cannot send via direct thread: no URN for %s", public_identifier)
         return False
+    # ``step`` tracke l'etape qui echoue : les pertes de follow-up observees sont
+    # transitoires (la zone de compose LinkedIn met parfois >5s a se rendre), pas
+    # un selecteur casse. On laisse donc plus de temps a compose_input et on logge
+    # l'etape + l'URL + un snapshot HTML pour pinpointer toute regression reelle.
+    step = "navigate"
     try:
         thread_url = f"{LINKEDIN_MESSAGING_URL}?recipient={encode_urn(target_urn)}"
         goto_page(
@@ -104,18 +136,21 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
         )
         session.wait(1, 2)
 
-        human_type(
-            _find(session.page, "compose_input").first,
-            message,
-            min_delay=10,
-            max_delay=50,
-        )
-        _find(session.page, "compose_send").first.click(delay=200)
+        step = "compose_input"
+        compose = _find(session.page, "compose_input", timeout=12_000).first
+        step = "type"
+        human_type(compose, message, min_delay=10, max_delay=50)
+        step = "compose_send"
+        _find(session.page, "compose_send", timeout=8_000).first.click(delay=200)
         session.wait(0.5, 1)
         logger.info("Message sent to %s (direct thread)", public_identifier)
         return True
     except (PlaywrightError, TimeoutError) as e:
-        logger.error("Failed to send message to %s (direct thread) → %s", public_identifier, e)
+        logger.error(
+            "Failed to send message to %s (direct thread) at step=%s url=%s → %s",
+            public_identifier, step, _safe_url(session), e,
+        )
+        _dump_failure_html(session, public_identifier)
         return False
 
 
