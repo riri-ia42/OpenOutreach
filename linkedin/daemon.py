@@ -95,17 +95,10 @@ class _CloudPromoRotator:
         self._last = 0.0
 
     def maybe_log(self):
-        now = time.monotonic()
-        if now - self._last < self._interval:
-            return
-        self._last = now
-        msg = random.choice(_CLOUD_MESSAGES)
-        color = random.choice(_CLOUD_COLORS)
-        cta = random.choice(_CLOUD_CTAS)
-        logger.info(
-            colored(msg + " \u2192 ", color, attrs=["bold"])
-            + colored(cta, "white", attrs=["bold"]),
-        )
+        # EKOALU: pub upstream OpenOutreach ($49/mo) muselee \u2014 elle spammait
+        # daemon.log (57 Mo) + provoquait des UnicodeEncodeError (cp1252 vs
+        # caractere \u2192) sur la console Windows TSE. No-op volontaire.
+        return
 
 
 # ── Heartbeat + watchdog ─────────────────────────────────────────────
