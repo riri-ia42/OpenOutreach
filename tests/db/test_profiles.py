@@ -334,8 +334,15 @@ class TestMultiCampaignQualification:
         )
 
     def test_disqualified_in_other_campaign_still_eligible(self, fake_session):
-        """A lead rejected by campaign A is still eligible for campaign B."""
-        create_enriched_lead(
+        """Un FAILED deal sur la campagne A ne bloque pas la campagne B.
+
+        Routage (06/04) : l'eligibilite est desormais scopee a la campagne qui
+        a DECOUVERT le lead. Le lead doit donc avoir ete trouve aussi par B pour
+        y etre eligible -- le FAILED deal de A ne l'en empeche pas.
+        """
+        from ekoalu.lead_routing.patch import record_discovery
+
+        lead_pk = create_enriched_lead(
             fake_session,
             "https://www.linkedin.com/in/alice/",
             SAMPLE_PROFILE,
@@ -343,6 +350,8 @@ class TestMultiCampaignQualification:
         create_disqualified_deal(fake_session, "alice", reason="Bad fit")
 
         other_session = self._make_other_session(fake_session)
+        record_discovery(lead_pk, other_session.campaign)  # B a aussi trouve alice
+
         leads = get_leads_for_qualification(other_session)
         assert len(leads) == 1
         assert leads[0]["public_identifier"] == "alice"

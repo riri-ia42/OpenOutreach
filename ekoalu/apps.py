@@ -22,6 +22,7 @@ class EkoaluConfig(AppConfig):
         # Import tardif pour éviter les imports circulaires Django startup
         from ekoalu.follow_up.patch import apply_ekoalu_follow_up_patch
         from ekoalu.human_scheduler.patch import apply_human_scheduler_patch
+        from ekoalu.lead_routing.patch import apply_lead_routing_patch
         from ekoalu.llm_usage.patch import apply_claude_logging_patch
         from ekoalu.outbound_validation.patch import apply_outbound_validation_patch
         from ekoalu.sourcing_filter.patch import apply_sourcing_filter_patch
@@ -49,6 +50,12 @@ class EkoaluConfig(AppConfig):
             logger.info("EKOALU sourcing_filter patch applied")
         except Exception as e:
             logger.error("Failed to apply sourcing_filter patch: %s", e, exc_info=True)
+
+        try:
+            apply_lead_routing_patch()
+            logger.info("EKOALU lead_routing patch applied")
+        except Exception as e:
+            logger.error("Failed to apply lead_routing patch: %s", e, exc_info=True)
 
         try:
             apply_ekoalu_follow_up_patch()

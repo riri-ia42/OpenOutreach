@@ -77,7 +77,8 @@ A profile is relevant when the person plausibly DECIDES or INFLUENCES the choice
    - Steel structure / steelwork firms (charpente métallique, construction métallique)
    - Metalworkers / locksmiths handling site work (métallerie, serrurerie)
    - Masonry / structural-works (gros œuvre) firms on tertiary projects
-   Good titles: founder, CEO/PDG/président, directeur général, directeur travaux/technique, gérant, conducteur de travaux (senior), responsable bureau d'études.
+   Good titles: founder, CEO/PDG/président, directeur général, directeur travaux/technique, gérant, responsable bureau d'études.
+   IMPORTANT — accept OPERATIONAL roles too, not only top management: conducteur de travaux, chargé d'affaires, chargé de projet, responsable travaux, métreur, deviseur/économiste interne, acheteur / responsable achats, chef d'agence, chef de chantier. These people specify or buy the joinery on tertiary projects and are valid contacts.
 
 2. Prescribers / specifiers on tertiary projects:
    - Architects and architecture firms (agence d'architecture)
@@ -93,7 +94,8 @@ EKOALU works regionally for standard products — Rhône-Alpes departments 69, 0
 # Who is a BAD prospect (reject)
 - Competing aluminium joinery makers/installers (menuiserie aluminium concurrente) — they are rivals, not clients.
 - Pure residential/housing focus (constructeur de maisons individuelles, habitat, promoteur résidentiel only).
-- Roles with no influence on supplier/material choice: students, interns, junior administrative/HR/marketing/sales-only staff, retired, "open to work" with no relevant company, recruiters.
+- Pure SUPPORT functions with no say on supplier/material choice: HR / ressources humaines, accounting / comptabilité / paie, finance-only, logistics / logistique, pure office administration, QSE-only, IT, marketing/communication, sales of unrelated products. (NB: "achats / acheteur" IS relevant and must be accepted — do not confuse purchasing with back-office support.)
+- Roles with no influence on supplier/material choice: students, interns, junior administrative staff, retired, "open to work" with no relevant company, recruiters.
 - Industries unrelated to building/construction (IT, finance, retail, food, etc.) unless they are clearly the building owner/decision-maker for a tertiary construction programme.
 - Vague profiles where the company or role cannot be tied to tertiary construction.
 
