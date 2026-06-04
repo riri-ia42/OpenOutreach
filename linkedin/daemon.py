@@ -348,6 +348,22 @@ def run_daemon(session):
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
+        # Arret d'urgence manuel (bouton STOP dashboard) : prioritaire sur
+        # tout. Tant que le sentinel existe, aucune action (ni LinkedIn ni
+        # drain de la file approved). Ne se purge JAMAIS tout seul : reprise
+        # uniquement via le bouton "Reprendre". Voir ekoalu/emergency_stop.py.
+        from ekoalu.emergency_stop import is_stopped
+        if is_stopped():
+            logger.warning(
+                colored("EMERGENCY_STOP", "red", attrs=["bold"])
+                + " - arret d'urgence actif (data/emergency_stop.flag),"
+                + " daemon en pause. Reprise via le bouton du dashboard.",
+            )
+            sleep_with_heartbeat(
+                60, heartbeat, "EMERGENCY_STOP actif - reprise via dashboard",
+            )
+            continue
+
         # Garde-fou cap Anthropic : si l'API a refuse un appel pour cause
         # d'usage limit, on bascule en pause jusqu'a la date de reprise
         # (auto-purge du sentinel). Voir ekoalu/llm_usage/api_limit_guard.py.

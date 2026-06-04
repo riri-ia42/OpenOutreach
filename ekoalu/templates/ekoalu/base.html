@@ -94,6 +94,19 @@
                 <a href="/ekoalu/companies/" class="text-blue-600 hover:underline">Sociétés</a>
                 <a href="/ekoalu/leads/add/" class="text-blue-600 hover:underline">+ Prospects</a>
                 <a href="/admin/" class="text-blue-600 hover:underline">Admin</a>
+                {% if not emergency_stop %}
+                <form method="post" action="{% url 'ekoalu:emergency_stop' %}" class="inline"
+                      onsubmit="return confirm('ARRET D\'URGENCE : mettre tout le pipeline en pause (daemon LinkedIn + tous les envois) ?\n\nReprise manuelle ensuite via le bouton Reprendre.');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="engage">
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit"
+                            class="px-3 py-1.5 bg-red-600 text-white rounded font-bold text-xs hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+                            title="Arret d'urgence : pause immediate du daemon et de tous les envois">
+                        ⛔ STOP
+                    </button>
+                </form>
+                {% endif %}
             </nav>
         </div>
 
@@ -115,9 +128,47 @@
             <a href="/ekoalu/leads/add/" class="px-3 py-3 bg-gray-50 rounded text-gray-700 font-medium text-center">➕ Prospects</a>
             <a href="/ekoalu/usage/" class="col-span-2 px-3 py-2 bg-blue-50 rounded text-blue-800 text-xs text-center">💰 {{ claude_cost_today_usd|floatformat:3 }}$/j · {{ claude_cost_month_usd|floatformat:2 }}$/mois</a>
             <a href="/admin/" class="col-span-2 px-3 py-2 bg-gray-100 rounded text-gray-600 text-xs text-center">Admin Django</a>
+            {% if not emergency_stop %}
+            <form method="post" action="{% url 'ekoalu:emergency_stop' %}" class="col-span-2"
+                  onsubmit="return confirm('ARRET D\'URGENCE : mettre tout le pipeline en pause ?');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="engage">
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="w-full px-3 py-3 bg-red-600 text-white rounded font-bold text-center hover:bg-red-700">
+                    ⛔ ARRET D'URGENCE
+                </button>
+            </form>
+            {% endif %}
         </nav>
     </div>
 </header>
+
+{% if emergency_stop %}
+<div class="bg-red-600 text-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div class="flex items-start gap-2 min-w-0">
+            <span class="text-xl leading-none pulse">⛔</span>
+            <div class="min-w-0">
+                <div class="font-bold">ARRET D'URGENCE ACTIF — daemon et envois en pause</div>
+                <div class="text-xs text-red-100 truncate">
+                    {% if emergency_stop.reason %}Motif : {{ emergency_stop.reason }} · {% endif %}
+                    {% if emergency_stop.actor %}par {{ emergency_stop.actor }} · {% endif %}
+                    depuis {{ emergency_stop.engaged_at_local|default:"?" }}
+                </div>
+            </div>
+        </div>
+        <form method="post" action="{% url 'ekoalu:emergency_stop' %}" class="shrink-0"
+              onsubmit="return confirm('Reprendre la prospection ? Le daemon et les envois redemarrent au prochain cycle.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="release">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="w-full sm:w-auto px-4 py-2 bg-white text-red-700 rounded font-bold hover:bg-red-50">
+                ▶ Reprendre
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %}
 
 {% if messages %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 space-y-2">

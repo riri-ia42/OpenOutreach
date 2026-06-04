@@ -1674,6 +1674,50 @@ def deals_filtered(request):
     return render(request, "ekoalu/deals_filtered.html", context)
 
 
+# ---- Arret d'urgence : bouton STOP du dashboard ----------------------
+
+@staff_member_required
+@require_POST
+def emergency_stop_toggle(request):
+    """Pose ou leve l'arret d'urgence (sentinel data/emergency_stop.flag).
+
+    POST action=engage  -> tout le pipeline se met en pause au prochain cycle
+    POST action=release -> reprise
+
+    Le daemon LinkedIn et les commandes d'envoi (cold mail / outbound / replies)
+    honorent ce sentinel. Cf. ekoalu/emergency_stop.py.
+    """
+    from ekoalu.emergency_stop import engage, is_stopped, release
+
+    action = request.POST.get("action", "")
+    if action == "engage":
+        if is_stopped():
+            django_messages.info(request, "Arret d'urgence deja actif.")
+        else:
+            reason = (request.POST.get("reason") or "Stop manuel dashboard").strip()
+            actor = getattr(request.user, "username", "") or "staff"
+            engage(reason=reason, actor=actor)
+            django_messages.error(
+                request,
+                "⛔ ARRET D'URGENCE ACTIVE. Le daemon et tous les envois sont en "
+                "pause au prochain cycle (max ~1 min). Clique « Reprendre » "
+                "quand tout est rentre dans l'ordre.",
+            )
+    elif action == "release":
+        if release():
+            django_messages.success(
+                request,
+                "Arret d'urgence leve. Le daemon reprend au prochain cycle "
+                "(dans la limite des plages horaires + caps habituels).",
+            )
+        else:
+            django_messages.info(request, "Aucun arret d'urgence actif a lever.")
+    else:
+        django_messages.warning(request, "Action inconnue (engage|release attendu).")
+
+    return redirect(request.POST.get("next") or "ekoalu:dashboard")
+
+
 # ---- Budget guard : acquittement manuel par Richard ------------------
 
 @staff_member_required

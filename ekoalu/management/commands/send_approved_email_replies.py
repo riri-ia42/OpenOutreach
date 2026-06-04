@@ -48,6 +48,14 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
+        from ekoalu.emergency_stop import is_stopped
+        if is_stopped():
+            self.stdout.write(self.style.ERROR(
+                "ARRET D'URGENCE actif (data/emergency_stop.flag) — 0 envoi. "
+                "Reprise via le bouton du dashboard.",
+            ))
+            return
+
         max_n = int(opts["max"])
         dry_run = bool(opts["dry_run"])
         ignore_schedule = bool(opts["ignore_schedule"])

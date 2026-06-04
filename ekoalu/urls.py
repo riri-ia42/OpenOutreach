@@ -23,6 +23,7 @@ urlpatterns = [
     path("deals/", views.deals_filtered, name="deals_filtered"),
     path("usage/", views.usage, name="usage"),
     path("budget/resume/", views.budget_resume, name="budget_resume"),
+    path("emergency-stop/", views.emergency_stop_toggle, name="emergency_stop"),
     path("recap/", views.daily_recap_today, name="recap_today"),
     path("recap/<str:day>/", views.daily_recap_view, name="recap_day"),
     # Monitoring live

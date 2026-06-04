@@ -27,6 +27,7 @@ def ekoalu_globals(request):
 
     from ekoalu import conf
     from ekoalu.company_validation.models import ApprovedCompany, CompanyStatus
+    from ekoalu.emergency_stop import status as emergency_status
     from ekoalu.human_scheduler import is_action_allowed_now
     from ekoalu.human_scheduler.windows import (
         is_active_day,
@@ -96,4 +97,5 @@ def ekoalu_globals(request):
         },
         "claude_cost_today_usd": cost_today,
         "claude_cost_month_usd": cost_month,
+        "emergency_stop": emergency_status(),
     }

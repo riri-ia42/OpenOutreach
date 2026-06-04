@@ -40,6 +40,14 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        from ekoalu.emergency_stop import is_stopped
+        if is_stopped():
+            self.stdout.write(self.style.ERROR(
+                "ARRET D'URGENCE actif (data/emergency_stop.flag) — 0 envoi. "
+                "Reprise via le bouton du dashboard.",
+            ))
+            return
+
         from ekoalu.outbound_validation.config import is_approval_required
         from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
         from ekoalu.outbound_validation.sender import process_approved_queue
