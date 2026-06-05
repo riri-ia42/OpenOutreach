@@ -172,8 +172,24 @@ def _build_few_shot(persona_slug: str = "", limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-def _render_system_prompt(include_booking: bool) -> str:
-    """Injecte signature + clause booking dans le system prompt."""
+_INSTRUCTION_OVERRIDE_CLAUSE = """
+
+=== CONSIGNE MANUELLE PRIORITAIRE ===
+Une consigne explicite de Richard accompagne cette demande (dans le message).
+Elle PRIME sur la structure 4-blocs et sur les regles de format/longueur ci-dessus
+en cas de conflit : si la consigne demande un seul paragraphe, pas de signature,
+un angle precis, un ton particulier, etc., tu OBEIS a la consigne et tu adaptes
+la structure en consequence (la structure 4-blocs n'est qu'un defaut).
+Restent INTOUCHABLES quoi qu'il arrive : aucun mot banni, aucune flatterie,
+aucun commentaire sur le parcours/poste, francais, pas de markdown."""
+
+
+def _render_system_prompt(include_booking: bool, has_instruction: bool = False) -> str:
+    """Injecte signature + clause booking dans le system prompt.
+
+    `has_instruction` : si une consigne manuelle est fournie, on ajoute une clause
+    qui lui donne la priorite sur la structure rigide par defaut.
+    """
     if include_booking and conf.CALENDAR_BOOKING_URL:
         booking_clause = (
             "Tu PEUX inclure le lien de prise de RDV (voir exemple avec lien)."
@@ -185,11 +201,14 @@ def _render_system_prompt(include_booking: bool) -> str:
             "invitation a echanger."
         )
         booking_url = ""
-    return BASE_SYSTEM_PROMPT.format(
+    prompt = BASE_SYSTEM_PROMPT.format(
         signature_block=conf.render_signature(),
         booking_clause=booking_clause,
         booking_url=booking_url,
     )
+    if has_instruction:
+        prompt += _INSTRUCTION_OVERRIDE_CLAUSE
+    return prompt
 
 
 def _build_user_message(
@@ -202,8 +221,19 @@ def _build_user_message(
 ) -> str:
     """Compose le bloc utilisateur envoye a Claude."""
     first_name_display = first_name or "(inconnu — utiliser 'Bonjour,' sans prenom)"
-    parts = [
-        "Genere le message LinkedIn de follow-up pour ce prospect.",
+    parts = ["Genere le message LinkedIn de follow-up pour ce prospect."]
+    # La consigne est placee EN TETE et marquee prioritaire : c'est la demande
+    # explicite de Richard pour CETTE version, elle prime sur la structure par defaut.
+    if instruction.strip():
+        parts += [
+            "",
+            "=== CONSIGNE EXPLICITE DE RICHARD (PRIORITAIRE) ===",
+            instruction.strip(),
+            "Applique cette consigne fidelement. Elle PRIME sur la structure 4-blocs "
+            "et sur les regles de format/longueur par defaut en cas de conflit. "
+            "Ne conserve comme contraintes dures que : zero mot banni, zero flatterie.",
+        ]
+    parts += [
         "",
         f"Slug LinkedIn : {public_id}",
         f"Prenom detecte : {first_name_display}",
@@ -219,14 +249,14 @@ def _build_user_message(
     if instruction.strip():
         parts += [
             "",
-            "=== CONSIGNE EXPLICITE DE RICHARD POUR CETTE VERSION ===",
-            instruction.strip(),
-            "Tu DOIS respecter cette consigne en plus des regles habituelles.",
+            "Reponds UNIQUEMENT avec le message complet, mis en forme selon la consigne "
+            "prioritaire ci-dessus (la structure 4-blocs n'est qu'un defaut).",
         ]
-    parts += [
-        "",
-        "Reponds UNIQUEMENT avec le message complet (4 blocs separes par une ligne vide).",
-    ]
+    else:
+        parts += [
+            "",
+            "Reponds UNIQUEMENT avec le message complet (4 blocs separes par une ligne vide).",
+        ]
     return "\n".join(parts)
 
 
@@ -251,7 +281,11 @@ def generate_ekoalu_dm(
         return ""
 
     first_name = _extract_first_name(public_id, profile_summary, chat_summary)
-    system = _render_system_prompt(include_booking) + _build_few_shot(persona_slug)
+    has_instruction = bool(instruction.strip())
+    system = (
+        _render_system_prompt(include_booking, has_instruction=has_instruction)
+        + _build_few_shot(persona_slug)
+    )
     user_msg = _build_user_message(
         public_id=public_id,
         profile_summary=profile_summary,
@@ -275,9 +309,12 @@ def generate_ekoalu_dm(
 
     # Strip guillemets parasites en tete/queue
     text = text.strip().strip('"').strip("'").strip()
-    # S assurer que la signature est presente (Claude peut l'oublier)
+    # S assurer que la signature est presente (Claude peut l'oublier).
+    # MAIS si la consigne manuelle traite explicitement de la signature
+    # (ex "sans signature", "signature courte"), on ne la re-impose pas de force.
     sig = conf.render_signature()
-    if conf.SIGNATURE_NAME not in text:
+    instruction_touches_signature = "signature" in instruction.lower()
+    if conf.SIGNATURE_NAME not in text and not instruction_touches_signature:
         text = f"{text}\n\n{sig}"
     return text
 

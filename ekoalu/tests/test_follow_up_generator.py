@@ -300,3 +300,71 @@ richard@ekoalu.com"""
         user_msg = captured_payload["messages"][0]["content"]
         assert "raccourcis et supprime la mention chantier" in user_msg
         assert "CONSIGNE EXPLICITE DE RICHARD" in user_msg
+
+
+# ---- Priorite de la consigne manuelle sur la structure par defaut ----------
+
+@pytest.mark.django_db
+class TestInstructionPriority:
+    def test_system_prompt_gains_override_clause_with_instruction(self):
+        base = _render_system_prompt(include_booking=False, has_instruction=False)
+        with_instr = _render_system_prompt(include_booking=False, has_instruction=True)
+        assert "PRIORITAIRE" not in base
+        assert "PRIORITAIRE" in with_instr
+        assert "PRIME" in with_instr
+        # Les garde-fous durs restent mentionnes meme en mode consigne
+        assert "mot banni" in with_instr.lower()
+
+    def test_instruction_placed_before_profile_facts(self):
+        """La consigne doit apparaitre AVANT les faits profil (saillance)."""
+        captured = {}
+
+        client = MagicMock()
+        msg = MagicMock()
+        msg.text = "Bonjour,\n\nQ ?\n\ncoupe-feu.\n\nEchanger ?"
+
+        def capture(**kwargs):
+            captured.update(kwargs)
+            resp = MagicMock()
+            resp.content = [msg]
+            return resp
+
+        client.messages.create.side_effect = capture
+        with patch("ekoalu.follow_up.generator._get_anthropic_client") as mocked:
+            mocked.return_value = client
+            generate_ekoalu_dm(public_id="test", instruction="fais court")
+
+        user_msg = captured["messages"][0]["content"]
+        system = captured["system"]
+        # consigne avant "Slug LinkedIn" / "Faits profil"
+        assert user_msg.index("CONSIGNE EXPLICITE") < user_msg.index("Faits profil")
+        # le system passe en mode consigne prioritaire
+        assert "PRIORITAIRE" in system
+
+    def test_signature_not_forced_when_instruction_targets_signature(self):
+        # Claude renvoie sans signature ; la consigne parle de signature
+        # -> on ne re-impose PAS la signature.
+        no_sig = "Bonjour,\n\nQuestion ?\n\nService coupe-feu.\n\nA echanger ?"
+        client = MagicMock()
+        msg = MagicMock()
+        msg.text = no_sig
+        client.messages.create.return_value.content = [msg]
+        with patch("ekoalu.follow_up.generator._get_anthropic_client") as mocked:
+            mocked.return_value = client
+            out = generate_ekoalu_dm(
+                public_id="x",
+                instruction="termine sans signature",
+            )
+        assert conf.SIGNATURE_NAME not in out
+
+    def test_signature_still_forced_when_instruction_unrelated(self):
+        # Consigne sans rapport avec la signature -> garde-fou maintenu
+        no_sig = "Bonjour,\n\nQuestion ?\n\nService coupe-feu.\n\nA echanger ?"
+        client = MagicMock()
+        msg = MagicMock()
+        msg.text = no_sig
+        client.messages.create.return_value.content = [msg]
+        with patch("ekoalu.follow_up.generator._get_anthropic_client") as mocked:
+            mocked.return_value = client
+            out = generate_ekoalu_dm(public_id="x", instruction="fais plus court")
+        assert conf.SIGNATURE_NAME in out
