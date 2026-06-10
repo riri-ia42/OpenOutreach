@@ -50,6 +50,11 @@ class PendingReply(models.Model):
     )
     inbound_subject = models.CharField(max_length=300, blank=True)
     sender_email = models.CharField(max_length=255, blank=True, db_index=True)
+    cold_variant = models.CharField(
+        max_length=32, blank=True, db_index=True,
+        help_text="Variante de prompt du cold mail auquel ce prospect répond"
+                  " (brique K : conversion A/B par variante)",
+    )
 
     inbound_message = models.TextField(help_text="Message du prospect")
     intent = models.CharField(

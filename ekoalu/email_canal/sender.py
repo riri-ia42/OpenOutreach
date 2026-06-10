@@ -61,7 +61,8 @@ def build_html_email(body: str) -> str:
 def _resolve_recipient(po: PendingOutbound) -> str | None:
     """Récupère l'adresse email du destinataire depuis le Lead correspondant.
 
-    Renvoie None si le Lead n'a pas de contact_email ou s'il est unsubscribed.
+    Renvoie None si le Lead n'a pas de contact_email, s'il est unsubscribed,
+    ou si l'adresse a hard-bouncé (NDR détecté par le poller).
     """
     from crm.models import Lead
 
@@ -71,6 +72,8 @@ def _resolve_recipient(po: PendingOutbound) -> str | None:
     if not lead.contact_email:
         return None
     if lead.unsubscribed_at is not None:
+        return None
+    if lead.email_bounced_at is not None:
         return None
     return lead.contact_email
 

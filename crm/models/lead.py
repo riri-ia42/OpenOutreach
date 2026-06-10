@@ -29,6 +29,10 @@ class Lead(models.Model):
         null=True, blank=True,
         help_text="Date de demande d'opposition (RGPD art 21) — exclu de tout envoi futur",
     )
+    email_bounced_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Date du hard bounce (NDR) détecté — adresse invalide, exclu des envois",
+    )
 
     def __str__(self):
         label = self.public_identifier or self.linkedin_url or f"Lead#{self.pk}"

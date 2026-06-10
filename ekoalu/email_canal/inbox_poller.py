@@ -31,12 +31,32 @@ class PollStats:
     no_lead_match: int = 0
     drafts_created: int = 0
     drafts_failed: int = 0
+    bounces_marked: int = 0
+    bounces_unmatched: int = 0
 
 
 def _lookup_lead_by_email(email: str):
     """Retourne le Lead correspondant à `email` (matché sur contact_email lower)."""
     from crm.models import Lead
     return Lead.objects.filter(contact_email__iexact=email).first()
+
+
+def _cold_variant_for(lead) -> str:
+    """Variante du dernier cold mail envoyé à ce prospect (brique K, A/B).
+
+    Permet de croiser réponse reçue ↔ variante envoyée pour mesurer le taux
+    de réponse par variante dans le daily_recap. Vide si aucun cold envoyé.
+    """
+    from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+    last_cold = (
+        PendingOutbound.objects.filter(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.EMAIL_COLD,
+            status=OutboundStatus.SENT,
+        ).order_by("-sent_at").first()
+    )
+    return last_cold.prompt_variant if last_cold else ""
 
 
 def _build_pending_reply(*, msg: dict, lead, intent_value: str,
@@ -55,6 +75,7 @@ def _build_pending_reply(*, msg: dict, lead, intent_value: str,
         ai_draft=draft_body,
         final_sent="",
         status=PendingReply.Status.PENDING,
+        cold_variant=_cold_variant_for(lead),
     )
 
 
@@ -75,6 +96,13 @@ def process_message(msg: dict, *, generate_draft=True) -> str:
     # Idempotence : si on a déjà un PendingReply pour cet inbound_message_id, skip
     if PendingReply.objects.filter(inbound_message_id=msg_id).exists():
         return "already_seen"
+
+    # Bounce / NDR : à traiter AVANT le matching lead (l'expéditeur est
+    # postmaster, pas le prospect). Marque Lead.email_bounced_at → exclu
+    # des envois futurs. Pas de PendingReply (rien à répondre à un NDR).
+    from ekoalu.email_canal.bounce import is_bounce_message, process_bounce
+    if is_bounce_message(msg):
+        return process_bounce(msg)
 
     sender = msg.get("from_email", "")
     if not sender:
@@ -158,5 +186,9 @@ def poll_inbox(*, since_iso_utc: str, max_n: int = 50,
             stats.drafts_created += 1
         elif result == "draft_failed":
             stats.drafts_failed += 1
+        elif result == "bounce_marked":
+            stats.bounces_marked += 1
+        elif result == "bounce_unmatched":
+            stats.bounces_unmatched += 1
 
     return stats
