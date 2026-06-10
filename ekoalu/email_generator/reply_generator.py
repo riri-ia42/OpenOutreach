@@ -39,8 +39,11 @@ CONTRAINTES GÉNÉRALES :
 - AUCUN jargon : INTERDITS = synergies, ROI, win-win, leader, référence, excellence,
   passion, à l'écoute, permettez-moi, j'aurais le plaisir, n'hésitez surtout pas,
   au plaisir d'échanger, restant à votre disposition, dans l'attente.
-- Si signature attendue (intent ≠ OPT_OUT), reproduis EXACTEMENT le bloc :
+- JAMAIS "Cordialement" ni "Bien cordialement" (charte Richard).
+- Termine EXACTEMENT par la clôture (rien d'autre après) :
 {signature_block}
+- JAMAIS de coordonnées (téléphone, adresse) dans le corps : le bloc coordonnées
+  est apposé automatiquement à l'envoi.
 
 FORMAT DE SORTIE (STRICT) :
 Tu réponds UNIQUEMENT par 2 balises XML, sans autre texte autour :
@@ -80,8 +83,7 @@ _INTENT_GUIDANCE = {
     Intent.OPT_OUT: (
         "Le prospect demande à être désinscrit. UNE seule phrase de confirmation : "
         "'C'est noté, je vous retire de notre base, plus aucune relance de notre "
-        "part. Bonne continuation.' PAS DE SIGNATURE complète, juste 'Cordialement, "
-        "Richard Gros' en fin."
+        "part. Bonne continuation.' Puis la clôture habituelle."
     ),
 }
 
@@ -91,7 +93,7 @@ def _render_reply_system_prompt(intent: Intent) -> str:
     return _BASE_SYSTEM_PROMPT.format(
         intent=intent.value,
         intent_guidance=_INTENT_GUIDANCE.get(intent, "Réponds sobrement, sans relance."),
-        signature_block=conf.render_signature(),
+        signature_block=conf.EMAIL_CLOSING_FORMAL,
         booking_url_or_none=booking or "(aucun lien fourni, ne pas inclure de lien)",
     )
 

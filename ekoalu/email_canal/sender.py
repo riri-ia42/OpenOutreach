@@ -34,6 +34,31 @@ _UNSUB_FOOTER_HTML = (
 )
 
 
+def signature_block_html(*, formal_first: bool = True) -> str:
+    """Bloc coordonnées HTML de la charte signature Richard (SIGNATURES.md).
+
+    Apposé par le CODE après la clôture textuelle générée par Claude
+    (« Bien à vous, Richard Gros »). `formal_first=True` ajoute la mention
+    « Dirigeant » (prospection / 1er contact) ; False = échange en cours.
+    """
+    from ekoalu import conf
+
+    title = ", Dirigeant" if formal_first else ""
+    return (
+        "<table style=\"border-collapse:collapse;margin-top:14px;"
+        "font-family:'Segoe UI',Calibri,Arial,sans-serif;font-size:11pt;color:#222;\">"
+        f"<tr><td><strong>Richard Gros</strong>{title} – {conf.EMAIL_SIG_MOBILE} – "
+        f"{conf.SIGNATURE_EMAIL}</td></tr>"
+        f"<tr><td style=\"color:#555;font-size:10pt;\">Fixe {conf.EMAIL_SIG_FIXE} – "
+        f"{conf.EMAIL_SIG_ADDRESS}</td></tr>"
+        f"<tr><td style=\"color:#555;font-size:10pt;\">{html.escape(conf.EMAIL_SIG_TAGLINE)}</td></tr>"
+        f"<tr><td style=\"color:#555;font-size:10pt;\">"
+        f"<a href=\"{conf.EMAIL_SIG_GUIDE_URL}\">Notre guide des solutions</a> – "
+        f"<a href=\"{conf.CALENDAR_BOOKING_URL}\">Prendre RDV</a></td></tr>"
+        "</table>"
+    )
+
+
 def text_body_to_html(body: str) -> str:
     """Convertit un body texte en HTML simple, sans CSS exotique.
 
@@ -54,8 +79,13 @@ def text_body_to_html(body: str) -> str:
 
 
 def build_html_email(body: str) -> str:
-    """Body texte → HTML complet (paragraphes + footer désinscription)."""
-    return text_body_to_html(body) + "\n" + _UNSUB_FOOTER_HTML
+    """Body texte → HTML complet : paragraphes + bloc signature charte
+    (formal-first, mention Dirigeant) + footer désinscription."""
+    return (
+        text_body_to_html(body)
+        + "\n" + signature_block_html(formal_first=True)
+        + "\n" + _UNSUB_FOOTER_HTML
+    )
 
 
 def _resolve_recipient(po: PendingOutbound) -> str | None:

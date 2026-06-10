@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from ekoalu.email_generator import ColdEmailDraft, generate_cold_email
 from ekoalu.email_generator.generator import (
-    _ensure_signature,
+    _ensure_closing,
     has_niche_mention,
     parse_response,
 )
@@ -60,25 +60,29 @@ Richard
         assert d.body == "world"
 
 
-# --- _ensure_signature -------------------------------------------------------
+# --- _ensure_closing (charte signature : clôture "Bien à vous") --------------
 
 
-class TestEnsureSignature:
-    def test_signature_deja_presente_inchange(self):
+class TestEnsureClosing:
+    def test_cloture_deja_presente_inchange(self):
         from ekoalu import conf
-        body = f"Bonjour,\n\n{conf.render_signature()}"
-        assert _ensure_signature(body) == body
+        body = f"Bonjour,\n\n{conf.EMAIL_CLOSING_FORMAL_FIRST}"
+        assert _ensure_closing(body) == body
 
-    def test_signature_ajoutee_si_absente(self):
-        from ekoalu import conf
+    def test_cloture_ajoutee_si_absente(self):
         body = "Bonjour, rien d'autre."
-        out = _ensure_signature(body)
-        assert conf.SIGNATURE_NAME in out
-        assert conf.SIGNATURE_EMAIL in out
+        out = _ensure_closing(body)
         assert out.startswith("Bonjour, rien d'autre.")
+        assert out.endswith("Bien à vous,\nRichard Gros")
+
+    def test_cordialement_banni_remplace(self):
+        body = "Bonjour,\n\nContenu.\n\nCordialement,\nRichard Gros"
+        out = _ensure_closing(body)
+        assert "Cordialement" not in out
+        assert out.endswith("Bien à vous,\nRichard Gros")
 
     def test_body_vide_reste_vide(self):
-        assert _ensure_signature("") == ""
+        assert _ensure_closing("") == ""
 
 
 # --- has_niche_mention -------------------------------------------------------
@@ -111,12 +115,15 @@ class TestHasNicheMention:
 
 
 class TestPromptRendering:
-    def test_system_prompt_inclut_signature_et_booking(self):
+    def test_system_prompt_inclut_cloture_charte_sans_coordonnees(self):
         from ekoalu import conf
         sys = render_system_prompt()
-        assert conf.SIGNATURE_NAME in sys
-        if conf.CALENDAR_BOOKING_URL:
-            assert conf.CALENDAR_BOOKING_URL in sys
+        # Clôture charte présente, mais PAS le bloc coordonnées (apposé par le
+        # sender) ni le lien booking inline (présent dans le bloc signature).
+        assert conf.EMAIL_CLOSING_FORMAL_FIRST in sys
+        assert conf.EMAIL_SIG_MOBILE not in sys
+        assert conf.CALENDAR_BOOKING_URL not in sys
+        assert "Cordialement" in sys  # listé comme interdit
 
     def test_system_prompt_contient_mots_bannis_explicites(self):
         sys = render_system_prompt()
@@ -176,15 +183,15 @@ class TestGenerateColdEmailSansApiKey:
 
 @pytest.fixture
 def fake_draft():
-    """Brouillon Claude factice avec niche obligatoire et signature."""
+    """Brouillon Claude factice avec niche obligatoire et clôture charte."""
     from ekoalu import conf
     body = (
         "Bonjour M. Dupont,\n\n"
         "Vous gérez des projets tertiaires en région Rhône-Alpes ?\n\n"
         "Chez EKOALU (Chasselay 69), on fabrique du coupe-feu EI60 et "
         "du désenfumage pour bureaux et ERP.\n\n"
-        "15 min en visio si pertinent : https://outlook.office365.com/book/...\n\n"
-        f"{conf.render_signature()}"
+        "15 minutes en visio si le sujet vous concerne ?\n\n"
+        f"{conf.EMAIL_CLOSING_FORMAL_FIRST}"
     )
     return ColdEmailDraft(
         subject="Coupe-feu EI60 pour vos projets tertiaires",

@@ -281,3 +281,26 @@ class TestSendApprovedEmailsCommand:
         po_sent_avant.refresh_from_db()
         assert po_pending.status == OutboundStatus.PENDING  # intact
         assert po_sent_avant.status == OutboundStatus.SENT  # intact
+
+
+# --- Charte signature (SIGNATURES.md jumeau numérique) ------------------------
+
+
+class TestSignatureCharte:
+    def test_build_html_contient_bloc_formal_first(self):
+        from ekoalu.email_canal.sender import build_html_email
+
+        out = build_html_email("Bonjour,\n\nBien à vous,\nRichard Gros")
+        assert "Dirigeant" in out                 # formal-first = mention Dirigeant
+        assert "06 14 26 31 24" in out            # mobile réel (pas le placeholder)
+        assert "04 37 50 36 36" in out
+        assert "Prendre RDV" in out
+        assert "Notre guide des solutions" in out
+        assert "06 XX" not in out
+
+    def test_bloc_formal_sans_dirigeant_pour_replies(self):
+        from ekoalu.email_canal.sender import signature_block_html
+
+        bloc = signature_block_html(formal_first=False)
+        assert "Dirigeant" not in bloc
+        assert "06 14 26 31 24" in bloc

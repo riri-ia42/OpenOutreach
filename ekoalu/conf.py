@@ -82,8 +82,26 @@ NICHE_PRODUCTS = [
 # ----------------------------------------------------------------------
 SIGNATURE_NAME = os.environ.get("EKOALU_SIGNATURE_NAME", "Richard Gros")
 SIGNATURE_TITLE = os.environ.get("EKOALU_SIGNATURE_TITLE", "Président EKOALU")
-SIGNATURE_MOBILE = os.environ.get("EKOALU_SIGNATURE_MOBILE", "06 XX XX XX XX")
+SIGNATURE_MOBILE = os.environ.get("EKOALU_SIGNATURE_MOBILE", "06 14 26 31 24")
 SIGNATURE_EMAIL = os.environ.get("EKOALU_SIGNATURE_EMAIL", "richard@ekoalu.com")
+
+# ----------------------------------------------------------------------
+# Charte de signature EMAIL (source of truth :
+# C:\Users\RI.GROS\Documents\CLAUDE\jumeau-numerique\03-synthese-style\SIGNATURES.md)
+# Règle d'apposition : Claude génère la CLÔTURE TEXTUELLE seule dans le
+# corps ; le code (email_canal/sender) appose le bloc coordonnées HTML.
+# JAMAIS "Cordialement" — Richard signe toujours "Bien à vous".
+# ----------------------------------------------------------------------
+EMAIL_CLOSING_FORMAL_FIRST = "Bien à vous,\nRichard Gros"  # 1er contact (cold mail)
+EMAIL_CLOSING_FORMAL = "Bien à vous,\nRichard"             # échange en cours (replies)
+EMAIL_SIG_MOBILE = "06 14 26 31 24"
+EMAIL_SIG_FIXE = "04 37 50 36 36"
+EMAIL_SIG_ADDRESS = "53 ZAC du Crouloup, Route de Quincieux, 69380 Chasselay"
+EMAIL_SIG_TAGLINE = (
+    "EKOALU spécialiste menuiseries standards, alu, acier, murs-rideaux, "
+    "désenfumage & feu"
+)
+EMAIL_SIG_GUIDE_URL = "https://ekoalu.com/"
 
 
 def render_signature() -> str:

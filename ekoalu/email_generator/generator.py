@@ -61,13 +61,27 @@ def parse_response(raw: str) -> ColdEmailDraft:
     return ColdEmailDraft(subject=subject, body=body)
 
 
-def _ensure_signature(body: str) -> str:
-    """Si Claude a oublié la signature, on l'ajoute en queue."""
+def _ensure_closing(body: str) -> str:
+    """Filet de sécurité charte : garantit la clôture "Bien à vous, Richard Gros".
+
+    Le bloc coordonnées n'est PAS ajouté ici (apposé en HTML par le sender,
+    cf. SIGNATURES.md §3). On corrige juste un Claude qui aurait oublié la
+    clôture ou glissé un "Cordialement" banni.
+    """
     if not body:
         return body
-    if conf.SIGNATURE_NAME in body and conf.SIGNATURE_EMAIL in body:
-        return body
-    return f"{body.rstrip()}\n\n{conf.render_signature()}"
+    cleaned = body.rstrip()
+    if "Bien à vous" in cleaned:
+        return cleaned
+    # Retire une clôture interdite éventuelle ("Cordialement," + nom) avant
+    # d'apposer la clôture charte.
+    lines = cleaned.splitlines()
+    while lines and lines[-1].strip() in ("Richard Gros", "Richard", ""):
+        lines.pop()
+    while lines and lines[-1].strip().rstrip(",") in ("Cordialement", "Bien cordialement"):
+        lines.pop()
+    cleaned = "\n".join(lines).rstrip()
+    return f"{cleaned}\n\n{conf.EMAIL_CLOSING_FORMAL_FIRST}"
 
 
 def generate_cold_email(
@@ -127,7 +141,7 @@ def generate_cold_email(
                        draft.subject, len(draft.body))
         return draft
 
-    draft.body = _ensure_signature(draft.body)
+    draft.body = _ensure_closing(draft.body)
     draft.model_used = model_id
     return draft
 

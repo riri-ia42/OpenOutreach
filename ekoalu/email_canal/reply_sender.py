@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from ekoalu.email_canal.sender import text_body_to_html
+from ekoalu.email_canal.sender import signature_block_html, text_body_to_html
 from ekoalu.inbox_assist.models import PendingReply
 from ekoalu.notifications.graph_mailer import (
     GraphAuthError,
@@ -49,7 +49,8 @@ def send_email_reply(pr: PendingReply) -> tuple[bool, str]:
     if not body_text.strip():
         return False, "body vide (final_sent et ai_draft tous les deux vides)"
 
-    body_html = text_body_to_html(body_text)
+    # Charte signature : échange en cours → bloc FORMAL (sans « Dirigeant »)
+    body_html = text_body_to_html(body_text) + "\n" + signature_block_html(formal_first=False)
 
     try:
         send_reply(original_message_id=pr.inbound_message_id, body_html=body_html)

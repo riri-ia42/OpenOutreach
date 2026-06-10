@@ -14,8 +14,10 @@ import random
 
 from ekoalu import conf
 
-# Pondération : on inclut TOUJOURS la signature dans le prompt mais on l'ajoute
-# en post-traitement par sécurité (cf. generator.py).
+# Charte signature : le prompt impose la clôture textuelle "Bien à vous,
+# Richard Gros" (formal-first) et INTERDIT toute coordonnée dans le corps.
+# Le bloc coordonnées HTML est apposé par le sender. Filet de sécurité en
+# post-traitement dans generator.py (_ensure_closing).
 
 # === VARIANTE V1 : posture wedge technique (focus niches/normes) =============
 BASE_SYSTEM_PROMPT_V1 = """Tu rédiges des cold mails B2B pour Richard Gros, Président d'EKOALU
@@ -56,12 +58,12 @@ acoustique Rw>40). Adapte la niche au profil du prospect quand c'est pertinent
 pour un architecte → mur-rideau + acoustique ; pour un BET → grandes dimensions + Rw).
 
 [Bloc 4 — CTA visio]
-Une seule phrase qui propose 15 min en visio. Si BOOKING_URL fourni dans le bloc système,
-inclus-le à la fin avec : "Mon agenda si pertinent : {booking_url}".
-Pas de téléphone, jamais.
+Une seule phrase qui propose 15 min en visio. PAS de lien, PAS de téléphone :
+le lien RDV et les coordonnées sont dans le bloc signature ajouté automatiquement
+après le corps par l'outil d'envoi.
 
-[Bloc 5 — Signature]
-Reproduis EXACTEMENT, sans modifier :
+[Bloc 5 — Clôture]
+Termine EXACTEMENT par (charte signature Richard, rien d'autre après) :
 {signature_block}
 </corps>
 
@@ -75,10 +77,10 @@ RÈGLES ABSOLUES :
   dans l'attente, dans l'optique de, à l'instar de.
 - Pas de markdown, pas de guillemets autour du corps.
 - Écris en français, vouvoiement obligatoire.
-- Corps total : 8-14 lignes max (signature comprise), aéré (1 ligne blanche entre blocs).
-- Bloc 5 : EXACTEMENT le bloc signature, copié verbatim, jamais modifié.
-
-BOOKING_URL : {booking_url_or_none}
+- Corps total : 8-12 lignes max (clôture comprise), aéré (1 ligne blanche entre blocs).
+- JAMAIS "Cordialement" ni "Bien cordialement" : la clôture est UNIQUEMENT celle du Bloc 5.
+- JAMAIS de coordonnées (téléphone, adresse, email, lien) dans le corps : le bloc
+  coordonnées complet est apposé automatiquement après la clôture.
 """
 
 
@@ -134,14 +136,14 @@ def pick_variant(variants: dict[str, tuple[str, float]] | None = None) -> str:
 
 
 def render_system_prompt(variant: str = DEFAULT_VARIANT) -> str:
-    """Injecte signature + booking URL dans la variante choisie."""
+    """Injecte la clôture charte dans la variante choisie.
+
+    Charte signature (SIGNATURES.md jumeau numérique) : Claude n'écrit que la
+    clôture textuelle formal-first ; le bloc coordonnées (avec lien RDV) est
+    apposé par ekoalu/email_canal/sender.py à l'envoi.
+    """
     template, _weight = PROMPT_VARIANTS.get(variant, PROMPT_VARIANTS[DEFAULT_VARIANT])
-    booking = conf.CALENDAR_BOOKING_URL or ""
-    return template.format(
-        signature_block=conf.render_signature(),
-        booking_url=booking or "(aucun)",
-        booking_url_or_none=booking or "(aucun lien fourni, ne pas inclure de lien)",
-    )
+    return template.format(signature_block=conf.EMAIL_CLOSING_FORMAL_FIRST)
 
 
 def build_user_message(*, entreprise: str, dirigeant: str, code_naf: str,

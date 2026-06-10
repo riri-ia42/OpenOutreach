@@ -68,10 +68,14 @@ class Command(BaseCommand):
         source = opts["source"].strip()
         dry_run = bool(opts["dry_run"])
 
-        # 1. Lead avec contact_email + EmailLeadData + pas désinscrit
+        # 1. Lead avec contact_email + EmailLeadData + pas désinscrit ni bouncé
         leads_qs = (
             Lead.objects
-            .filter(contact_email__isnull=False, unsubscribed_at__isnull=True)
+            .filter(
+                contact_email__isnull=False,
+                unsubscribed_at__isnull=True,
+                email_bounced_at__isnull=True,
+            )
             .exclude(contact_email="")
             .filter(email_data__isnull=False)
         )
