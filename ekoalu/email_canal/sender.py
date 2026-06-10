@@ -63,28 +63,40 @@ def signature_block_html(*, formal_first: bool = True, with_logo: bool = True) -
     from ekoalu import conf
 
     title = ", Dirigeant" if formal_first else ""
-    line = (
+    # Interlignes en POINTS + mso-line-height-rule : le moteur Word d'Outlook
+    # ignore les line-height relatifs et rognait les jambages (texte tronqué).
+    line_main = (
         "margin:0;padding:0;font-family:'Segoe UI',Calibri,Arial,sans-serif;"
-        "line-height:1.35;"
+        "font-size:11pt;mso-line-height-rule:exactly;line-height:16pt;color:#222;"
+    )
+    line_sub = (
+        "margin:0;padding:0;font-family:'Segoe UI',Calibri,Arial,sans-serif;"
+        "font-size:9pt;mso-line-height-rule:exactly;line-height:14pt;color:#555;"
     )
     logo_td = ""
     if with_logo and get_logo_bytes() is not None:
+        # PNG 149x182 = contenu a ras en haut + 8px de marge EN BAS (Outlook
+        # rognait le wordmark "eKoalu"). 60x73 = meme ratio.
+        # font-size:0/line-height:0 sur la cellule : sans ca le moteur Word
+        # d'Outlook traite l'img comme du texte inline et la decale d'une
+        # demi-ligne vers le bas (le "logo desaligne" des captures Richard).
         logo_td = (
-            "<td style=\"padding:0 12px 0 0;vertical-align:top;\">"
-            f"<img src=\"cid:{LOGO_CID}\" width=\"95\" height=\"111\" alt=\"EKOALU\""
-            " style=\"display:block;border:0;\"></td>"
+            "<td valign=\"top\" style=\"padding:0 12px 0 0;vertical-align:top;"
+            "font-size:0;line-height:0;mso-line-height-rule:exactly;\">"
+            f"<img src=\"cid:{LOGO_CID}\" width=\"60\" height=\"73\" alt=\"EKOALU\""
+            " style=\"display:block;border:0;width:60px;height:73px;\"></td>"
         )
     return (
         "<table cellpadding=\"0\" cellspacing=\"0\""
         " style=\"border-collapse:collapse;margin-top:14px;\"><tr>"
         f"{logo_td}"
-        "<td style=\"padding:0;vertical-align:top;\">"
-        f"<p style=\"{line}font-size:11pt;color:#222;\"><strong>Richard Gros</strong>{title}"
+        "<td valign=\"top\" style=\"padding:0 0 6px 0;vertical-align:top;\">"
+        f"<p style=\"{line_main}\"><strong>Richard Gros</strong>{title}"
         f" – {conf.EMAIL_SIG_MOBILE} – {conf.SIGNATURE_EMAIL}</p>"
-        f"<p style=\"{line}font-size:9pt;color:#555;\">Fixe {conf.EMAIL_SIG_FIXE} – "
+        f"<p style=\"{line_sub}\">Fixe {conf.EMAIL_SIG_FIXE} – "
         f"{conf.EMAIL_SIG_ADDRESS}</p>"
-        f"<p style=\"{line}font-size:9pt;color:#555;\">{html.escape(conf.EMAIL_SIG_TAGLINE)}</p>"
-        f"<p style=\"{line}font-size:9pt;color:#555;\">"
+        f"<p style=\"{line_sub}\">{html.escape(conf.EMAIL_SIG_TAGLINE)}</p>"
+        f"<p style=\"{line_sub}\">"
         f"<a href=\"{conf.EMAIL_SIG_GUIDE_URL}\">Notre guide des solutions</a> – "
         f"<a href=\"{conf.CALENDAR_BOOKING_URL}\">Prendre RDV</a></p>"
         "</td></tr></table>"
