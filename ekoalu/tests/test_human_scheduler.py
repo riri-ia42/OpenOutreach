@@ -156,9 +156,20 @@ class TestConfDefaults:
         assert conf.ACTIVE_WINDOWS[0] == (7.5, 12.0)
         assert conf.ACTIVE_WINDOWS[1] == (14.0, 20.0)
 
-    def test_volume_hebdo_target_par_defaut_30(self):
-        # Pilote initial 30/sem (modifiable via EKOALU_WEEKLY_INVITE_TARGET)
-        assert conf.WEEKLY_INVITE_TARGET == 30
+    def test_volume_hebdo_target_par_defaut_30(self, monkeypatch):
+        # Pilote initial 30/sem (modifiable via EKOALU_WEEKLY_INVITE_TARGET).
+        # La machine de prod a EKOALU_WEEKLY_INVITE_TARGET=60 dans l'env : on
+        # teste le DEFAUT en rechargeant le module sans la variable, puis on
+        # restaure l'etat reel pour ne pas polluer les autres tests.
+        import importlib
+
+        monkeypatch.delenv("EKOALU_WEEKLY_INVITE_TARGET", raising=False)
+        try:
+            importlib.reload(conf)
+            assert conf.WEEKLY_INVITE_TARGET == 30
+        finally:
+            monkeypatch.undo()
+            importlib.reload(conf)
 
     def test_hard_cap_80(self):
         assert conf.WEEKLY_INVITE_HARD_CAP == 80
