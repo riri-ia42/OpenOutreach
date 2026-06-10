@@ -25,6 +25,7 @@ class EkoaluConfig(AppConfig):
         from ekoalu.lead_routing.patch import apply_lead_routing_patch
         from ekoalu.llm_usage.patch import apply_claude_logging_patch
         from ekoalu.outbound_validation.patch import apply_outbound_validation_patch
+        from ekoalu.read_guard.patch import apply_read_guard_patch
         from ekoalu.sourcing_filter.patch import apply_sourcing_filter_patch
 
         try:
@@ -62,3 +63,9 @@ class EkoaluConfig(AppConfig):
             logger.info("EKOALU follow_up patch applied")
         except Exception as e:
             logger.error("Failed to apply ekoalu follow_up patch: %s", e, exc_info=True)
+
+        try:
+            apply_read_guard_patch()
+            logger.info("EKOALU read_guard patch applied")
+        except Exception as e:
+            logger.error("Failed to apply read_guard patch: %s", e, exc_info=True)

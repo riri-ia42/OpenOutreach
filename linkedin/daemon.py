@@ -398,6 +398,25 @@ def run_daemon(session):
         except Exception:
             logger.exception("EKOALU drain approved queue failed")
 
+        # EKOALU — cap dur lectures profil/jour (garde-fou post-checkpoint
+        # 06/06 : ce sont les LECTURES qui ont fait sanctionner le compte,
+        # pas les envois). Cap atteint => plus aucune task (qualif,
+        # follow-up, check_pending lisent des fiches), mais le drain de la
+        # file approved ci-dessus continue. Reset auto a minuit.
+        from ekoalu.read_guard.guard import daily_reads_cap, is_cap_reached
+        if is_cap_reached():
+            logger.warning(
+                colored("READ_CAP", "yellow", attrs=["bold"])
+                + " - cap lectures profil atteint (%d/j), tasks en pause"
+                + " jusqu'a minuit. Les envois approuves continuent.",
+                daily_reads_cap(),
+            )
+            sleep_with_heartbeat(
+                1800, heartbeat, "READ_CAP atteint - tasks en pause, reset minuit",
+            )
+            rhythm.reset()
+            continue
+
         task = Task.objects.claim_next()
         if task is None:
             # Nothing ready — reconcile the queue from CRM state. Any deal
@@ -448,6 +467,12 @@ def run_daemon(session):
             # Either way, mark this task FAILED; reconcile will re-create a
             # fresh task for the deal on the next idle cycle.
             task.mark_failed()
+            # EKOALU — auto-STOP anti-checkpoint : N tasks consecutives en
+            # echec d'auth = blocage LinkedIn probable. Insister aggrave le
+            # signal (le 06/06 : 492 re-login avant le STOP manuel). Le
+            # compteur est remis a zero par chaque task reussie plus bas.
+            from ekoalu import auth_watch
+            auth_watch.record_auth_failure(context=f"task={task}")
             continue
         except ModelHTTPError as e:
             task.mark_failed()
@@ -462,5 +487,7 @@ def run_daemon(session):
             continue
 
         task.mark_completed()
+        from ekoalu import auth_watch
+        auth_watch.reset()
         cloud_promo.maybe_log()
         rhythm.maybe_break()
