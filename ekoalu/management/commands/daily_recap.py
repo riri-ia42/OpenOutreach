@@ -65,6 +65,8 @@ class DailyStats:
     email_unsubscribed: int
     # A/B testing brique H : compte cold mails envoyés par variante (cumulatif total)
     email_cold_by_variant: dict[str, int]
+    # Brique K : réponses reçues par variante de cold mail (cumulatif total)
+    email_replies_by_variant: dict[str, int]
     tasks_completed: int
     tasks_failed: int
     accept_rate_today: float | None
@@ -72,6 +74,11 @@ class DailyStats:
     by_campaign: list[dict]
     recent_activity: list[str]
     system: SystemStatus
+    # Garde-fou anti-ban : lectures de fiches LinkedIn du jour vs cap
+    profile_reads_today: int
+    profile_reads_cap: int
+    # Audit de coherence CRM (check_crm_integrity)
+    integrity_issues: int
 
 
 def read_system_status() -> SystemStatus:
@@ -186,6 +193,16 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
     email_cold_by_variant = {row["prompt_variant"]: row["n"]
                               for row in email_cold_by_variant_qs}
 
+    # Brique K : réponses reçues par variante (cumulatif, même logique)
+    email_replies_by_variant = {
+        row["cold_variant"]: row["n"]
+        for row in PendingReply.objects.filter(channel=PendingReply.CHANNEL_EMAIL)
+        .exclude(cold_variant="")
+        .values("cold_variant")
+        .annotate(n=Count("id"))
+        .order_by("cold_variant")
+    }
+
     tasks_today_completed = Task.objects.filter(
         completed_at__gte=day_start, completed_at__lt=day_end, status="completed"
     ).count()
@@ -230,6 +247,15 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
     ).order_by("-completed_at")[:5]:
         recent_activity.append(f"{t.completed_at.astimezone(tz):%H:%M} - {t.task_type}")
 
+    from ekoalu.crm_integrity import collect_anomalies, total_issues
+    from ekoalu.read_guard.guard import daily_reads_cap, reads_today
+
+    try:
+        integrity_issues = total_issues(collect_anomalies())
+    except Exception:
+        logger.exception("daily_recap: audit crm_integrity en echec")
+        integrity_issues = -1  # -1 = audit indisponible
+
     return DailyStats(
         day=day,
         period=period,
@@ -247,6 +273,7 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         email_replies_sent=email_replies_sent,
         email_unsubscribed=email_unsubscribed,
         email_cold_by_variant=email_cold_by_variant,
+        email_replies_by_variant=email_replies_by_variant,
         tasks_completed=tasks_today_completed,
         tasks_failed=tasks_today_failed,
         accept_rate_today=accept_rate,
@@ -254,6 +281,9 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         by_campaign=by_campaign,
         recent_activity=recent_activity,
         system=read_system_status(),
+        profile_reads_today=reads_today(),
+        profile_reads_cap=daily_reads_cap(),
+        integrity_issues=integrity_issues,
     )
 
 
@@ -324,15 +354,23 @@ def _render_system_banner(sys_status: SystemStatus, period: str) -> str:
     )
 
 
-def _render_ab_rows(by_variant: dict[str, int]) -> str:
+def _render_ab_rows(by_variant: dict[str, int],
+                    replies_by_variant: dict[str, int] | None = None) -> str:
     if not by_variant:
-        return ("<tr><td colspan='2' style='color:#6b7280;padding:6px'>"
+        return ("<tr><td colspan='4' style='color:#6b7280;padding:6px'>"
                 "(aucun cold mail envoye, A/B testing en attente de donnees)</td></tr>")
-    return "\n".join(
-        f"<tr><td style='padding:6px'>{v}</td>"
-        f"<td style='padding:6px;text-align:right;font-weight:bold'>{n}</td></tr>"
-        for v, n in sorted(by_variant.items())
-    )
+    replies_by_variant = replies_by_variant or {}
+    rows = []
+    for v, n in sorted(by_variant.items()):
+        replies = replies_by_variant.get(v, 0)
+        rate = f"{100.0 * replies / n:.1f}%" if n else "n/a"
+        rows.append(
+            f"<tr><td style='padding:6px'>{v}</td>"
+            f"<td style='padding:6px;text-align:right;font-weight:bold'>{n}</td>"
+            f"<td style='padding:6px;text-align:right'>{replies}</td>"
+            f"<td style='padding:6px;text-align:right'>{rate}</td></tr>"
+        )
+    return "\n".join(rows)
 
 
 def render_html(s: DailyStats) -> str:
@@ -392,6 +430,10 @@ def render_html(s: DailyStats) -> str:
         <span style="color: #16a34a">{s.tasks_completed}</span> /
         <span style="color: #dc2626">{s.tasks_failed}</span>
       </td></tr>
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Lectures profil LinkedIn (cap anti-ban)</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: {'#dc2626' if s.profile_reads_today >= s.profile_reads_cap else '#16a34a'};">{s.profile_reads_today} / {s.profile_reads_cap}</td></tr>
+  <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Coherence CRM (anomalies)</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: {'#16a34a' if s.integrity_issues == 0 else '#dc2626'};">{s.integrity_issues if s.integrity_issues >= 0 else 'audit KO'}</td></tr>
 </table>
 
 <h2 style="color: #1f2937;">Canal email</h2>
@@ -412,9 +454,11 @@ def render_html(s: DailyStats) -> str:
 <table style="width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px;">
   <thead><tr style="background: #f3f4f6;">
     <th style="padding: 6px; text-align: left;">Variante</th>
-    <th style="padding: 6px; text-align: right;">Cold mails envoyés</th>
+    <th style="padding: 6px; text-align: right;">Envoyés</th>
+    <th style="padding: 6px; text-align: right;">Réponses</th>
+    <th style="padding: 6px; text-align: right;">Taux</th>
   </tr></thead>
-  <tbody>{_render_ab_rows(s.email_cold_by_variant)}</tbody>
+  <tbody>{_render_ab_rows(s.email_cold_by_variant, s.email_replies_by_variant)}</tbody>
 </table>
 
 <h2 style="color: #1f2937;">Par campagne</h2>
@@ -468,10 +512,15 @@ def render_text(s: DailyStats) -> str:
         "",
         "A/B prompts (cumul):",
         *(
-            [f"  - {v:8} : {n} envoyes" for v, n in sorted(s.email_cold_by_variant.items())]
+            [
+                f"  - {v:8} : {n} envoyes, {s.email_replies_by_variant.get(v, 0)} reponses"
+                for v, n in sorted(s.email_cold_by_variant.items())
+            ]
             or ["  (aucun envoi avec variante)"]
         ),
         f"Tasks completed/failed: {s.tasks_completed} / {s.tasks_failed}",
+        f"Lectures profil LK   : {s.profile_reads_today} / {s.profile_reads_cap} (cap anti-ban)",
+        f"Coherence CRM        : {s.integrity_issues if s.integrity_issues >= 0 else 'audit KO'} anomalie(s)",
         "",
         "Dashboard : http://ekoalu-prospection:3210/ekoalu/",
     ]
