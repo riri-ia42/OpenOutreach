@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import logging
 
-from ekoalu.email_canal.sender import signature_block_html, text_body_to_html
+from ekoalu.email_canal.sender import (
+    LOGO_CID,
+    get_logo_bytes,
+    signature_block_html,
+    text_body_to_html,
+)
 from ekoalu.inbox_assist.models import PendingReply
 from ekoalu.notifications.graph_mailer import (
     GraphAuthError,
@@ -51,9 +56,12 @@ def send_email_reply(pr: PendingReply) -> tuple[bool, str]:
 
     # Charte signature : échange en cours → bloc FORMAL (sans « Dirigeant »)
     body_html = text_body_to_html(body_text) + "\n" + signature_block_html(formal_first=False)
+    logo = get_logo_bytes()
+    inline_images = {LOGO_CID: logo} if logo else None
 
     try:
-        send_reply(original_message_id=pr.inbound_message_id, body_html=body_html)
+        send_reply(original_message_id=pr.inbound_message_id, body_html=body_html,
+                   inline_images=inline_images)
     except GraphConfigError as exc:
         logger.error("Graph mal configuré : %s", exc)
         return False, f"graph_config: {exc}"

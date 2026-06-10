@@ -82,12 +82,31 @@ def _get_access_token() -> str:
         return token
 
 
+def _inline_attachments(images: dict[str, bytes]) -> list[dict]:
+    """Convertit {cid: bytes_png} en attachments Graph inline (img src=cid:...)."""
+    import base64
+
+    return [
+        {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": f"{cid}.png",
+            "contentType": "image/png",
+            "contentBytes": base64.b64encode(data).decode("ascii"),
+            "contentId": cid,
+            "isInline": True,
+        }
+        for cid, data in images.items()
+        if data
+    ]
+
+
 def send_mail(
     *,
     subject: str,
     html_body: str,
     text_body: str | None = None,
     to: str | None = None,
+    inline_images: dict[str, bytes] | None = None,
 ) -> None:
     """Envoie un mail via Graph sendMail.
 
@@ -96,6 +115,8 @@ def send_mail(
         html_body: Corps HTML
         text_body: (ignoré — Graph rend bien le HTML)
         to: destinataire (défaut richard@ekoalu.com via GRAPH_ALERT_RECIPIENT)
+        inline_images: {content_id: bytes_png} embarqués inline — référencés
+            dans le HTML via ``<img src="cid:<content_id>">`` (ex : logo signature)
 
     Raises:
         GraphConfigError, GraphAuthError, GraphSendError.
@@ -115,6 +136,8 @@ def send_mail(
         },
         "saveToSentItems": True,
     }
+    if inline_images:
+        payload["message"]["attachments"] = _inline_attachments(inline_images)
 
     resp = requests.post(
         f"{GRAPH_BASE}/users/{user_email}/sendMail",
@@ -157,7 +180,12 @@ def is_configured() -> bool:
         return False
 
 
-def send_reply(*, original_message_id: str, body_html: str) -> None:
+def send_reply(
+    *,
+    original_message_id: str,
+    body_html: str,
+    inline_images: dict[str, bytes] | None = None,
+) -> None:
     """Envoie une réponse threadée à un message existant via Graph reply.
 
     Graph gère automatiquement les headers In-Reply-To / References / threading
@@ -185,6 +213,8 @@ def send_reply(*, original_message_id: str, body_html: str) -> None:
         # On peut surcharger le message (subject, toRecipients) si besoin via "message":
         # ici on laisse Graph reprendre l'original et on injecte juste notre comment.
     }
+    if inline_images:
+        payload["message"] = {"attachments": _inline_attachments(inline_images)}
 
     resp = requests.post(
         f"{GRAPH_BASE}/users/{user_email}/messages/{original_message_id}/reply",

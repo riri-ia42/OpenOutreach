@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import html
 import logging
+from functools import lru_cache
+from pathlib import Path
 
 from ekoalu.email_canal.models import EmailLeadData  # noqa: F401 (futur usage)
 from ekoalu.notifications.graph_mailer import (
@@ -34,28 +36,58 @@ _UNSUB_FOOTER_HTML = (
 )
 
 
-def signature_block_html(*, formal_first: bool = True) -> str:
+# Logo EKOALU embarqué inline (cid:) — extrait de la signature Outlook native
+# (image002.png, 119x139). Fichier : ekoalu/assets/logo_ekoalu.png.
+LOGO_CID = "logoekoalu"
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo_ekoalu.png"
+
+
+@lru_cache(maxsize=1)
+def get_logo_bytes() -> bytes | None:
+    """Bytes PNG du logo EKOALU (None si le fichier manque — mail sans logo)."""
+    try:
+        return _LOGO_PATH.read_bytes()
+    except OSError:
+        logger.warning("Logo EKOALU introuvable (%s) — signature sans logo", _LOGO_PATH)
+        return None
+
+
+def signature_block_html(*, formal_first: bool = True, with_logo: bool = True) -> str:
     """Bloc coordonnées HTML de la charte signature Richard (SIGNATURES.md).
 
-    Apposé par le CODE après la clôture textuelle générée par Claude
-    (« Bien à vous, Richard Gros »). `formal_first=True` ajoute la mention
-    « Dirigeant » (prospection / 1er contact) ; False = échange en cours.
+    Reproduit le gabarit de la signature Outlook native EKOALU : logo à
+    gauche (cid inline), texte serré à droite (9pt, interligne 1.35).
+    Apposé par le CODE après la clôture textuelle générée par Claude.
+    `formal_first=True` ajoute la mention « Dirigeant » (1er contact).
     """
     from ekoalu import conf
 
     title = ", Dirigeant" if formal_first else ""
+    line = (
+        "margin:0;padding:0;font-family:'Segoe UI',Calibri,Arial,sans-serif;"
+        "line-height:1.35;"
+    )
+    logo_td = ""
+    if with_logo and get_logo_bytes() is not None:
+        logo_td = (
+            "<td style=\"padding:0 12px 0 0;vertical-align:top;\">"
+            f"<img src=\"cid:{LOGO_CID}\" width=\"95\" height=\"111\" alt=\"EKOALU\""
+            " style=\"display:block;border:0;\"></td>"
+        )
     return (
-        "<table style=\"border-collapse:collapse;margin-top:14px;"
-        "font-family:'Segoe UI',Calibri,Arial,sans-serif;font-size:11pt;color:#222;\">"
-        f"<tr><td><strong>Richard Gros</strong>{title} – {conf.EMAIL_SIG_MOBILE} – "
-        f"{conf.SIGNATURE_EMAIL}</td></tr>"
-        f"<tr><td style=\"color:#555;font-size:10pt;\">Fixe {conf.EMAIL_SIG_FIXE} – "
-        f"{conf.EMAIL_SIG_ADDRESS}</td></tr>"
-        f"<tr><td style=\"color:#555;font-size:10pt;\">{html.escape(conf.EMAIL_SIG_TAGLINE)}</td></tr>"
-        f"<tr><td style=\"color:#555;font-size:10pt;\">"
+        "<table cellpadding=\"0\" cellspacing=\"0\""
+        " style=\"border-collapse:collapse;margin-top:14px;\"><tr>"
+        f"{logo_td}"
+        "<td style=\"padding:0;vertical-align:top;\">"
+        f"<p style=\"{line}font-size:11pt;color:#222;\"><strong>Richard Gros</strong>{title}"
+        f" – {conf.EMAIL_SIG_MOBILE} – {conf.SIGNATURE_EMAIL}</p>"
+        f"<p style=\"{line}font-size:9pt;color:#555;\">Fixe {conf.EMAIL_SIG_FIXE} – "
+        f"{conf.EMAIL_SIG_ADDRESS}</p>"
+        f"<p style=\"{line}font-size:9pt;color:#555;\">{html.escape(conf.EMAIL_SIG_TAGLINE)}</p>"
+        f"<p style=\"{line}font-size:9pt;color:#555;\">"
         f"<a href=\"{conf.EMAIL_SIG_GUIDE_URL}\">Notre guide des solutions</a> – "
-        f"<a href=\"{conf.CALENDAR_BOOKING_URL}\">Prendre RDV</a></td></tr>"
-        "</table>"
+        f"<a href=\"{conf.CALENDAR_BOOKING_URL}\">Prendre RDV</a></p>"
+        "</td></tr></table>"
     )
 
 
@@ -128,9 +160,12 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
         return False, "body vide"
 
     html_body = build_html_email(body_text)
+    logo = get_logo_bytes()
+    inline_images = {LOGO_CID: logo} if logo else None
 
     try:
-        send_mail(subject=po.subject, html_body=html_body, to=recipient)
+        send_mail(subject=po.subject, html_body=html_body, to=recipient,
+                  inline_images=inline_images)
     except GraphConfigError as exc:
         logger.error("Graph mal configuré : %s", exc)
         return False, f"graph_config: {exc}"

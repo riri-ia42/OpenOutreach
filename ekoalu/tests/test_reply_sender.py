@@ -59,9 +59,10 @@ class TestSendEmailReplySuccess:
     def test_appelle_graph_send_reply(self, monkeypatch):
         captured = {}
 
-        def _mock(*, original_message_id, body_html):
+        def _mock(*, original_message_id, body_html, inline_images=None):
             captured["msg_id"] = original_message_id
             captured["html"] = body_html
+            captured["inline_images"] = inline_images
 
         monkeypatch.setattr("ekoalu.email_canal.reply_sender.send_reply", _mock)
         pr = _make_pr()
@@ -71,6 +72,10 @@ class TestSendEmailReplySuccess:
         assert captured["msg_id"] == "graph-msg-id-123"
         assert "<p " in captured["html"]
         assert "OK pour 15min" in captured["html"]
+        # Bloc signature FORMAL (échange en cours) + logo inline
+        assert "Dirigeant" not in captured["html"]
+        assert "cid:logoekoalu" in captured["html"]
+        assert captured["inline_images"] and "logoekoalu" in captured["inline_images"]
 
     def test_envoie_final_sent_si_edite(self, monkeypatch):
         captured = {}

@@ -94,10 +94,11 @@ class TestSendColdEmailSuccess:
         lead, po = make_lead_with_po()
         captured = {}
 
-        def _mock_send(*, subject, html_body, to):
+        def _mock_send(*, subject, html_body, to, inline_images=None):
             captured["subject"] = subject
             captured["html_body"] = html_body
             captured["to"] = to
+            captured["inline_images"] = inline_images
 
         monkeypatch.setattr("ekoalu.email_canal.sender.send_mail", _mock_send)
         success, err = send_cold_email(po)
@@ -107,6 +108,7 @@ class TestSendColdEmailSuccess:
         assert captured["subject"] == "Coupe-feu EI60 pour vos projets"
         assert "Coupe-feu EI60" in captured["html_body"]
         assert "<p " in captured["html_body"]  # HTML conversion
+        assert captured["inline_images"] and "logoekoalu" in captured["inline_images"]
 
 
 class TestSendColdEmailFailures:
@@ -297,6 +299,8 @@ class TestSignatureCharte:
         assert "Prendre RDV" in out
         assert "Notre guide des solutions" in out
         assert "06 XX" not in out
+        assert "cid:logoekoalu" in out            # logo EKOALU inline
+        assert "line-height:1.35" in out          # interligne serré (gabarit natif)
 
     def test_bloc_formal_sans_dirigeant_pour_replies(self):
         from ekoalu.email_canal.sender import signature_block_html
@@ -304,3 +308,15 @@ class TestSignatureCharte:
         bloc = signature_block_html(formal_first=False)
         assert "Dirigeant" not in bloc
         assert "06 14 26 31 24" in bloc
+
+    def test_logo_present_sur_disque(self):
+        from ekoalu.email_canal.sender import get_logo_bytes
+
+        logo = get_logo_bytes()
+        assert logo is not None
+        assert logo[:8] == b"\x89PNG\r\n\x1a\n"  # entête PNG valide
+
+    def test_bloc_sans_logo_si_demande(self):
+        from ekoalu.email_canal.sender import signature_block_html
+
+        assert "cid:" not in signature_block_html(with_logo=False)
