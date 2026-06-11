@@ -300,7 +300,8 @@ class TestSignatureCharte:
         assert "Notre guide des solutions" in out
         assert "06 XX" not in out
         assert "cid:logoekoalu" in out            # logo EKOALU inline
-        assert "line-height:1.35" in out          # interligne serré (gabarit natif)
+        assert "line-height:14pt" in out          # interligne en pt (Outlook/Word)
+        assert "mso-line-height-rule:exactly" in out
 
     def test_bloc_formal_sans_dirigeant_pour_replies(self):
         from ekoalu.email_canal.sender import signature_block_html
@@ -320,3 +321,23 @@ class TestSignatureCharte:
         from ekoalu.email_canal.sender import signature_block_html
 
         assert "cid:" not in signature_block_html(with_logo=False)
+
+
+class TestLinkify:
+    """Le lien RDV present dans le corps doit etre cliquable dans le HTML."""
+
+    def test_url_du_corps_devient_un_lien(self):
+        from ekoalu.email_canal.sender import text_body_to_html
+
+        out = text_body_to_html(
+            "Bonjour,\n\nMon agenda : https://outlook.office365.com/book/EKOALUPrisedeRDV@ekoalu.com/"
+        )
+        assert (
+            '<a href="https://outlook.office365.com/book/EKOALUPrisedeRDV@ekoalu.com/">' in out
+        )
+
+    def test_texte_sans_url_inchange(self):
+        from ekoalu.email_canal.sender import text_body_to_html
+
+        out = text_body_to_html("Bonjour,\n\npas de lien ici.")
+        assert "<a " not in out

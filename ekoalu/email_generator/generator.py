@@ -84,6 +84,32 @@ def _ensure_closing(body: str) -> str:
     return f"{cleaned}\n\n{conf.EMAIL_CLOSING_FORMAL_FIRST}"
 
 
+def _ensure_booking(body: str) -> str:
+    """Garantit la proposition RDV 15-30 min avec le lien Bookings OFFICIEL.
+
+    Le prompt impose le marqueur [LIEN_RDV] (le LLM n'écrit jamais d'URL →
+    zéro hallucination possible). Ici : remplacement du marqueur par
+    conf.CALENDAR_BOOKING_URL ; si le marqueur manque (LLM distrait), on
+    insère la phrase RDV standard juste avant la clôture.
+    """
+    if not body:
+        return body
+    url = conf.CALENDAR_BOOKING_URL
+    if "[LIEN_RDV]" in body:
+        return body.replace("[LIEN_RDV]", url)
+    if url in body:
+        return body
+    sentence = (
+        "Si le sujet vous parle, 15-30 min en visio suffisent — "
+        f"mon agenda en ligne : {url}"
+    )
+    lines = body.rstrip().splitlines()
+    idx = next((i for i, line in enumerate(lines) if "Bien à vous" in line), None)
+    if idx is None:
+        return f"{body.rstrip()}\n\n{sentence}"
+    return "\n".join(lines[:idx] + [sentence, ""] + lines[idx:])
+
+
 def generate_cold_email(
     *,
     entreprise: str = "",
@@ -97,6 +123,7 @@ def generate_cold_email(
     model: str | None = None,
     max_tokens: int = 900,
     variant: str | None = None,
+    instruction: str = "",
 ) -> ColdEmailDraft:
     """Génère un cold mail EKOALU pour les données prospect fournies.
 
@@ -120,6 +147,12 @@ def generate_cold_email(
         activite=activite, ville=ville, dpt=dpt,
         effectif_min=effectif_min, effectif_max=effectif_max,
     )
+    if instruction.strip():
+        user_msg += (
+            "\n\nCONSIGNE DE RÉGÉNÉRATION (priorité absolue, demandée par Richard) :\n"
+            f"{instruction.strip()}\n"
+            "Rappel : le seul lien autorisé reste le marqueur [LIEN_RDV] tel quel."
+        )
     model_id = model or os.environ.get("ANTHROPIC_MODEL", _DEFAULT_MODEL)
 
     try:
@@ -141,7 +174,7 @@ def generate_cold_email(
                        draft.subject, len(draft.body))
         return draft
 
-    draft.body = _ensure_closing(draft.body)
+    draft.body = _ensure_booking(_ensure_closing(draft.body))
     draft.model_used = model_id
     return draft
 

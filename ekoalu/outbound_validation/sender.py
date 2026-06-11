@@ -21,6 +21,11 @@ from ekoalu.outbound_validation.patch import (
 
 logger = logging.getLogger(__name__)
 
+# Kinds envoyes par CE sender (navigateur LinkedIn). Les kinds email_* sont
+# envoyes par ekoalu/email_canal (commande send_approved_emails via Graph) —
+# les ramasser ici produisait des FAILED "unknown kind: email_cold".
+LINKEDIN_KINDS = (OutboundKind.INVITATION, OutboundKind.FOLLOW_UP, OutboundKind.REPLY)
+
 
 def _resolve_profile_dict(po: PendingOutbound) -> dict:
     """Construit le profile dict requis par les fonctions LinkedIn."""
@@ -161,7 +166,7 @@ def process_approved_queue(
     if not is_action_allowed_now():
         logger.info("Hors plage active EKOALU — aucun envoi")
         stats["skipped"] = PendingOutbound.objects.filter(
-            status=OutboundStatus.APPROVED,
+            status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
         ).count()
         return stats
 
@@ -219,11 +224,11 @@ def process_approved_queue(
     # (pas de cap LinkedIn comparable).
     if invitations_blocked:
         approved = PendingOutbound.objects.filter(
-            status=OutboundStatus.APPROVED,
+            status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
         ).exclude(kind=OutboundKind.INVITATION).order_by("approved_at")[:max_messages]
     else:
         approved = PendingOutbound.objects.filter(
-            status=OutboundStatus.APPROVED,
+            status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
         ).order_by("approved_at")[:max_messages]
 
     for i, po in enumerate(approved):

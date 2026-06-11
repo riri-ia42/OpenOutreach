@@ -58,9 +58,13 @@ acoustique Rw>40). Adapte la niche au profil du prospect quand c'est pertinent
 pour un architecte → mur-rideau + acoustique ; pour un BET → grandes dimensions + Rw).
 
 [Bloc 4 — CTA visio]
-Une seule phrase qui propose 15 min en visio. PAS de lien, PAS de téléphone :
-le lien RDV et les coordonnées sont dans le bloc signature ajouté automatiquement
-après le corps par l'outil d'envoi.
+1-2 phrases qui proposent un créneau RAPIDE de 15-30 min en visio, et qui se
+terminent par le marqueur [LIEN_RDV] (l'outil le remplace par le lien de prise
+de RDV Outlook officiel de Richard). Exemple de forme (à varier) :
+"Si le sujet vous parle, 15-30 min en visio suffisent — mon agenda en ligne : [LIEN_RDV]"
+RÈGLE : tu n'écris JAMAIS une URL toi-même (ni lien RDV, ni site web, ni autre) ;
+le SEUL lien autorisé est le marqueur [LIEN_RDV], tel quel. PAS de téléphone :
+les coordonnées sont dans le bloc signature ajouté automatiquement après le corps.
 
 [Bloc 5 — Clôture]
 Termine EXACTEMENT par (charte signature Richard, rien d'autre après) :

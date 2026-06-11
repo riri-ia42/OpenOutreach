@@ -226,3 +226,42 @@ class TestProcessApprovedQueue:
             )
 
         assert stats["processed"] == 2
+
+    def test_file_linkedin_ignore_les_kinds_email(self):
+        """Les email_* sont envoyes par email_canal (Graph), JAMAIS par ce
+        sender LinkedIn — il les marquait FAILED 'unknown kind: email_cold'
+        (bug du 10-11/06, 2 mails valides par Richard perdus)."""
+        from django.utils import timezone
+        po_mail = PendingOutbound.objects.create(
+            prospect_public_id="bdd-prospect-123",
+            kind=OutboundKind.EMAIL_COLD,
+            subject="Sujet",
+            ai_draft="corps",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now() - dt.timedelta(hours=2),
+        )
+        po_invit = PendingOutbound.objects.create(
+            prospect_public_id="test-invit",
+            kind=OutboundKind.INVITATION,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now(),
+        )
+
+        with patch(
+            "ekoalu.outbound_validation.sender.is_action_allowed_now",
+            return_value=True,
+        ), patch(
+            "ekoalu.outbound_validation.sender.send_one", return_value=True,
+        ) as mock_send:
+            stats = process_approved_queue(
+                session=MagicMock(), max_messages=10, dry_run=False,
+            )
+
+        # Seule l invitation est traitee ; le mail reste APPROVED intact.
+        assert stats["processed"] == 1
+        sent_pks = [call.args[1].pk for call in mock_send.call_args_list]
+        assert sent_pks == [po_invit.pk]
+        po_mail.refresh_from_db()
+        assert po_mail.status == OutboundStatus.APPROVED
+        assert po_mail.error_message == ""

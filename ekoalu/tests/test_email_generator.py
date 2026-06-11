@@ -349,3 +349,87 @@ class TestGenerateColdEmailsCommand:
         )
         call_command("generate_cold_emails", limit=10, stdout=StringIO())
         assert PendingOutbound.objects.count() == 0
+
+
+class TestEnsureBooking:
+    """Lien RDV systematique et infalsifiable (demande Richard 11/06)."""
+
+    def test_remplace_le_marqueur_par_le_lien_officiel(self):
+        from ekoalu import conf
+        from ekoalu.email_generator.generator import _ensure_booking
+
+        body = "Bonjour,\n\nblabla.\n\nMon agenda : [LIEN_RDV]\n\nBien à vous,\nRichard Gros"
+        out = _ensure_booking(body)
+        assert "[LIEN_RDV]" not in out
+        assert conf.CALENDAR_BOOKING_URL in out
+
+    def test_insere_la_phrase_rdv_si_marqueur_absent(self):
+        from ekoalu import conf
+        from ekoalu.email_generator.generator import _ensure_booking
+
+        body = "Bonjour,\n\nblabla.\n\nBien à vous,\nRichard Gros"
+        out = _ensure_booking(body)
+        assert conf.CALENDAR_BOOKING_URL in out
+        # La phrase RDV est inseree AVANT la cloture charte
+        assert out.index(conf.CALENDAR_BOOKING_URL) < out.index("Bien à vous")
+
+    def test_idempotent_si_lien_deja_present(self):
+        from ekoalu import conf
+        from ekoalu.email_generator.generator import _ensure_booking
+
+        body = f"Bonjour,\n\nagenda : {conf.CALENDAR_BOOKING_URL}\n\nBien à vous,\nRichard Gros"
+        assert _ensure_booking(body).count(conf.CALENDAR_BOOKING_URL) == 1
+
+
+@pytest.mark.django_db
+class TestRegenerateEmailDraft:
+    """La regeneration d un email passe par le generateur EMAIL (pas le DM
+    LinkedIn qui hallucinait des liens — bug signale par Richard le 11/06)."""
+
+    def test_regenere_via_generateur_email_avec_instruction(self, monkeypatch):
+        from crm.models import Lead
+        from ekoalu.email_canal.models import EmailLeadData
+        from ekoalu.email_generator.models import ColdEmailDraft
+        from ekoalu.outbound_validation.models import (
+            OutboundKind,
+            OutboundStatus,
+            PendingOutbound,
+        )
+        from ekoalu.views import _regenerate_outbound_draft
+
+        lead = Lead.objects.create(
+            public_identifier="bdd-prospect-999",
+            linkedin_url="https://bdd-prospect.local/siren/999",
+            contact_email="x@y.fr",
+        )
+        EmailLeadData.objects.create(
+            lead=lead, source="bdd_prospect", entreprise="Metallerie Test",
+            dirigeant="Jean Test", code_naf="43.32B", ville="Lyon", dpt="69",
+        )
+        po = PendingOutbound.objects.create(
+            prospect_public_id="bdd-prospect-999",
+            kind=OutboundKind.EMAIL_COLD,
+            subject="ancien sujet",
+            ai_draft="ancien corps",
+            status=OutboundStatus.PENDING,
+            prompt_variant="v1",
+        )
+
+        captured = {}
+
+        def fake_generate(**kwargs):
+            captured.update(kwargs)
+            return ColdEmailDraft(subject="nouveau sujet", body="nouveau corps\n\nBien à vous,\nRichard Gros")
+
+        monkeypatch.setattr(
+            "ekoalu.email_generator.generator.generate_cold_email", fake_generate,
+        )
+        success, error = _regenerate_outbound_draft(po, "ajoute le lien rdv")
+
+        assert success, error
+        assert captured["entreprise"] == "Metallerie Test"
+        assert captured["instruction"] == "ajoute le lien rdv"
+        assert captured["variant"] == "v1"
+        po.refresh_from_db()
+        assert po.ai_draft.startswith("nouveau corps")
+        assert po.subject == "nouveau sujet"

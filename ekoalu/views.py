@@ -1269,14 +1269,54 @@ def _capture_correction_example(
         logging.exception("CorrectionExample creation failed: %s", e)
 
 
+def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tuple[bool, str]:
+    """Regenere un cold mail / email follow-up via le generateur EMAIL EKOALU.
+
+    (Avant : la regeneration passait par le generateur de DM LinkedIn, qui ne
+    connait ni le format sujet/corps ni le lien RDV → hallucinations.)
+    """
+    from crm.models import Lead
+    from ekoalu.email_generator.generator import generate_cold_email
+
+    lead = (
+        Lead.objects
+        .filter(public_identifier=outbound.prospect_public_id)
+        .select_related("email_data")
+        .first()
+    )
+    data = getattr(lead, "email_data", None) if lead else None
+    draft = generate_cold_email(
+        entreprise=(data.entreprise if data else outbound.prospect_company or ""),
+        dirigeant=(data.dirigeant if data else ""),
+        code_naf=(data.code_naf if data else ""),
+        activite=(data.activite if data else ""),
+        ville=(data.ville if data else ""),
+        dpt=(data.dpt if data else ""),
+        effectif_min=(data.effectif_min if data else 0),
+        effectif_max=(data.effectif_max if data else 0),
+        variant=outbound.prompt_variant or None,
+        instruction=instruction,
+    )
+    if not draft.is_valid():
+        return False, "Le générateur email a renvoyé un draft vide (clé API ? erreur réseau ?)."
+    outbound.ai_draft = draft.body
+    outbound.subject = draft.subject
+    outbound.final_content = ""  # on repart sur le nouveau draft
+    outbound.save(update_fields=["ai_draft", "subject", "final_content"])
+    return True, ""
+
+
 def _regenerate_outbound_draft(outbound: PendingOutbound, instruction: str) -> tuple[bool, str]:
     """Regenere le brouillon de l'outbound via le generateur EKOALU.
 
     Renvoie (success, error_msg).
-    Seulement applicable a FOLLOW_UP et REPLY (invitations restent sans note).
+    Invitations : pas de regeneration (mode sans note). Emails : generateur
+    email dedie. FOLLOW_UP / REPLY LinkedIn : generateur DM.
     """
     if outbound.kind == OutboundKind.INVITATION:
         return False, "Régénération désactivée pour les invitations (mode sans note)."
+    if outbound.kind in (OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP):
+        return _regenerate_email_draft(outbound, instruction)
 
     from crm.models import Deal
     from ekoalu.follow_up.generator import generate_ekoalu_dm
@@ -1429,6 +1469,17 @@ def outbound_detail(request, pk: int):
         outbound.prospect_public_id, deal=deal, company_hint=outbound.prospect_company,
     )
 
+    # Apercu signature pour les emails : le bloc coordonnees + footer RGPD
+    # sont apposes par le sender a l'envoi — on les montre ici pour que
+    # Richard voie le mail COMPLET (sans logo : le cid inline ne se rend
+    # pas dans un navigateur).
+    signature_preview = ""
+    if outbound.kind in (OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP):
+        from ekoalu.email_canal.sender import _UNSUB_FOOTER_HTML, signature_block_html
+        signature_preview = signature_block_html(
+            formal_first=(outbound.kind == OutboundKind.EMAIL_COLD), with_logo=False,
+        ) + _UNSUB_FOOTER_HTML
+
     context = {
         "outbound": outbound,
         "linkedin_url": f"https://www.linkedin.com/in/{outbound.prospect_public_id}/",
@@ -1437,6 +1488,7 @@ def outbound_detail(request, pk: int):
         "can_regenerate": outbound.kind != OutboundKind.INVITATION
             and outbound.status == OutboundStatus.PENDING,
         "prospect_display": display,
+        "signature_preview": signature_preview,
     }
     return render(request, "ekoalu/outbound_detail.html", context)
 

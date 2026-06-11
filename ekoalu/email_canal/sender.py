@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -103,14 +104,26 @@ def signature_block_html(*, formal_first: bool = True, with_logo: bool = True) -
     )
 
 
+_URL_RE = re.compile(r"https?://[^\s<&\"]+")
+
+
+def _linkify(escaped_text: str) -> str:
+    """Rend cliquables les URLs présentes dans du texte déjà html-escaped
+    (le lien RDV Bookings injecté dans le corps par le générateur)."""
+    return _URL_RE.sub(
+        lambda m: f"<a href=\"{m.group(0)}\">{m.group(0)}</a>", escaped_text,
+    )
+
+
 def text_body_to_html(body: str) -> str:
     """Convertit un body texte en HTML simple, sans CSS exotique.
 
     - escape HTML
+    - URLs rendues cliquables (lien RDV dans le corps)
     - groupe en paragraphes (séparés par ligne vide)
     - retours à la ligne simples → <br>
     """
-    escaped = html.escape(body.strip())
+    escaped = _linkify(html.escape(body.strip()))
     paragraphs = [p.strip() for p in escaped.split("\n\n") if p.strip()]
     pieces = []
     for para in paragraphs:
