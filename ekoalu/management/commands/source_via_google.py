@@ -10,8 +10,8 @@ Usage :
     python manage.py source_via_google --campaign "Leon Grosse" --max 15
     python manage.py source_via_google --max 10 --max-queries 90   # toutes les ABM
 
-Quota Google : 100 requetes/jour -> --max-queries borne la conso (defaut 90).
-Config : env GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX.
+Credits Serper : 1 credit/requete -> --max-queries borne la conso (defaut 90).
+Config : env SERPER_API_KEY.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class Command(BaseCommand):
         dry = opts["dry_run"]
         if not dry and not client.is_configured():
             raise CommandError(
-                "GOOGLE_CSE_API_KEY / GOOGLE_CSE_CX manquants dans l'environnement (.env). "
+                "SERPER_API_KEY manquant dans l'environnement (.env). "
                 "Cf. README. Utilise --dry-run pour tester sans clef.",
             )
 

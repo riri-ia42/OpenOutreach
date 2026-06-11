@@ -7,5 +7,6 @@ URL-only + rattaches a leur campagne (LeadDiscovery, via le routage) ; le daemon
 les enrichit et les qualifie ensuite dans SA session browser (pas de 2e browser).
 
 V1 : commande separee `source_via_google` (manuel/cron), ABM d'abord.
-Config : env GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX.
+Backend : Serper.dev (vrais resultats Google ; l'API Google Custom Search est
+fermee aux nouveaux clients depuis 2026). Config : env SERPER_API_KEY.
 """

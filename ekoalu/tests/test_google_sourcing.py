@@ -1,4 +1,4 @@
-"""Tests du sourcing Google Custom Search (API mockee)."""
+"""Tests du sourcing via recherche Google (backend Serper.dev, API mockee)."""
 from __future__ import annotations
 
 from io import StringIO
@@ -39,6 +39,42 @@ def test_build_abm_queries_un_par_poste_et_cible():
 def test_build_abm_queries_sans_cible_vide():
     c = SimpleNamespace(name="EKOALU - Persona sans ABM")
     assert queries.build_abm_queries(c) == []
+
+
+# --------------------------------------------------------------------------
+# client.search_raw (mock requests.post — contrat Serper)
+# --------------------------------------------------------------------------
+
+def test_search_raw_appelle_serper_et_renvoie_organic(monkeypatch):
+    monkeypatch.setenv("SERPER_API_KEY", "sk-test")
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"organic": [{"link": "https://www.linkedin.com/in/x/", "title": "X"}]}
+
+    def fake_post(url, json=None, timeout=None, headers=None):
+        captured.update(url=url, json=json, headers=headers)
+        return FakeResp()
+
+    with patch.object(client.requests, "post", side_effect=fake_post):
+        items = client.search_raw("ma requete", num=10, page=2)
+
+    assert items == [{"link": "https://www.linkedin.com/in/x/", "title": "X"}]
+    assert captured["url"] == client.ENDPOINT
+    assert captured["headers"]["X-API-KEY"] == "sk-test"
+    assert captured["json"]["q"] == "ma requete"
+    assert captured["json"]["page"] == 2
+    assert captured["json"]["num"] == 10  # num<=10 : 1 credit
+
+
+def test_search_raw_sans_cle_leve(monkeypatch):
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        client.search_raw("q")
 
 
 # --------------------------------------------------------------------------
@@ -84,8 +120,7 @@ def test_command_cree_leads_url_only_et_discovery(abm_campaign, monkeypatch):
     from crm.models import Lead
     from ekoalu.lead_routing.models import LeadDiscovery
 
-    monkeypatch.setenv("GOOGLE_CSE_API_KEY", "k")
-    monkeypatch.setenv("GOOGLE_CSE_CX", "cx")
+    monkeypatch.setenv("SERPER_API_KEY", "k")
 
     urls = ["https://www.linkedin.com/in/alice-x/", "https://www.linkedin.com/in/bob-y/"]
     with patch("ekoalu.google_sourcing.client.search_linkedin_profiles", return_value=urls):
@@ -117,8 +152,7 @@ def test_command_idempotent(abm_campaign, monkeypatch):
     from crm.models import Lead
     from ekoalu.lead_routing.models import LeadDiscovery
 
-    monkeypatch.setenv("GOOGLE_CSE_API_KEY", "k")
-    monkeypatch.setenv("GOOGLE_CSE_CX", "cx")
+    monkeypatch.setenv("SERPER_API_KEY", "k")
     urls = ["https://www.linkedin.com/in/alice-x/"]
     with patch("ekoalu.google_sourcing.client.search_linkedin_profiles", return_value=urls):
         call_command("source_via_google", "--campaign", "Test Boite", stdout=StringIO())
@@ -132,7 +166,6 @@ def test_command_idempotent(abm_campaign, monkeypatch):
 def test_command_exige_config_hors_dry_run(abm_campaign, monkeypatch):
     from django.core.management.base import CommandError
 
-    monkeypatch.delenv("GOOGLE_CSE_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_CSE_CX", raising=False)
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
     with pytest.raises(CommandError):
         call_command("source_via_google", "--campaign", "Test Boite", stdout=StringIO())

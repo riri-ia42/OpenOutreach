@@ -1,7 +1,12 @@
-"""Client Google Custom Search JSON API.
+"""Client de recherche Google via Serper.dev.
 
-Quota gratuit : 100 requetes/jour. 10 resultats max par requete (pagination via
-``start``). Isolable pour les tests : ``search_raw`` est le seul appel reseau.
+Remplace Google Custom Search JSON API (fermee aux nouveaux clients par Google,
+verdict 11/06/2026 — voir PROGRESS.md). Serper renvoie les vrais resultats
+Google : meme couverture linkedin.com/in, format JSON simple.
+
+Tarif : 2 500 requetes d'essai gratuites, puis credits (50 $ / 50 000).
+1 credit par requete avec num<=10. Isolable pour les tests : ``search_raw``
+est le seul appel reseau.
 """
 from __future__ import annotations
 
@@ -12,37 +17,40 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-ENDPOINT = "https://www.googleapis.com/customsearch/v1"
-MAX_START = 91  # l'API plafonne a 100 resultats (start 1..91 par pas de 10)
+ENDPOINT = "https://google.serper.dev/search"
+MAX_PAGE = 10  # ~100 resultats max par requete, comme l'ancienne API
 
 
-def _config() -> tuple[str, str]:
-    return (
-        os.environ.get("GOOGLE_CSE_API_KEY", "").strip(),
-        os.environ.get("GOOGLE_CSE_CX", "").strip(),
-    )
+def _config() -> str:
+    return os.environ.get("SERPER_API_KEY", "").strip()
 
 
 def is_configured() -> bool:
-    key, cx = _config()
-    return bool(key and cx)
+    return bool(_config())
 
 
-def search_raw(query: str, num: int = 10, start: int = 1, timeout: int = 20) -> list[dict]:
-    """Appel brut a Custom Search. Renvoie la liste ``items`` (peut etre vide).
+def search_raw(query: str, num: int = 10, page: int = 1, timeout: int = 20) -> list[dict]:
+    """Appel brut a Serper. Renvoie la liste ``organic`` (peut etre vide).
 
-    Seul point reseau du module -> c'est lui qu'on mocke dans les tests.
+    Chaque item a au moins ``link``/``title``/``snippet``. Seul point reseau
+    du module -> c'est lui qu'on mocke dans les tests.
     """
-    key, cx = _config()
-    if not (key and cx):
-        raise RuntimeError("GOOGLE_CSE_API_KEY / GOOGLE_CSE_CX manquants")
-    params = {
-        "key": key, "cx": cx, "q": query,
-        "num": min(max(num, 1), 10), "start": start,
+    key = _config()
+    if not key:
+        raise RuntimeError("SERPER_API_KEY manquant")
+    payload = {
+        "q": query,
+        "num": min(max(num, 1), 10),  # num<=10 : 1 credit par requete
+        "page": max(page, 1),
+        "gl": "fr",
+        "hl": "fr",
     }
-    resp = requests.get(ENDPOINT, params=params, timeout=timeout)
+    resp = requests.post(
+        ENDPOINT, json=payload, timeout=timeout,
+        headers={"X-API-KEY": key, "Content-Type": "application/json"},
+    )
     resp.raise_for_status()
-    return resp.json().get("items", []) or []
+    return resp.json().get("organic", []) or []
 
 
 def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
@@ -51,9 +59,9 @@ def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
 
     urls: list[str] = []
     seen: set[str] = set()
-    start = 1
-    while len(urls) < max_results and start <= MAX_START:
-        items = search_raw(query, num=10, start=start)
+    page = 1
+    while len(urls) < max_results and page <= MAX_PAGE:
+        items = search_raw(query, num=10, page=page)
         if not items:
             break
         for it in items:
@@ -67,5 +75,5 @@ def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
             urls.append(link)
             if len(urls) >= max_results:
                 break
-        start += 10
+        page += 1
     return urls
