@@ -72,7 +72,11 @@ def launch_persistent_browser():
         user_data_dir=str(LINKEDIN_PROFILE_DIR),
         headless=False,        # tete visible (TSE: vraie console requise)
         no_viewport=True,      # pas de viewport force
-        # ZERO override volontaire : pas de user_agent, pas d'args, pas de
+        chromium_sandbox=True,  # SANDBOX ACTIVE : sans ca, --no-sandbox est passe
+                               # → bandeau "flag non pris en charge" + LinkedIn
+                               # detecte l'automatisation et bloque la page de
+                               # login sur un spinner infini (constate 11/06).
+        # ZERO autre override : pas de user_agent, pas d'args, pas de
         # extra_http_headers, pas d'init script — chaque override reintroduit
         # un tell detectable (cf. benchmark Patchright).
     )
@@ -96,8 +100,15 @@ def launch_persistent_browser():
 
 
 def is_authenticated(page) -> bool:
-    """True si le profil persistant a une session LinkedIn valide (sur /feed)."""
-    from urllib.parse import unquote
+    """True si le profil persistant a une session LinkedIn valide.
+
+    On verifie le CHEMIN de l'URL (pas une sous-chaine) : non authentifie,
+    LinkedIn redirige vers `/uas/login?session_redirect=.../feed/` — l'ancien
+    test `"/feed" in url` matchait le `/feed` du parametre de redirection (faux
+    positif). On exige que le path commence par `/feed` ET qu'on ne soit pas sur
+    une page login/checkpoint.
+    """
+    from urllib.parse import urlparse
 
     try:
         page.goto(LINKEDIN_FEED_URL)
@@ -106,7 +117,12 @@ def is_authenticated(page) -> bool:
     except Exception:
         logger.exception("Echec de navigation vers /feed")
         return False
-    return "/feed" in unquote(page.url)
+
+    path = urlparse(page.url).path
+    blocked = ("/login", "/uas/login", "/checkpoint", "/authwall")
+    if any(b in path for b in blocked):
+        return False
+    return path.startswith("/feed")
 
 
 def _handle_login_failure(session, reason: str, exc: Exception | None = None):

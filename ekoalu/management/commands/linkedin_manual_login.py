@@ -38,11 +38,20 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
+        from urllib.parse import urlparse
+
         from linkedin.browser.login import (
             dismiss_comply_gate,
             launch_persistent_browser,
         )
         from linkedin.conf import LINKEDIN_PROFILE_DIR
+
+        def _on_feed(page) -> bool:
+            """True si le path de l'URL est bien /feed (pas un mur de login)."""
+            path = urlparse(page.url).path
+            if any(b in path for b in ("/login", "/uas/login", "/checkpoint", "/authwall")):
+                return False
+            return path.startswith("/feed")
 
         self.stdout.write(self.style.WARNING(
             "\n=== LOGIN LINKEDIN MANUEL (profil persistant) ===\n"
@@ -55,7 +64,7 @@ class Command(BaseCommand):
             page.goto(FEED_URL)
             dismiss_comply_gate(page)
             page.wait_for_load_state("domcontentloaded")
-            if "/feed" in unquote(page.url):
+            if _on_feed(page):
                 self.stdout.write(self.style.SUCCESS(
                     "Deja authentifie ✅ — le profil a une session LinkedIn valide."
                     " Rien a faire. (Tu peux quand meme verifier que 'Rester"
@@ -78,7 +87,7 @@ class Command(BaseCommand):
                 time.sleep(5)
                 waited += 5
                 try:
-                    if "/feed" in unquote(page.url):
+                    if _on_feed(page):
                         self.stdout.write(self.style.SUCCESS(
                             f"\n✅ Connexion detectee apres {waited}s. Profil"
                             " device-trust sauvegarde sur disque.\n"
