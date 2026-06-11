@@ -35,6 +35,22 @@ BROWSER_NAV_TIMEOUT_MS = 10_000
 HUMAN_TYPE_MIN_DELAY_MS = 50
 HUMAN_TYPE_MAX_DELAY_MS = 200
 
+# Anti-detection (refonte 11/06 — benchmark Patchright + persistent context).
+# Profil navigateur PERSISTANT sur disque : cookies + localStorage + IndexedDB
+# + fingerprint conserves entre sessions = "appareil de confiance" stable cote
+# LinkedIn (le contexte ephemere + cookies injectes ressemblait a une session
+# volee → checkpoint a chaque login). Le 1er login est MANUEL (commande
+# linkedin_manual_login) ; ensuite le daemon reutilise le profil, jamais de
+# re-login auto au mot de passe. Cf. docs/MODE_OPERATOIRE_LINKEDIN.md.
+import os as _os
+
+LINKEDIN_PROFILE_DIR = Path(
+    _os.environ.get("EKOALU_LINKEDIN_PROFILE_DIR", str(ROOT_DIR / "data" / "linkedin_profile"))
+)
+# Vrai Google Chrome (pas le Chromium bundle) — recommandation Patchright pour
+# un fingerprint indistinguable d'un humain. Fallback "chromium" si absent.
+BROWSER_CHANNEL = _os.environ.get("EKOALU_BROWSER_CHANNEL", "chrome")
+
 # ----------------------------------------------------------------------
 # Onboarding defaults (shown to user during interactive setup)
 # ----------------------------------------------------------------------

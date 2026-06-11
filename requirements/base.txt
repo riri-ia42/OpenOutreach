@@ -1,5 +1,5 @@
 playwright
-playwright-stealth
+patchright
 pydantic
 pydantic-ai-slim[openai,anthropic,google,groq,mistral,cohere,bedrock]
 nest-asyncio

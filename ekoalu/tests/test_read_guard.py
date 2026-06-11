@@ -44,9 +44,10 @@ class TestCompteur:
 
 
 class TestCap:
-    def test_cap_par_defaut_60(self, monkeypatch):
+    def test_cap_par_defaut_40(self, monkeypatch):
+        # Consensus praticien < 50/j ; on prend 40 de marge (benchmark 11/06).
         monkeypatch.delenv("EKOALU_DAILY_PROFILE_READS_CAP", raising=False)
-        assert daily_reads_cap() == 60
+        assert daily_reads_cap() == 40
 
     def test_cap_configurable_via_env(self, monkeypatch):
         monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "25")
@@ -54,7 +55,7 @@ class TestCap:
 
     def test_env_invalide_retombe_sur_defaut(self, monkeypatch):
         monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "abc")
-        assert daily_reads_cap() == 60
+        assert daily_reads_cap() == 40
 
     def test_check_read_allowed_sous_le_cap(self, monkeypatch):
         monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "3")

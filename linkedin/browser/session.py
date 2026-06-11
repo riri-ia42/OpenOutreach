@@ -76,35 +76,34 @@ class AccountSession:
         self.page.wait_for_load_state("domcontentloaded")
 
     def reauthenticate(self):
-        """Force a fresh login: close browser, clear saved cookies, re-launch."""
-        from linkedin.browser.login import start_browser_session
+        """OBSOLETE depuis la refonte 11/06 — ne JAMAIS re-logger automatiquement.
 
-        logger.warning("Re-authenticating %s — clearing saved session", self)
-        self.close()
-        self.linkedin_profile.cookie_data = None
-        self.linkedin_profile.save(update_fields=["cookie_data"])
-        start_browser_session(session=self)
+        L'ancien comportement (fermer le navigateur + effacer les cookies +
+        re-login auto au mot de passe sur un 401) etait la cause directe du
+        checkpoint a chaque connexion (cf. benchmark anti-detection). Conservee
+        en no-op pour ne pas casser d'eventuels appelants : on engage le STOP et
+        on laisse la session telle quelle (fenetre ouverte pour login manuel).
+        """
+        from ekoalu import auth_watch
+
+        logger.warning(
+            "reauthenticate() appele mais DESACTIVE (anti-checkpoint) — STOP"
+            " engage, login manuel requis via le profil persistant.",
+        )
+        auth_watch.record_auth_failure(context="reauthenticate() obsolete")
 
     def _maybe_refresh_cookies(self):
-        """Re-login if the li_at auth cookie in the saved DB state is expired."""
-        from linkedin.browser.login import start_browser_session
-
-        self.linkedin_profile.refresh_from_db(fields=["cookie_data"])
-        cookie_data = self.linkedin_profile.cookie_data
-        if not cookie_data:
-            return
-        for cookie in cookie_data.get("cookies", []):
-            if cookie.get("name") == _AUTH_COOKIE_NAME:
-                expires = cookie.get("expires", -1)
-                if expires > 0 and expires < time.time():
-                    logger.warning("Auth cookie expired for %s — re-authenticating", self)
-                    self.close()
-                    start_browser_session(session=self)
-                return
+        """No-op : avec le profil persistant Patchright, LinkedIn re-emet `li_at`
+        tout seul tant que `li_rm` (device trust) est present. On ne touche plus
+        aux cookies en DB et on ne relance jamais de login auto."""
+        return
 
     def close(self):
         if self.context:
             try:
+                # Profil persistant : fermer le contexte sauvegarde tout le
+                # profil sur disque (cookies/localStorage/IndexedDB). `browser`
+                # est None en mode persistant.
                 self.context.close()
                 if self.browser:
                     self.browser.close()

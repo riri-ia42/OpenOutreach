@@ -24,7 +24,10 @@ from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DAILY_READS_CAP = 60
+# Consensus praticien 2025-2026 : < 50 lectures de profils/jour pour un compte
+# gratuit (StaffSpy, CloselyHQ, Kondo). On prend 40 = marge sous le seuil.
+# L'incident du 06/06 etait a ~1700/j (~35x trop). Cf. benchmark anti-detection.
+DEFAULT_DAILY_READS_CAP = 40
 
 
 class ReadCapExceededError(RuntimeError):

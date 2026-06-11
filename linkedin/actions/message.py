@@ -2,7 +2,7 @@
 import logging
 from typing import Dict, Any
 
-from playwright.sync_api import Error as PlaywrightError, Locator
+from patchright.sync_api import Error as PlaywrightError, Locator
 from linkedin.browser.nav import goto_page, human_type, dump_page_html
 
 logger = logging.getLogger(__name__)

@@ -23,17 +23,22 @@ import os
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FAILURES_BEFORE_STOP = 3
+DEFAULT_FAILURES_BEFORE_STOP = 1
 
 _consecutive_failures = 0
 
 
 def failures_before_stop() -> int:
-    """Seuil d'echecs consecutifs avant auto-STOP (defaut 3)."""
+    """Seuil d'echecs consecutifs avant auto-STOP (defaut 1 = STOP immediat).
+
+    Decision Richard 10/06 : insister contre un checkpoint LinkedIn aggrave le
+    signal. On coupe DES le 1er echec d'auth - le compte n'est de toute facon
+    pas reutilisable tant que le checkpoint n'est pas resolu a la main.
+    """
     try:
-        return int(os.environ.get(
+        return max(1, int(os.environ.get(
             "EKOALU_AUTH_FAILURES_BEFORE_STOP", DEFAULT_FAILURES_BEFORE_STOP,
-        ))
+        )))
     except (ValueError, TypeError):
         return DEFAULT_FAILURES_BEFORE_STOP
 

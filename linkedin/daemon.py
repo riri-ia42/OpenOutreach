@@ -459,18 +459,19 @@ def run_daemon(session):
             with failure_diagnostics(session):
                 run_task_with_watchdog(handler, task, session, qualifiers)
         except AuthenticationError:
-            logger.warning("Session expired during %s — re-authenticating", task)
-            try:
-                session.reauthenticate()
-            except Exception:
-                logger.exception("Re-authentication failed for %s", task)
-            # Either way, mark this task FAILED; reconcile will re-create a
-            # fresh task for the deal on the next idle cycle.
+            # EKOALU — anti-checkpoint (decision Richard 10/06) : on NE
+            # re-authentifie PAS (l'ancien reauthenticate() fermait le
+            # navigateur + effacait les cookies + relancait un login auto au
+            # mot de passe = exactement ce qui declenche le checkpoint a
+            # chaque fois). On STOP des le 1er echec et on LAISSE LA FENETRE
+            # OUVERTE sur la page de verification : quand Richard est au
+            # poste, il termine le login/checkpoint a la main, puis Reprendre.
+            logger.warning(
+                colored("AUTH FAIL", "red", attrs=["bold"])
+                + " — %s. Fenetre laissee ouverte pour login manuel."
+                + " AUCUN re-login auto, AUCUN effacement de cookies.", task,
+            )
             task.mark_failed()
-            # EKOALU — auto-STOP anti-checkpoint : N tasks consecutives en
-            # echec d'auth = blocage LinkedIn probable. Insister aggrave le
-            # signal (le 06/06 : 492 re-login avant le STOP manuel). Le
-            # compteur est remis a zero par chaque task reussie plus bas.
             from ekoalu import auth_watch
             auth_watch.record_auth_failure(context=f"task={task}")
             continue

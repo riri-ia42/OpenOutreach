@@ -1,47 +1,38 @@
 # linkedin/browser/login.py
+#
+# Refonte anti-detection 11/06/2026 (benchmark Patchright + persistent context).
+#
+# Modele cible (convergence des 3 sources benchmark + repo linkedin-mcp-server) :
+# 1. PATCHRIGHT (pas Playwright stock) — corrige le leak CDP `Runtime.enable` et
+#    `navigator.webdriver` que `playwright-stealth` laissait passer.
+# 2. PROFIL PERSISTANT sur disque (`launch_persistent_context`) — cookies +
+#    localStorage + IndexedDB + fingerprint conserves = appareil de confiance
+#    stable. Un contexte neuf + cookies injectes ressemblait a une session volee
+#    → checkpoint a chaque login.
+# 3. VRAI CHROME (`channel="chrome"`), `headless=False`, `no_viewport=True`,
+#    ZERO override (pas de user_agent/args/init scripts custom).
+# 4. JAMAIS de re-login automatique au mot de passe. Le 1er login est MANUEL
+#    (commande `linkedin_manual_login`, Richard coche "Rester connecte" → cookie
+#    `li_rm` device-trust 1 an). Ensuite le daemon reutilise le profil. Si le
+#    profil n'est plus authentifie : STOP + fenetre laissee ouverte pour login
+#    manuel, jamais de soumission auto de credentials (chaque resoumission
+#    durcit le blocage LinkedIn).
 import logging
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from patchright.sync_api import sync_playwright
 from termcolor import colored
 
-from linkedin.browser.nav import goto_page, human_type, resolve_locator
+from linkedin.browser.nav import goto_page
 from linkedin.conf import (
+    BROWSER_CHANNEL,
     BROWSER_DEFAULT_TIMEOUT_MS,
-    BROWSER_LOGIN_TIMEOUT_MS,
-    BROWSER_SLOW_MO,
+    LINKEDIN_PROFILE_DIR,
 )
 
 logger = logging.getLogger(__name__)
 
 LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login"
 LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/"
-
-EMAIL_LOCATORS = [
-    lambda p: p.get_by_role("textbox", name="Email or phone"),
-    lambda p: p.get_by_label("Email or phone"),
-    lambda p: p.locator('input[autocomplete="webauthn"]'),
-    lambda p: p.locator('input[name="session_key"]'),
-    lambda p: p.locator('input#username'),
-    lambda p: p.locator('form input[type="text"]'),
-]
-
-PASSWORD_LOCATORS = [
-    lambda p: p.locator('input[type="password"]'),
-    lambda p: p.locator('input[autocomplete="current-password"]'),
-    lambda p: p.get_by_role("textbox", name="Password"),
-    lambda p: p.get_by_label("Password"),
-    lambda p: p.locator('input[name="session_password"]'),
-    lambda p: p.locator('input#password'),
-]
-
-SUBMIT_LOCATORS = [
-    lambda p: p.locator("form").get_by_role("button", name="Sign in", exact=True),
-    lambda p: p.get_by_role("button", name="Sign in", exact=True),
-    lambda p: p.locator('form button[type="submit"]'),
-    lambda p: p.locator('button[type="submit"]'),
-]
 
 COMPLY_LOCATORS = [
     lambda p: p.locator('button#content__button--primary--muted'),
@@ -54,6 +45,8 @@ COMPLY_PROBE_TIMEOUT_MS = 5000
 
 def dismiss_comply_gate(page, timeout_ms: int = COMPLY_PROBE_TIMEOUT_MS) -> bool:
     """Click LinkedIn's 'Agree to comply' interstitial if present. Return True if clicked."""
+    from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
+
     for factory in COMPLY_LOCATORS:
         locator = factory(page).first
         try:
@@ -66,83 +59,110 @@ def dismiss_comply_gate(page, timeout_ms: int = COMPLY_PROBE_TIMEOUT_MS) -> bool
     return False
 
 
-def playwright_login(session: "AccountSession"):
-    page = session.page
-    lp = session.linkedin_profile
-    logger.info(colored("Fresh login sequence starting", "cyan") + f" for {session}")
+def launch_persistent_browser():
+    """Lance Chrome avec un PROFIL PERSISTANT sur disque (anti-detection).
 
-    goto_page(
-        session,
-        action=lambda: page.goto(LINKEDIN_LOGIN_URL),
-        expected_url_pattern="/login",
-        error_message="Failed to load login page",
-    )
-
-    human_type(resolve_locator(page, EMAIL_LOCATORS), lp.linkedin_username)
-    session.wait()
-    human_type(resolve_locator(page, PASSWORD_LOCATORS), lp.linkedin_password)
-    session.wait()
-
-    submit = resolve_locator(page, SUBMIT_LOCATORS)
-    submit.click()
-    dismiss_comply_gate(page)
-    goto_page(
-        session,
-        action=lambda: None,
-        expected_url_pattern="/feed",
-        timeout=BROWSER_LOGIN_TIMEOUT_MS,
-        error_message="Login failed – no redirect to feed",
-    )
-
-
-def launch_browser(storage_state=None):
-    logger.debug("Launching Playwright")
+    Retourne (page, context, browser, playwright). `browser` est None : en mode
+    persistant le contexte EST le navigateur (pas d'objet browser separe).
+    """
+    LINKEDIN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(headless=False, slow_mo=BROWSER_SLOW_MO)
-    context = browser.new_context(storage_state=storage_state)
+
+    launch_kwargs = dict(
+        user_data_dir=str(LINKEDIN_PROFILE_DIR),
+        headless=False,        # tete visible (TSE: vraie console requise)
+        no_viewport=True,      # pas de viewport force
+        # ZERO override volontaire : pas de user_agent, pas d'args, pas de
+        # extra_http_headers, pas d'init script — chaque override reintroduit
+        # un tell detectable (cf. benchmark Patchright).
+    )
+    try:
+        context = playwright.chromium.launch_persistent_context(
+            channel=BROWSER_CHANNEL, **launch_kwargs,
+        )
+    except Exception:
+        # Vrai Chrome absent → repli sur le Chromium bundle (moins ideal mais
+        # fonctionnel). On log clairement pour que Richard installe Chrome.
+        logger.warning(
+            "Chrome (channel=%s) introuvable — repli sur Chromium bundle."
+            " Installer Google Chrome ameliore le fingerprint.", BROWSER_CHANNEL,
+        )
+        context = playwright.chromium.launch_persistent_context(**launch_kwargs)
+
     context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
     context.set_default_navigation_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
-    Stealth().apply_stealth_sync(context)
-    page = context.new_page()
-    return page, context, browser, playwright
+    page = context.pages[0] if context.pages else context.new_page()
+    return page, context, None, playwright
 
 
-def _save_cookies(session):
-    """Persist Playwright storage state (cookies) to the DB."""
-    state = session.context.storage_state()
-    session.linkedin_profile.cookie_data = state
-    session.linkedin_profile.save(update_fields=["cookie_data"])
+def is_authenticated(page) -> bool:
+    """True si le profil persistant a une session LinkedIn valide (sur /feed)."""
+    from urllib.parse import unquote
+
+    try:
+        page.goto(LINKEDIN_FEED_URL)
+        dismiss_comply_gate(page)
+        page.wait_for_load_state("domcontentloaded")
+    except Exception:
+        logger.exception("Echec de navigation vers /feed")
+        return False
+    return "/feed" in unquote(page.url)
+
+
+def _handle_login_failure(session, reason: str, exc: Exception | None = None):
+    """Profil non authentifie (checkpoint LinkedIn ou cookies expires).
+
+    Decision Richard 10-11/06 : on NE soumet PAS de credentials automatiquement
+    (chaque resoumission durcit le blocage cote LinkedIn), on NE ferme PAS le
+    navigateur (la fenetre reste ouverte sur la page de login/verification pour
+    que Richard se connecte a la main au poste — il coche "Rester connecte"),
+    et on engage le STOP des le 1er echec. On leve AuthenticationError pour que
+    l'appelant cesse d'utiliser la session, SANS toucher au profil ni aux cookies.
+    """
+    from linkedin.exceptions import AuthenticationError
+
+    logger.error(
+        colored("AUTH FAIL", "red", attrs=["bold"])
+        + " — %s. Fenetre LAISSEE OUVERTE pour login manuel ; STOP engage ;"
+        + " aucune soumission auto de credentials, aucun effacement de profil.",
+        reason,
+    )
+    # Amene la fenetre sur la page de login pour faciliter la saisie manuelle.
+    try:
+        if session is not None and session.page is not None:
+            session.page.goto(LINKEDIN_LOGIN_URL)
+    except Exception:
+        logger.debug("Impossible d'ouvrir la page de login", exc_info=True)
+    try:
+        from ekoalu import auth_watch
+        auth_watch.record_auth_failure(context=reason)
+    except Exception:
+        logger.exception("auth_watch indisponible (STOP non engage automatiquement)")
+    raise AuthenticationError(reason) from exc
 
 
 def start_browser_session(session: "AccountSession"):
-    logger.debug("Configuring browser for %s", session)
+    """Demarre la session navigateur a partir du PROFIL PERSISTANT.
 
-    session.linkedin_profile.refresh_from_db(fields=["cookie_data"])
-    cookie_data = session.linkedin_profile.cookie_data
+    Plus de login automatique au mot de passe : si le profil n'est pas
+    authentifie, on laisse la fenetre ouverte + STOP (login manuel requis).
+    """
+    logger.debug("Configuring persistent browser for %s", session)
 
-    storage_state = cookie_data if cookie_data else None
-    if storage_state:
-        logger.info("Loading saved session for %s", session)
+    session.page, session.context, session.browser, session.playwright = (
+        launch_persistent_browser()
+    )
 
-    session.page, session.context, session.browser, session.playwright = launch_browser(storage_state=storage_state)
-
-    if not storage_state:
-        playwright_login(session)
-        _save_cookies(session)
-        logger.info(colored("Login successful – session saved", "green", attrs=["bold"]))
+    if is_authenticated(session.page):
+        logger.info(colored("Browser ready", "green", attrs=["bold"]) + " (profil persistant authentifie)")
     else:
-        session.page.goto(LINKEDIN_FEED_URL)
-        dismiss_comply_gate(session.page)
-        goto_page(
+        _handle_login_failure(
             session,
-            action=lambda: None,
-            expected_url_pattern="/feed",
-            timeout=BROWSER_DEFAULT_TIMEOUT_MS,
-            error_message="Saved session invalid",
+            "profil persistant non authentifie (1er login manuel requis OU"
+            " cookies expires/checkpoint) — lancer `manage.py linkedin_manual_login`",
         )
 
     session.page.wait_for_load_state("load")
-    logger.info(colored("Browser ready", "green", attrs=["bold"]))
 
 
 if __name__ == "__main__":
