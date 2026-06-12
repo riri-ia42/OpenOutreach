@@ -181,6 +181,14 @@
 {% endif %}
 
 <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    {% if request.resolver_match.url_name != 'dashboard' %}
+    <div>
+        <a href="javascript:history.back()"
+           class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-100">
+            ← Retour
+        </a>
+    </div>
+    {% endif %}
     {% block content %}{% endblock %}
 </main>
 

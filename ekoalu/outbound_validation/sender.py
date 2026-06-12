@@ -239,10 +239,27 @@ def process_approved_queue(
             kind__in=(OutboundKind.FOLLOW_UP, OutboundKind.REPLY),
         ).count()
 
+    # Cap LECTURES de profil atteint : l'envoi d'un follow-up/reply LIT la
+    # fiche (materialize_profile_summary) -> sans cette garde ils partaient en
+    # FAILED sur ReadCapExceededError (constat Richard 12/06, PO 402/405). On
+    # les laisse APPROVED jusqu'au reset de minuit. Les invitations, elles,
+    # passent par la page navigateur (pas l'API Voyager comptée) -> non bloquées.
+    from ekoalu.read_guard.guard import is_cap_reached
+    reads_blocked = is_cap_reached()
+    if reads_blocked and not messages_blocked:
+        logger.info(
+            "Cap lectures profil atteint - follow-up/reply attendent minuit "
+            "(l'envoi lit la fiche), les invitations continuent",
+        )
+        stats["skipped"] += PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+            kind__in=(OutboundKind.FOLLOW_UP, OutboundKind.REPLY),
+        ).count()
+
     blocked_kinds = []
     if invitations_blocked:
         blocked_kinds.append(OutboundKind.INVITATION)
-    if messages_blocked:
+    if messages_blocked or reads_blocked:
         blocked_kinds.extend([OutboundKind.FOLLOW_UP, OutboundKind.REPLY])
 
     approved = PendingOutbound.objects.filter(

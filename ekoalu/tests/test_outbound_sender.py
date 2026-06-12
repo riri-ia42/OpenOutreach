@@ -313,6 +313,43 @@ class TestProcessApprovedQueue:
         assert po_msg.status == OutboundStatus.APPROVED  # bloqué, pas failed
         assert stats["skipped"] >= 1
 
+    def test_cap_lectures_atteint_follow_up_attendent_invitations_partent(self, monkeypatch):
+        """Cap lectures profil atteint : les follow-up (qui LISENT la fiche à
+        l'envoi) restent APPROVED au lieu de partir en FAILED ; les invitations
+        (page navigateur, non comptée) continuent. Bug constaté 12/06 (PO 402/405)."""
+        from django.utils import timezone
+
+        monkeypatch.setattr(
+            "ekoalu.read_guard.guard.is_cap_reached", lambda: True,
+        )
+        po_fu = PendingOutbound.objects.create(
+            prospect_public_id="test-readcap-fu",
+            kind=OutboundKind.FOLLOW_UP,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now() - dt.timedelta(hours=1),
+        )
+        po_invit = PendingOutbound.objects.create(
+            prospect_public_id="test-readcap-invit",
+            kind=OutboundKind.INVITATION,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now(),
+        )
+
+        with patch(
+            "ekoalu.outbound_validation.sender.is_action_allowed_now",
+            return_value=True,
+        ), patch(
+            "ekoalu.outbound_validation.sender.send_one", return_value=True,
+        ) as mock_send:
+            process_approved_queue(session=MagicMock(), max_messages=10, dry_run=False)
+
+        sent_pks = [call.args[1].pk for call in mock_send.call_args_list]
+        assert sent_pks == [po_invit.pk]
+        po_fu.refresh_from_db()
+        assert po_fu.status == OutboundStatus.APPROVED  # attend minuit, pas FAILED
+
     def test_sous_le_cap_messages_les_follow_up_partent(self, monkeypatch):
         from django.utils import timezone
         from ekoalu import conf
