@@ -45,6 +45,23 @@ def get_logo_bytes() -> bytes | None:
         return None
 
 
+# Guide des solutions EKOALU — joint au 1er contact (email_cold) uniquement
+# (demande Richard 12/06 ; le lien de la signature est conservé). Version
+# recompressée ~2,3 Mo (l'original 9,4 Mo dépasse la limite Graph de 4 Mo).
+GUIDE_FILENAME = "EKOALU - Guide des solutions.pdf"
+_GUIDE_PATH = Path(__file__).resolve().parent.parent / "assets" / "guide_solutions_ekoalu.pdf"
+
+
+@lru_cache(maxsize=1)
+def get_guide_bytes() -> bytes | None:
+    """Bytes PDF du guide des solutions (None si absent — mail sans PJ)."""
+    try:
+        return _GUIDE_PATH.read_bytes()
+    except OSError:
+        logger.warning("Guide des solutions introuvable (%s) — cold mail sans PJ", _GUIDE_PATH)
+        return None
+
+
 def signature_block_html(*, formal_first: bool = True, with_logo: bool = True) -> str:
     """Bloc coordonnées HTML de la charte signature Richard (SIGNATURES.md).
 
@@ -180,9 +197,17 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
     logo = get_logo_bytes()
     inline_images = {LOGO_CID: logo} if logo else None
 
+    # Guide des solutions en PJ sur le 1er contact uniquement (pas les
+    # follow-ups : le prospect l'a déjà reçu).
+    file_attachments = None
+    if po.kind == OutboundKind.EMAIL_COLD:
+        guide = get_guide_bytes()
+        if guide:
+            file_attachments = [(GUIDE_FILENAME, "application/pdf", guide)]
+
     try:
         send_mail(subject=po.subject, html_body=html_body, to=recipient,
-                  inline_images=inline_images)
+                  inline_images=inline_images, file_attachments=file_attachments)
     except GraphConfigError as exc:
         logger.error("Graph mal configuré : %s", exc)
         return False, f"graph_config: {exc}"

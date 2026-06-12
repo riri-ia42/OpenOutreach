@@ -100,6 +100,24 @@ def _inline_attachments(images: dict[str, bytes]) -> list[dict]:
     ]
 
 
+def _file_attachments(files: list[tuple[str, str, bytes]]) -> list[dict]:
+    """Convertit [(nom, content_type, bytes)] en attachments Graph classiques
+    (pièces jointes visibles, pas inline). Limite : ~3 Mo/fichier (la requête
+    sendMail JSON est plafonnée à 4 Mo base64 comprise par Graph)."""
+    import base64
+
+    return [
+        {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": name,
+            "contentType": content_type,
+            "contentBytes": base64.b64encode(data).decode("ascii"),
+        }
+        for name, content_type, data in files
+        if data
+    ]
+
+
 def send_mail(
     *,
     subject: str,
@@ -107,6 +125,7 @@ def send_mail(
     text_body: str | None = None,
     to: str | None = None,
     inline_images: dict[str, bytes] | None = None,
+    file_attachments: list[tuple[str, str, bytes]] | None = None,
 ) -> None:
     """Envoie un mail via Graph sendMail.
 
@@ -117,6 +136,8 @@ def send_mail(
         to: destinataire (défaut richard@ekoalu.com via GRAPH_ALERT_RECIPIENT)
         inline_images: {content_id: bytes_png} embarqués inline — référencés
             dans le HTML via ``<img src="cid:<content_id>">`` (ex : logo signature)
+        file_attachments: [(nom_fichier, content_type, bytes)] — pièces jointes
+            classiques (ex : guide des solutions PDF sur les cold mails)
 
     Raises:
         GraphConfigError, GraphAuthError, GraphSendError.
@@ -136,8 +157,13 @@ def send_mail(
         },
         "saveToSentItems": True,
     }
+    attachments = []
     if inline_images:
-        payload["message"]["attachments"] = _inline_attachments(inline_images)
+        attachments += _inline_attachments(inline_images)
+    if file_attachments:
+        attachments += _file_attachments(file_attachments)
+    if attachments:
+        payload["message"]["attachments"] = attachments
 
     resp = requests.post(
         f"{GRAPH_BASE}/users/{user_email}/sendMail",

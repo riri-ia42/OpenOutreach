@@ -99,11 +99,13 @@ class TestSendColdEmailSuccess:
         lead, po = make_lead_with_po()
         captured = {}
 
-        def _mock_send(*, subject, html_body, to, inline_images=None):
+        def _mock_send(*, subject, html_body, to, inline_images=None,
+                       file_attachments=None):
             captured["subject"] = subject
             captured["html_body"] = html_body
             captured["to"] = to
             captured["inline_images"] = inline_images
+            captured["file_attachments"] = file_attachments
 
         monkeypatch.setattr("ekoalu.email_canal.sender.send_mail", _mock_send)
         success, err = send_cold_email(po)
@@ -114,6 +116,34 @@ class TestSendColdEmailSuccess:
         assert "Coupe-feu EI60" in captured["html_body"]
         assert "<p " in captured["html_body"]  # HTML conversion
         assert captured["inline_images"] and "logoekoalu" in captured["inline_images"]
+
+    def test_guide_joint_au_cold_mais_pas_au_follow_up(self, make_lead_with_po, monkeypatch):
+        """Le guide des solutions part en PJ sur le 1er contact uniquement
+        (demande Richard 12/06) — le lien signature est conservé par ailleurs."""
+        captured = {}
+
+        def _mock_send(**kw):
+            captured.update(kw)
+
+        monkeypatch.setattr("ekoalu.email_canal.sender.send_mail", _mock_send)
+
+        lead, po_cold = make_lead_with_po()
+        success, _ = send_cold_email(po_cold)
+        assert success
+        pjs = captured.get("file_attachments")
+        assert pjs and pjs[0][0] == "EKOALU - Guide des solutions.pdf"
+        assert pjs[0][1] == "application/pdf"
+        assert len(pjs[0][2]) > 100_000  # vrai PDF, pas un placeholder
+        assert len(pjs[0][2]) < 3_000_000  # sous la limite Graph 4 Mo base64
+
+        captured.clear()
+        lead2, po_fu = make_lead_with_po(
+            kind=OutboundKind.EMAIL_FOLLOW_UP, siren="555000222",
+            email="autre@acme.fr",
+        )
+        success, _ = send_cold_email(po_fu)
+        assert success
+        assert captured.get("file_attachments") is None
 
 
 class TestSendColdEmailFailures:
