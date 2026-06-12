@@ -154,6 +154,27 @@ class TestOutboundDetailProspect:
         r = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk]))
         assert "data:image/png;base64," in r.content.decode()
 
+    def test_fiche_prospect_lead_detail_enrichie_et_lien_retour_message(self, client_logged):
+        """La fiche prospect porte les mêmes infos en partie haute + le lien
+        vers le message en attente de validation (captures Richard 12/06)."""
+        po = self._make_email_po()
+        r = client_logged.get(
+            reverse("ekoalu:lead_detail", args=[po.prospect_public_id]),
+        )
+        assert r.status_code == 200
+        content = r.content.decode()
+        assert "Marc Allouis" in content
+        assert "m.allouis@faceintec.fr" in content
+        assert "Villeurbanne" in content
+        assert "43.32B" in content
+        assert "330465550" in content
+        assert "BDD PROSPECT" in content
+        # bouton retour vers le message pending
+        assert f"/ekoalu/messages/{po.pk}/" in content
+        assert "à valider" in content
+        # pas de faux lien LinkedIn pour un lead mail-only
+        assert "linkedin.com/in/bdd-prospect" not in content
+
 
 @pytest.mark.django_db
 class TestCampaignsViews:

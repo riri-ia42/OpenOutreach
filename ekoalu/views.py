@@ -21,6 +21,56 @@ from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, Pend
 from ekoalu.personas import PERSONAS
 
 
+def _build_prospect_card(slug: str, deal=None, company_hint: str = "") -> dict:
+    """Fiche prospect complète (demande Richard 12/06) — partagée entre le
+    détail message et la fiche prospect.
+
+    Combine resolve_prospect_display (heuristiques LinkedIn) avec les données
+    structurées EmailLeadData (leads BDD PROSPECT) : nom du dirigeant, email,
+    ville, NAF, effectif, SIREN, source.
+    """
+    from crm.models import Lead
+    from ekoalu.prospect_display import resolve_prospect_display
+
+    display = resolve_prospect_display(slug, deal=deal, company_hint=company_hint)
+    lead = Lead.objects.filter(public_identifier=slug).select_related("email_data").first()
+    email_data = getattr(lead, "email_data", None) if lead else None
+    if email_data:
+        if email_data.dirigeant:
+            display["name"] = email_data.dirigeant
+        display["company"] = email_data.entreprise or display.get("company", "")
+        loc_bits = [b for b in (email_data.ville, email_data.cp) if b]
+        if loc_bits:
+            display["location"] = " ".join(loc_bits) + (
+                f" ({email_data.dpt})" if email_data.dpt else ""
+            )
+        if not display.get("job_title"):
+            display["job_title"] = "Dirigeant" if email_data.dirigeant else ""
+
+    facts = {
+        "email": getattr(lead, "contact_email", "") or "",
+        "email_bounced": bool(lead and lead.email_bounced_at),
+        "unsubscribed": bool(lead and lead.unsubscribed_at),
+        "activite": getattr(email_data, "activite", "") or "",
+        "code_naf": getattr(email_data, "code_naf", "") or "",
+        "siren": getattr(email_data, "siren", "") or "",
+        "effectif": (
+            f"{email_data.effectif_min}-{email_data.effectif_max} salariés"
+            if email_data and email_data.effectif_max else ""
+        ),
+        "source": (
+            "BDD PROSPECT" if (email_data and email_data.source == "bdd_prospect")
+            else ("Saisie manuelle" if email_data and email_data.source == "manual" else "LinkedIn")
+        ),
+    }
+    return {
+        "display": display,
+        "facts": facts,
+        "lead": lead,
+        "is_mail_only": slug.startswith("bdd-prospect-"),
+    }
+
+
 def _campaign_funnel(campaign) -> dict:
     """Funnel commercial cohérent d'une campagne — partagé dashboard + page campagnes.
 
@@ -542,9 +592,16 @@ def lead_detail(request, slug: str):
         name__startswith="EKOALU - ",
     ).exclude(pk__in=existing_campaign_ids).order_by("name")
 
-    from ekoalu.prospect_display import resolve_prospect_display
     primary_deal = deals.first() if deals else None
-    display = resolve_prospect_display(slug, deal=primary_deal)
+    card = _build_prospect_card(slug, deal=primary_deal)
+
+    # Lien retour vers le message en attente de validation (demande Richard
+    # 12/06 : « pouvoir revenir en arrière, je viens du mail cold à valider »)
+    po_to_validate = (
+        PendingOutbound.objects.filter(
+            prospect_public_id=slug, status=OutboundStatus.PENDING,
+        ).order_by("-created_at").first()
+    )
 
     return render(request, "ekoalu/lead_detail.html", {
         "lead": lead,
@@ -555,7 +612,10 @@ def lead_detail(request, slug: str):
         "timeline_events": timeline_events[:30],
         "has_embedding": lead.embedding is not None,
         "available_campaigns": available_campaigns,
-        "prospect_display": display,
+        "prospect_display": card["display"],
+        "prospect_facts": card["facts"],
+        "is_mail_only": card["is_mail_only"],
+        "po_to_validate": po_to_validate,
     })
 
 
@@ -1612,53 +1672,20 @@ def outbound_detail(request, pk: int):
                 )
             return redirect("ekoalu:outbound_detail", pk=pk)
 
-    from crm.models import Deal, Lead
-    from ekoalu.prospect_display import resolve_prospect_display
+    from crm.models import Deal
     deal = (
         Deal.objects
         .filter(lead__public_identifier=outbound.prospect_public_id, campaign_id=outbound.campaign_id)
         .select_related("lead", "campaign")
         .first()
     )
-    display = resolve_prospect_display(
+    card = _build_prospect_card(
         outbound.prospect_public_id, deal=deal, company_hint=outbound.prospect_company,
     )
-
-    # Fiche prospect complete : tout ce qu'on sait du contact (demande Richard
-    # 12/06). Les leads BDD PROSPECT portent leurs donnees dans EmailLeadData ;
-    # les leads LinkedIn dans le profile_summary (via resolve_prospect_display).
-    lead = Lead.objects.filter(
-        public_identifier=outbound.prospect_public_id,
-    ).select_related("email_data").first()
-    email_data = getattr(lead, "email_data", None) if lead else None
-    is_mail_only = outbound.prospect_public_id.startswith("bdd-prospect-")
-    if email_data:
-        if email_data.dirigeant:
-            display["name"] = email_data.dirigeant
-        display["company"] = email_data.entreprise or display.get("company", "")
-        loc_bits = [b for b in (email_data.ville, email_data.cp) if b]
-        if loc_bits:
-            display["location"] = " ".join(loc_bits) + (
-                f" ({email_data.dpt})" if email_data.dpt else ""
-            )
-        if not display.get("job_title"):
-            display["job_title"] = "Dirigeant" if email_data.dirigeant else ""
-    prospect_facts = {
-        "email": getattr(lead, "contact_email", "") or "",
-        "email_bounced": bool(lead and lead.email_bounced_at),
-        "unsubscribed": bool(lead and lead.unsubscribed_at),
-        "activite": getattr(email_data, "activite", "") or "",
-        "code_naf": getattr(email_data, "code_naf", "") or "",
-        "siren": getattr(email_data, "siren", "") or "",
-        "effectif": (
-            f"{email_data.effectif_min}-{email_data.effectif_max} salariés"
-            if email_data and email_data.effectif_max else ""
-        ),
-        "source": (
-            "BDD PROSPECT" if (email_data and email_data.source == "bdd_prospect")
-            else ("Saisie manuelle" if email_data and email_data.source == "manual" else "LinkedIn")
-        ),
-    }
+    display = card["display"]
+    prospect_facts = card["facts"]
+    lead = card["lead"]
+    is_mail_only = card["is_mail_only"]
 
     # Apercu signature pour les emails : le bloc coordonnees est appose par
     # le sender a l'envoi — on le montre ici pour que Richard voie le mail

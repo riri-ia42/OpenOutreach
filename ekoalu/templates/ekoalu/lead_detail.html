@@ -4,10 +4,13 @@
 
 {% block content %}
 
-<div class="flex items-center justify-between gap-4">
+<div class="flex items-start justify-between gap-4 flex-wrap">
     <div>
         <h1 class="text-2xl font-bold text-gray-900">
             {{ prospect_display.name|default:lead.public_identifier }}
+            {% if prospect_display.job_title %}
+            <span class="text-base font-normal text-gray-500">· {{ prospect_display.job_title }}</span>
+            {% endif %}
             {% if prospect_display.company %}
             <span class="text-lg font-normal text-gray-700">— {{ prospect_display.company }}</span>
             {% endif %}
@@ -15,38 +18,92 @@
             <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 ml-2 align-middle">disqualifié</span>
             {% endif %}
         </h1>
-        {% if prospect_display.location %}
-        <p class="text-sm text-gray-600">📍 {{ prospect_display.location }}</p>
-        {% endif %}
+        {% if not is_mail_only %}
         <a href="{{ linkedin_url }}" target="_blank" class="text-sm text-blue-600 hover:underline">{{ linkedin_url }} ↗</a>
+        {% endif %}
+    </div>
+    <div class="flex gap-2 items-center">
+        {% if po_to_validate %}
+        <a href="{% url 'ekoalu:outbound_detail' po_to_validate.pk %}"
+           class="px-4 py-2 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium">
+            ✉ {{ po_to_validate.get_kind_display }} à valider →
+        </a>
+        {% endif %}
+        <a href="javascript:history.back()"
+           class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">← Retour</a>
     </div>
 </div>
 
 <!-- Infos lead + actions -->
 <section class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
     <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Prospect</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-        <div>
-            <div class="text-xs text-gray-500">Slug</div>
-            <div class="font-mono">{{ lead.public_identifier }}</div>
+
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm mb-4">
+        {% if prospect_facts.email %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Email</dt>
+            <dd>
+                <a href="mailto:{{ prospect_facts.email }}" class="text-blue-600 hover:underline">{{ prospect_facts.email }}</a>
+                {% if prospect_facts.email_bounced %}<span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 ml-1">bounce</span>{% endif %}
+                {% if prospect_facts.unsubscribed %}<span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 ml-1">désinscrit</span>{% else %}<span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 ml-1">actif</span>{% endif %}
+            </dd>
         </div>
-        <div>
-            <div class="text-xs text-gray-500">URN</div>
-            <div class="font-mono text-xs">{{ lead.urn|default:"(pas encore scrapé)" }}</div>
+        {% endif %}
+        {% if prospect_display.location %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Localisation</dt>
+            <dd class="text-gray-900">📍 {{ prospect_display.location }}</dd>
         </div>
-        <div>
-            <div class="text-xs text-gray-500">Embedding ML</div>
-            <div>{% if has_embedding %}<span class="text-green-700">✓ calculé (384-dim)</span>{% else %}<span class="text-gray-400">— pas encore</span>{% endif %}</div>
+        {% endif %}
+        {% if prospect_facts.activite %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Activité</dt>
+            <dd class="text-gray-900">{{ prospect_facts.activite }}{% if prospect_facts.code_naf %} <span class="text-gray-400">(NAF {{ prospect_facts.code_naf }})</span>{% endif %}</dd>
         </div>
-        <div>
-            <div class="text-xs text-gray-500">Créé</div>
-            <div>{{ lead.creation_date|date:"d/m/Y H:i" }}</div>
+        {% endif %}
+        {% if prospect_facts.effectif %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Effectif</dt>
+            <dd class="text-gray-900">{{ prospect_facts.effectif }}</dd>
         </div>
-        <div>
-            <div class="text-xs text-gray-500">Maj</div>
-            <div>{{ lead.update_date|date:"d/m/Y H:i" }}</div>
+        {% endif %}
+        {% if prospect_facts.siren %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">SIREN</dt>
+            <dd><a href="https://www.pappers.fr/recherche?q={{ prospect_facts.siren }}" target="_blank" class="text-blue-600 hover:underline">{{ prospect_facts.siren }} ↗</a></dd>
         </div>
-    </div>
+        {% endif %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Source</dt>
+            <dd class="text-gray-900">{{ prospect_facts.source }}</dd>
+        </div>
+    </dl>
+
+    <details class="text-sm border-t border-gray-100 pt-3">
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Détails techniques (slug, URN, embedding…)</summary>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mt-3">
+            <div>
+                <div class="text-xs text-gray-500">Slug</div>
+                <div class="font-mono">{{ lead.public_identifier }}</div>
+            </div>
+            <div>
+                <div class="text-xs text-gray-500">URN</div>
+                <div class="font-mono text-xs">{{ lead.urn|default:"(pas encore scrapé)" }}</div>
+            </div>
+            <div>
+                <div class="text-xs text-gray-500">Embedding ML</div>
+                <div>{% if has_embedding %}<span class="text-green-700">✓ calculé (384-dim)</span>{% else %}<span class="text-gray-400">— pas encore</span>{% endif %}</div>
+            </div>
+            <div>
+                <div class="text-xs text-gray-500">Créé</div>
+                <div>{{ lead.creation_date|date:"d/m/Y H:i" }}</div>
+            </div>
+            <div>
+                <div class="text-xs text-gray-500">Maj</div>
+                <div>{{ lead.update_date|date:"d/m/Y H:i" }}</div>
+            </div>
+        </div>
+    </details>
     <form method="post" class="mt-4 pt-4 border-t border-gray-200 flex gap-2 flex-wrap">
         {% csrf_token %}
         {% if lead.disqualified %}
@@ -78,22 +135,17 @@
             {% endif %}
         {% endif %}
 
+        {% if not is_mail_only %}
         <a href="{{ linkedin_url }}" target="_blank"
            class="px-4 py-2 bg-gray-100 text-gray-800 text-sm rounded hover:bg-gray-200">
             Voir sur LinkedIn ↗
         </a>
+        {% endif %}
     </form>
 
-    {% if lead.contact_email %}
-    <div class="mt-3 text-xs text-gray-600">
-        Canal email : <span class="font-mono">{{ lead.contact_email }}</span>
-        {% if lead.unsubscribed_at %}
-        <span class="ml-2 px-2 py-0.5 rounded-full bg-red-100 text-red-800">
-            désinscrit depuis le {{ lead.unsubscribed_at|date:"d/m/Y H:i" }}
-        </span>
-        {% else %}
-        <span class="ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-800">actif</span>
-        {% endif %}
+    {% if lead.unsubscribed_at %}
+    <div class="mt-3 text-xs text-red-700">
+        Désinscrit du canal email depuis le {{ lead.unsubscribed_at|date:"d/m/Y H:i" }}.
     </div>
     {% endif %}
 </section>
