@@ -65,12 +65,13 @@
     <!-- Efficacité des recherches (lectures de fiches vs sélectionnés) -->
     <section>
         <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold text-gray-900">Efficacité du tri — 10 derniers jours</h2>
+            <h2 class="text-lg font-semibold text-gray-900">Efficacité du tri <span class="text-sm font-normal text-gray-500">— depuis le {{ efficiency_chart.totals.since }}</span></h2>
             <div class="flex flex-wrap gap-3 text-xs text-gray-600">
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Fiches lues : <b>{{ efficiency_chart.totals.reads }}</b></span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Sélectionnés : <b>{{ efficiency_chart.totals.selected }}</b></span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#dc2626"></span>Rejetés : <b>{{ efficiency_chart.totals.rejected }}</b></span>
-                <span class="font-medium">Taux : <b>{% if efficiency_chart.totals.rate is not None %}{{ efficiency_chart.totals.rate }}%{% else %}—{% endif %}</b></span>
+                <span class="font-medium">Taux du jour : <b>{% if efficiency_chart.totals.today_rate is not None %}{{ efficiency_chart.totals.today_rate }}%{% else %}—{% endif %}</b></span>
+                <span class="text-gray-400">(moyenne : {% if efficiency_chart.totals.rate is not None %}{{ efficiency_chart.totals.rate }}%{% else %}—{% endif %})</span>
             </div>
         </div>
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">

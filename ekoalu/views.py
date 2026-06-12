@@ -136,15 +136,24 @@ def _search_efficiency_data(days: int = 10) -> dict:
       (state != Failed, shadows exclus)
     - rejetés : Deals créés ce jour-là en Failed/wrong_fit
     - taux : sélectionnés / lectures du jour
+
+    Fenêtre plancher au 10/06/2026 : le compteur de lectures (read_guard)
+    n'existe que depuis cette date — avant, lectures=0 et des centaines de
+    rejets/jour (ère pré-scoping) écrasaient l'échelle et faussaient le taux
+    (demande Richard 12/06).
     """
     import json
-    from datetime import timedelta
+    from datetime import date, timedelta
 
     from crm.models import Deal
     from ekoalu.read_guard.models import ProfileReadDay
 
+    floor = date(2026, 6, 10)
     today = timezone.localdate()
-    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    day_list = [
+        d for d in (today - timedelta(days=i) for i in range(days - 1, -1, -1))
+        if d >= floor
+    ] or [today]
     start = timezone.make_aware(
         timezone.datetime.combine(day_list[0], timezone.datetime.min.time()),
     )
@@ -189,6 +198,8 @@ def _search_efficiency_data(days: int = 10) -> dict:
             "selected": total_selected,
             "rejected": sum(rejected),
             "rate": round(total_selected / total_reads * 100, 1) if total_reads else None,
+            "today_rate": rates[-1] if rates else None,
+            "since": day_list[0].strftime("%d/%m"),
         },
     }
 
