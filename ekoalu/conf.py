@@ -40,7 +40,9 @@ MAX_DELAY_SECONDS = 1800     # 30 min maximum
 WEEKLY_INVITE_TARGET = int(os.environ.get("EKOALU_WEEKLY_INVITE_TARGET", "30"))
 WEEKLY_INVITE_HARD_CAP = int(os.environ.get("EKOALU_WEEKLY_INVITE_HARD_CAP", "80"))
 DAILY_INVITE_CAP = int(os.environ.get("EKOALU_DAILY_INVITE_CAP", "8"))
-DAILY_MESSAGE_CAP = int(os.environ.get("EKOALU_DAILY_MESSAGE_CAP", "80"))
+# Messages LinkedIn (follow-up + reply) par 24h glissantes — benchmark 2026
+# compte gratuit : ~100/sem, zone sure 15-20/j. Enforce par process_approved_queue.
+DAILY_MESSAGE_CAP = int(os.environ.get("EKOALU_DAILY_MESSAGE_CAP", "15"))
 
 # Cooldown post-acceptation (heures avant follow-up)
 COOLDOWN_MIN_HOURS = 4

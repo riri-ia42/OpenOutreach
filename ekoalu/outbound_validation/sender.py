@@ -220,16 +220,34 @@ def process_approved_queue(
     else:
         invitations_blocked = False
 
-    # Si invitations bloquees, on traite quand meme les follow-up DMs
-    # (pas de cap LinkedIn comparable).
+    # Cap journalier MESSAGES (follow-up + reply) — benchmark 2026 compte
+    # gratuit : ~100/sem soit 15-20/j en zone sure. Cale via
+    # EKOALU_DAILY_MESSAGE_CAP (conf.DAILY_MESSAGE_CAP).
+    messages_24h = PendingOutbound.objects.filter(
+        kind__in=(OutboundKind.FOLLOW_UP, OutboundKind.REPLY),
+        status=OutboundStatus.SENT,
+        sent_at__gte=now - timedelta(days=1),
+    ).count()
+    messages_blocked = messages_24h >= conf.DAILY_MESSAGE_CAP
+    if messages_blocked:
+        logger.info(
+            "Cap journalier messages atteint (%d/%d) - on attend demain",
+            messages_24h, conf.DAILY_MESSAGE_CAP,
+        )
+        stats["skipped"] += PendingOutbound.objects.filter(
+            status=OutboundStatus.APPROVED,
+            kind__in=(OutboundKind.FOLLOW_UP, OutboundKind.REPLY),
+        ).count()
+
+    blocked_kinds = []
     if invitations_blocked:
-        approved = PendingOutbound.objects.filter(
-            status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
-        ).exclude(kind=OutboundKind.INVITATION).order_by("approved_at")[:max_messages]
-    else:
-        approved = PendingOutbound.objects.filter(
-            status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
-        ).order_by("approved_at")[:max_messages]
+        blocked_kinds.append(OutboundKind.INVITATION)
+    if messages_blocked:
+        blocked_kinds.extend([OutboundKind.FOLLOW_UP, OutboundKind.REPLY])
+
+    approved = PendingOutbound.objects.filter(
+        status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
+    ).exclude(kind__in=blocked_kinds).order_by("approved_at")[:max_messages]
 
     for i, po in enumerate(approved):
         stats["processed"] += 1

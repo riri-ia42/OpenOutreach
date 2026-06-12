@@ -265,3 +265,74 @@ class TestProcessApprovedQueue:
         po_mail.refresh_from_db()
         assert po_mail.status == OutboundStatus.APPROVED
         assert po_mail.error_message == ""
+
+    def test_cap_journalier_messages_bloque_follow_up_pas_invitations(self, monkeypatch):
+        """Au cap DAILY_MESSAGE_CAP (15/j zone sure compte gratuit), les
+        follow-up/reply sont bloqués mais les invitations continuent."""
+        from django.utils import timezone
+        from ekoalu import conf
+
+        monkeypatch.setattr(conf, "DAILY_MESSAGE_CAP", 2)
+        # 2 messages déjà envoyés dans les 24h → cap atteint
+        for i in range(2):
+            PendingOutbound.objects.create(
+                prospect_public_id=f"test-msgcap-sent-{i}",
+                kind=OutboundKind.FOLLOW_UP,
+                ai_draft="x",
+                status=OutboundStatus.SENT,
+                sent_at=timezone.now() - dt.timedelta(hours=1),
+            )
+        po_msg = PendingOutbound.objects.create(
+            prospect_public_id="test-msgcap-fu",
+            kind=OutboundKind.FOLLOW_UP,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now() - dt.timedelta(hours=1),
+        )
+        po_invit = PendingOutbound.objects.create(
+            prospect_public_id="test-msgcap-invit",
+            kind=OutboundKind.INVITATION,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now(),
+        )
+
+        with patch(
+            "ekoalu.outbound_validation.sender.is_action_allowed_now",
+            return_value=True,
+        ), patch(
+            "ekoalu.outbound_validation.sender.send_one", return_value=True,
+        ) as mock_send:
+            stats = process_approved_queue(
+                session=MagicMock(), max_messages=10, dry_run=False,
+            )
+
+        sent_pks = [call.args[1].pk for call in mock_send.call_args_list]
+        assert sent_pks == [po_invit.pk]
+        po_msg.refresh_from_db()
+        assert po_msg.status == OutboundStatus.APPROVED  # bloqué, pas failed
+        assert stats["skipped"] >= 1
+
+    def test_sous_le_cap_messages_les_follow_up_partent(self, monkeypatch):
+        from django.utils import timezone
+        from ekoalu import conf
+
+        monkeypatch.setattr(conf, "DAILY_MESSAGE_CAP", 15)
+        po_msg = PendingOutbound.objects.create(
+            prospect_public_id="test-msgok-fu",
+            kind=OutboundKind.FOLLOW_UP,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now(),
+        )
+
+        with patch(
+            "ekoalu.outbound_validation.sender.is_action_allowed_now",
+            return_value=True,
+        ), patch(
+            "ekoalu.outbound_validation.sender.send_one", return_value=True,
+        ) as mock_send:
+            process_approved_queue(session=MagicMock(), max_messages=10, dry_run=False)
+
+        sent_pks = [call.args[1].pk for call in mock_send.call_args_list]
+        assert po_msg.pk in sent_pks
