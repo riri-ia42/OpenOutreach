@@ -118,6 +118,79 @@ def _file_attachments(files: list[tuple[str, str, bytes]]) -> list[dict]:
     ]
 
 
+# Au-dela : sendMail JSON (limite Graph 4 Mo base64 comprise) ne passe plus.
+LARGE_ATTACH_THRESHOLD = 2_300_000
+# Chunks d'upload : multiple de 320 KiB exige par Graph.
+_UPLOAD_CHUNK = 327_680 * 10  # 3,125 Mo
+
+
+def _send_via_upload_session(
+    *, subject, html_body, recipient, user_email, token,
+    inline_images, file_attachments,
+) -> None:
+    """Flux brouillon -> createUploadSession (chunks) -> send.
+
+    Requis pour les PJ > LARGE_ATTACH_THRESHOLD. Le brouillon envoyé part en
+    Éléments envoyés comme un sendMail classique.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # 1. Brouillon (avec le logo inline, petit, en attachment direct)
+    message = {
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": html_body},
+        "toRecipients": [{"emailAddress": {"address": recipient}}],
+    }
+    if inline_images:
+        message["attachments"] = _inline_attachments(inline_images)
+    resp = requests.post(
+        f"{GRAPH_BASE}/users/{user_email}/messages",
+        json=message, headers=headers, timeout=30,
+    )
+    if not resp.ok:
+        raise GraphSendError(f"draft {resp.status_code}: {resp.text[:300]}")
+    msg_id = resp.json()["id"]
+
+    # 2. Upload des grosses PJ par chunks
+    for name, content_type, data in (file_attachments or []):
+        sess = requests.post(
+            f"{GRAPH_BASE}/users/{user_email}/messages/{msg_id}/attachments/createUploadSession",
+            json={"AttachmentItem": {
+                "attachmentType": "file",
+                "name": name,
+                "size": len(data),
+                "contentType": content_type,
+            }},
+            headers=headers, timeout=30,
+        )
+        if not sess.ok:
+            raise GraphSendError(f"uploadSession {sess.status_code}: {sess.text[:300]}")
+        upload_url = sess.json()["uploadUrl"]
+        for start in range(0, len(data), _UPLOAD_CHUNK):
+            end = min(start + _UPLOAD_CHUNK, len(data))
+            chunk_resp = requests.put(
+                upload_url,
+                data=data[start:end],
+                headers={
+                    "Content-Length": str(end - start),
+                    "Content-Range": f"bytes {start}-{end - 1}/{len(data)}",
+                },
+                timeout=120,
+            )
+            if chunk_resp.status_code not in (200, 201, 202):
+                raise GraphSendError(
+                    f"upload chunk {chunk_resp.status_code}: {chunk_resp.text[:300]}",
+                )
+
+    # 3. Envoi du brouillon
+    resp = requests.post(
+        f"{GRAPH_BASE}/users/{user_email}/messages/{msg_id}/send",
+        headers=headers, timeout=30,
+    )
+    if resp.status_code != 202:
+        raise GraphSendError(f"draft send {resp.status_code}: {resp.text[:300]}")
+
+
 def send_mail(
     *,
     subject: str,
@@ -157,6 +230,20 @@ def send_mail(
         },
         "saveToSentItems": True,
     }
+    # Au-dela de ~2,3 Mo de PJ, la requete sendMail JSON depasse la limite
+    # Graph de 4 Mo (base64 x1,37) -> bascule sur le flux brouillon + upload
+    # session (chunks, jusqu'a 150 Mo). Ex : guide des solutions 5,5 Mo.
+    total_files = sum(len(d) for _, _, d in (file_attachments or []))
+    if total_files > LARGE_ATTACH_THRESHOLD:
+        _send_via_upload_session(
+            subject=subject, html_body=html_body, recipient=recipient,
+            user_email=user_email, token=token,
+            inline_images=inline_images, file_attachments=file_attachments,
+        )
+        logger.info("Mail Graph (upload session, PJ %.1f Mo) envoyé à %s — sujet: %s",
+                    total_files / 1024 / 1024, recipient, subject[:80])
+        return
+
     attachments = []
     if inline_images:
         attachments += _inline_attachments(inline_images)

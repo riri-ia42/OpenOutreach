@@ -134,7 +134,8 @@ class TestSendColdEmailSuccess:
         assert pjs and pjs[0][0] == "EKOALU - Guide des solutions.pdf"
         assert pjs[0][1] == "application/pdf"
         assert len(pjs[0][2]) > 100_000  # vrai PDF, pas un placeholder
-        assert len(pjs[0][2]) < 3_000_000  # sous la limite Graph 4 Mo base64
+        # > 2,3 Mo : part par le flux upload session (pas de limite 4 Mo)
+        assert len(pjs[0][2]) < 8_000_000  # raisonnable pour un cold mail B2B
 
         captured.clear()
         lead2, po_fu = make_lead_with_po(
@@ -144,6 +145,71 @@ class TestSendColdEmailSuccess:
         success, _ = send_cold_email(po_fu)
         assert success
         assert captured.get("file_attachments") is None
+
+
+class TestGraphUploadSession:
+    """Routage des grosses PJ vers le flux brouillon + upload session."""
+
+    def _mock_graph(self, monkeypatch, calls):
+        import ekoalu.notifications.graph_mailer as gm
+        monkeypatch.setenv("GRAPH_USER_EMAIL", "richard@ekoalu.com")
+        monkeypatch.setattr(gm, "_get_access_token", lambda: "tok")
+
+        class FakeResp:
+            def __init__(self, status, payload=None):
+                self.status_code = status
+                self.ok = status < 400
+                self.text = ""
+                self._payload = payload or {}
+            def json(self):
+                return self._payload
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            calls.append(("POST", url))
+            if url.endswith("/messages"):
+                return FakeResp(201, {"id": "draft-1"})
+            if url.endswith("/createUploadSession"):
+                return FakeResp(201, {"uploadUrl": "https://up.example/sess"})
+            if url.endswith("/send"):
+                return FakeResp(202)
+            if url.endswith("/sendMail"):
+                return FakeResp(202)
+            return FakeResp(404)
+
+        def fake_put(url, data=None, headers=None, timeout=None):
+            calls.append(("PUT", url, len(data)))
+            return FakeResp(201)
+
+        monkeypatch.setattr(gm.requests, "post", fake_post)
+        monkeypatch.setattr(gm.requests, "put", fake_put)
+        return gm
+
+    def test_grosse_pj_part_en_upload_session(self, monkeypatch):
+        calls = []
+        gm = self._mock_graph(monkeypatch, calls)
+        big = b"x" * 5_500_000  # 5,5 Mo comme le guide
+        gm.send_mail(
+            subject="s", html_body="<p>b</p>", to="dest@x.fr",
+            file_attachments=[("guide.pdf", "application/pdf", big)],
+        )
+        urls = [c[1] for c in calls if c[0] == "POST"]
+        assert any(u.endswith("/messages") for u in urls)          # brouillon
+        assert any(u.endswith("/createUploadSession") for u in urls)
+        assert any(u.endswith("/draft-1/send") for u in urls)      # envoi final
+        assert not any(u.endswith("/sendMail") for u in urls)      # pas le flux simple
+        puts = [c for c in calls if c[0] == "PUT"]
+        assert sum(c[2] for c in puts) == 5_500_000                # tout uploadé
+
+    def test_petite_pj_garde_le_flux_simple(self, monkeypatch):
+        calls = []
+        gm = self._mock_graph(monkeypatch, calls)
+        gm.send_mail(
+            subject="s", html_body="<p>b</p>", to="dest@x.fr",
+            file_attachments=[("note.pdf", "application/pdf", b"x" * 10_000)],
+        )
+        urls = [c[1] for c in calls if c[0] == "POST"]
+        assert any(u.endswith("/sendMail") for u in urls)
+        assert not any(u.endswith("/createUploadSession") for u in urls)
 
 
 class TestSendColdEmailFailures:
