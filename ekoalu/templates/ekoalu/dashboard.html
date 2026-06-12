@@ -62,8 +62,48 @@
             </div>
         </div>
     </section>
+    <!-- Efficacité des recherches (lectures de fiches vs sélectionnés) -->
+    <section>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Efficacité du tri — 10 derniers jours</h2>
+            <div class="flex flex-wrap gap-3 text-xs text-gray-600">
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Fiches lues : <b>{{ efficiency_chart.totals.reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Sélectionnés : <b>{{ efficiency_chart.totals.selected }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#dc2626"></span>Rejetés : <b>{{ efficiency_chart.totals.rejected }}</b></span>
+                <span class="font-medium">Taux : <b>{% if efficiency_chart.totals.rate is not None %}{{ efficiency_chart.totals.rate }}%{% else %}—{% endif %}</b></span>
+            </div>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div class="relative h-56 md:h-64">
+                <canvas id="efficiencyChart"></canvas>
+            </div>
+        </div>
+    </section>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
     <script>
+    new Chart(document.getElementById('efficiencyChart'), {
+        type: 'bar',
+        data: {
+            labels: {{ efficiency_chart.labels|safe }},
+            datasets: [
+                { label: 'Fiches lues', data: {{ efficiency_chart.reads|safe }}, backgroundColor: '#94a3b8', yAxisID: 'y' },
+                { label: 'Profils sélectionnés', data: {{ efficiency_chart.selected|safe }}, backgroundColor: '#16a34a', yAxisID: 'y' },
+                { label: 'Rejetés (hors cible)', data: {{ efficiency_chart.rejected|safe }}, backgroundColor: '#dc2626', yAxisID: 'y' },
+                { label: 'Taux de sélection (%)', data: {{ efficiency_chart.rates|safe }}, type: 'line', borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.3, pointRadius: 3, spanGaps: true, yAxisID: 'y2' },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+                x: { grid: { display: false } },
+                y: { beginAtZero: true, ticks: { precision: 0 } },
+                y2: { beginAtZero: true, max: 100, position: 'right', grid: { display: false }, ticks: { callback: v => v + '%' } },
+            },
+        },
+    });
     new Chart(document.getElementById('activityChart'), {
         type: 'bar',
         data: {

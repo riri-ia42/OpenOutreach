@@ -77,6 +77,72 @@ def _campaign_funnel(campaign) -> dict:
     }
 
 
+def _search_efficiency_data(days: int = 10) -> dict:
+    """Efficacité du tri sur `days` jours : fiches lues vs profils sélectionnés.
+
+    - lectures : ProfileReadDay (compteur read_guard, = « recherches » au sens
+      fiches LinkedIn consultées)
+    - sélectionnés : Deals créés ce jour-là par le qualifier en Qualified
+      (state != Failed, shadows exclus)
+    - rejetés : Deals créés ce jour-là en Failed/wrong_fit
+    - taux : sélectionnés / lectures du jour
+    """
+    import json
+    from datetime import timedelta
+
+    from crm.models import Deal
+    from ekoalu.read_guard.models import ProfileReadDay
+
+    today = timezone.localdate()
+    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    start = timezone.make_aware(
+        timezone.datetime.combine(day_list[0], timezone.datetime.min.time()),
+    )
+
+    reads_by_day = {
+        r["date"]: r["count"]
+        for r in ProfileReadDay.objects.filter(date__gte=day_list[0]).values("date", "count")
+    }
+
+    selected_by_day: dict = defaultdict(int)
+    rejected_by_day: dict = defaultdict(int)
+    rows = (
+        Deal.objects.filter(creation_date__gte=start)
+        .exclude(outcome__in=SHADOW_OUTCOMES)
+        .values_list("creation_date", "state", "outcome")
+    )
+    for created, state, outcome in rows:
+        d = timezone.localtime(created).date()
+        if state == "Failed" and outcome == "wrong_fit":
+            rejected_by_day[d] += 1
+        elif state != "Failed":
+            selected_by_day[d] += 1
+
+    reads = [reads_by_day.get(d, 0) for d in day_list]
+    selected = [selected_by_day.get(d, 0) for d in day_list]
+    rejected = [rejected_by_day.get(d, 0) for d in day_list]
+    rates = [
+        round(s / r * 100, 1) if r else None
+        for s, r in zip(selected, reads)
+    ]
+
+    total_reads = sum(reads)
+    total_selected = sum(selected)
+    return {
+        "labels": json.dumps([d.strftime("%d/%m") for d in day_list]),
+        "reads": json.dumps(reads),
+        "selected": json.dumps(selected),
+        "rejected": json.dumps(rejected),
+        "rates": json.dumps(rates),
+        "totals": {
+            "reads": total_reads,
+            "selected": total_selected,
+            "rejected": sum(rejected),
+            "rate": round(total_selected / total_reads * 100, 1) if total_reads else None,
+        },
+    }
+
+
 def _activity_chart_data(days: int = 10) -> dict:
     """Séries jour par jour pour le graphique d'activité du dashboard.
 
@@ -261,8 +327,9 @@ def dashboard(request):
         status=CompanyStatus.PENDING,
     ).count()
 
-    # ---- Graphique activité 10 derniers jours ----
+    # ---- Graphiques 10 derniers jours (activité + efficacité du tri) ----
     activity_chart = _activity_chart_data(days=10)
+    efficiency_chart = _search_efficiency_data(days=10)
 
     # ---- Apprentissage inbox_assist ----
     corrections_count = CorrectionExample.objects.count()
@@ -307,6 +374,7 @@ def dashboard(request):
         },
         "companies_pending_count": companies_pending_count,
         "activity_chart": activity_chart,
+        "efficiency_chart": efficiency_chart,
         "learning": {
             "total": corrections_count,
             "in_use": corrections_in_use,
