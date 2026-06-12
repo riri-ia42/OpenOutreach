@@ -187,6 +187,20 @@ def _search_efficiency_data(days: int = 10) -> dict:
 
     total_reads = sum(reads)
     total_selected = sum(selected)
+
+    # Ventilation des lectures du jour par usage (réponse à « où sont les
+    # manquants ? » : lectures techniques ≠ verdicts de tri).
+    today_row = ProfileReadDay.objects.filter(date=today).first()
+    src = (today_row.sources or {}) if today_row else {}
+    _SRC_LABELS = {
+        "get_profile": "fiches complètes (enrichissement/tri/follow-up)",
+        "get_connection_degree": "contrôles de degré (avant invitation)",
+        "autre": "autres",
+    }
+    today_sources = [
+        (_SRC_LABELS.get(k, k), v) for k, v in sorted(src.items(), key=lambda x: -x[1])
+    ]
+
     return {
         "labels": json.dumps([d.strftime("%d/%m") for d in day_list]),
         "reads": json.dumps(reads),
@@ -200,7 +214,10 @@ def _search_efficiency_data(days: int = 10) -> dict:
             "rate": round(total_selected / total_reads * 100, 1) if total_reads else None,
             "today_rate": rates[-1] if rates else None,
             "since": day_list[0].strftime("%d/%m"),
+            "today_reads": reads[-1] if reads else 0,
+            "today_verdicts": (selected[-1] + rejected[-1]) if selected else 0,
         },
+        "today_sources": today_sources,
     }
 
 

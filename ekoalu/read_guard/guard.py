@@ -107,7 +107,9 @@ def record_read(source: str = "") -> int:
     """Compte une lecture de profil (atomique). Retourne le total du jour.
 
     A appeler juste AVANT l'appel reseau : on compte les tentatives, pas les
-    succes — LinkedIn voit la requete meme si elle echoue.
+    succes — LinkedIn voit la requete meme si elle echoue. La ventilation par
+    ``source`` (get_profile / get_connection_degree...) alimente la ligne
+    « dont » du dashboard.
     """
     from django.db.models import F
 
@@ -117,6 +119,12 @@ def record_read(source: str = "") -> int:
     row, _created = ProfileReadDay.objects.get_or_create(date=today)
     ProfileReadDay.objects.filter(pk=row.pk).update(count=F("count") + 1)
     row.refresh_from_db()
+
+    # Ventilation par usage (read-modify-write : course bénigne, le total
+    # de référence reste `count` qui est lui atomique).
+    key = source or "autre"
+    row.sources[key] = row.sources.get(key, 0) + 1
+    ProfileReadDay.objects.filter(pk=row.pk).update(sources=row.sources)
 
     cap = daily_reads_cap()
     if row.count >= cap and not row.notified:

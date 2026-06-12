@@ -18,6 +18,9 @@ class ProfileReadDay(models.Model):
         default=False,
         help_text="Mail d'alerte cap atteint deja envoye pour ce jour",
     )
+    # Ventilation par usage {source: n} — ex {"get_profile": 40, "get_connection_degree": 18}.
+    # Question Richard 12/06 : « 60 lues, 4+21 verdicts, ou sont les manquants ? »
+    sources = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = "Lectures profil / jour"

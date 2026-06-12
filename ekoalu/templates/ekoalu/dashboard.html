@@ -78,6 +78,14 @@
             <div class="relative h-56 md:h-64">
                 <canvas id="efficiencyChart"></canvas>
             </div>
+            <p class="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">
+                Aujourd'hui : {{ efficiency_chart.totals.today_reads }} lecture{{ efficiency_chart.totals.today_reads|pluralize }}
+                dont {{ efficiency_chart.totals.today_verdicts }} verdict{{ efficiency_chart.totals.today_verdicts|pluralize }} de tri
+                {% if efficiency_chart.today_sources %}
+                — par usage : {% for label, n in efficiency_chart.today_sources %}{{ n }} {{ label }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                {% endif %}.
+                Le reste = enrichissements en attente de verdict + lectures liées aux envois.
+            </p>
         </div>
     </section>
 
