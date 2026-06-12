@@ -23,6 +23,7 @@ class EmailLeadData(models.Model):
     SOURCE_BDD_PROSPECT = "bdd_prospect"
     SOURCE_MANUAL = "manual"
     SOURCE_ENRICHMENT_API = "enrichment_api"
+    SOURCE_MAILJET_HOT = "mailjet_hot"  # ouvreurs/cliqueurs campagnes mailing-mailjet
 
     lead = models.OneToOneField(
         "crm.Lead",
