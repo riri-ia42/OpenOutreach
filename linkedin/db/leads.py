@@ -48,6 +48,13 @@ def create_enriched_lead(session, url: str, profile: Dict[str, Any]) -> Optional
         lead = Lead.objects.create(linkedin_url=clean_url, public_identifier=public_id)
         _cache_urn_from_profile(lead, profile)
 
+    # On a la fiche en main : snapshot immediat pour que le verdict LLM et la
+    # suite (resume follow-up, generation) n'aient JAMAIS a relire LinkedIn.
+    from django.utils import timezone as _tz
+    lead.profile_snapshot = profile
+    lead.profile_snapshot_at = _tz.now()
+    lead.save(update_fields=["profile_snapshot", "profile_snapshot_at"])
+
     lead.embed_from_profile(profile)
 
     logger.debug("Created enriched lead for %s (pk=%d)", public_id, lead.pk)

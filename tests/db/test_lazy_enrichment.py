@@ -18,8 +18,10 @@ FAKE_PROFILE = {
 
 
 class TestGetProfile:
-    def test_live_scrape_every_call(self, fake_session):
-        """`get_profile` is a thin live scrape — no DB caching."""
+    def test_scrape_once_then_snapshot(self, fake_session):
+        """1re lecture = scrape + snapshot DB ; appels suivants = DB, ZÉRO
+        lecture LinkedIn (EKOALU 12/06 : 1 lead = 1 lecture max, le cap
+        lectures ne bloque plus les verdicts/résumés)."""
         from crm.models import Lead
 
         lead = Lead.objects.create(
@@ -30,11 +32,13 @@ class TestGetProfile:
         with patch("linkedin.api.client.PlaywrightLinkedinAPI") as MockAPI:
             MockAPI.return_value.get_profile.return_value = (FAKE_PROFILE, {})
             result = lead.get_profile(fake_session)
-            lead.get_profile(fake_session)
+            again = lead.get_profile(fake_session)
 
-        # Both calls scraped — no memoization at the Lead level.
-        assert MockAPI.return_value.get_profile.call_count == 2
+        assert MockAPI.return_value.get_profile.call_count == 1
         assert result["first_name"] == "Alice"
+        assert again["first_name"] == "Alice"
+        lead.refresh_from_db()
+        assert lead.profile_snapshot["first_name"] == "Alice"
 
     def test_populates_urn_from_scrape(self, fake_session):
         """First successful scrape promotes `urn` onto the Lead row."""

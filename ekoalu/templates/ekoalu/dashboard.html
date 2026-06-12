@@ -67,7 +67,7 @@
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-gray-900">Efficacité du tri <span class="text-sm font-normal text-gray-500">— depuis le {{ efficiency_chart.totals.since }}</span></h2>
             <div class="flex flex-wrap gap-3 text-xs text-gray-600">
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Fiches lues : <b>{{ efficiency_chart.totals.reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Fiches lues (tri) : <b>{{ efficiency_chart.totals.reads }}</b></span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Sélectionnés : <b>{{ efficiency_chart.totals.selected }}</b></span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#dc2626"></span>Rejetés : <b>{{ efficiency_chart.totals.rejected }}</b></span>
                 <span class="font-medium">Taux du jour : <b>{% if efficiency_chart.totals.today_rate is not None %}{{ efficiency_chart.totals.today_rate }}%{% else %}—{% endif %}</b></span>
@@ -84,7 +84,7 @@
                 {% if efficiency_chart.today_sources %}
                 — par usage : {% for label, n in efficiency_chart.today_sources %}{{ n }} {{ label }}{% if not forloop.last %} · {% endif %}{% endfor %}
                 {% endif %}.
-                Le reste = enrichissements en attente de verdict + lectures liées aux envois.
+                Les contrôles de degré (avant invitation) sont exclus du taux.
             </p>
         </div>
     </section>

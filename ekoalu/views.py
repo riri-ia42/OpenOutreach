@@ -158,10 +158,15 @@ def _search_efficiency_data(days: int = 10) -> dict:
         timezone.datetime.combine(day_list[0], timezone.datetime.min.time()),
     )
 
-    reads_by_day = {
-        r["date"]: r["count"]
-        for r in ProfileReadDay.objects.filter(date__gte=day_list[0]).values("date", "count")
-    }
+    # Dénominateur = lectures de FICHES uniquement (tri/enrichissement).
+    # Les contrôles de degré avant invitation (get_connection_degree) sont des
+    # lectures techniques qui biaisaient le taux (remarque Richard 12/06).
+    # NB : avec le snapshot de fiche (Lead.profile_snapshot), verdicts et
+    # follow-ups ne relisent plus LinkedIn — 1 lead = 1 lecture max.
+    reads_by_day = {}
+    for r in ProfileReadDay.objects.filter(date__gte=day_list[0]):
+        degree = (r.sources or {}).get("get_connection_degree", 0)
+        reads_by_day[r.date] = max(r.count - degree, 0)
 
     selected_by_day: dict = defaultdict(int)
     rejected_by_day: dict = defaultdict(int)

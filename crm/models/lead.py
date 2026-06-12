@@ -34,6 +34,14 @@ class Lead(models.Model):
         help_text="Date du hard bounce (NDR) détecté — adresse invalide, exclu des envois",
     )
 
+    # Snapshot de la fiche LinkedIn parsée, stocké à la 1re lecture réussie.
+    # Décision Richard 12/06 : « on a toutes les infos, on peut juger » — le
+    # verdict LLM, le résumé follow-up etc. relisaient la fiche en live à
+    # chaque fois (2 lectures par lead trié, verdicts stoppés par le cap).
+    # Avec le snapshot : 1 lead = 1 lecture LinkedIn maximum.
+    profile_snapshot = models.JSONField(null=True, blank=True)
+    profile_snapshot_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         label = self.public_identifier or self.linkedin_url or f"Lead#{self.pk}"
         if self.disqualified:
@@ -45,16 +53,30 @@ class Lead(models.Model):
     # derived caches we still keep (urn, embedding).
     # ------------------------------------------------------------------
 
-    def get_profile(self, session) -> dict | None:
-        """Live Voyager scrape of the parsed profile dict.
+    # Au-delà : le snapshot est considéré périmé et la fiche est relue
+    # (les profils bougent peu — 30 jours couvrent largement notre pipeline).
+    PROFILE_SNAPSHOT_MAX_AGE_DAYS = 30
 
-        No DB caching: the heavy fields (raw JSON, names, company) live
-        only in memory for as long as the caller holds the dict. We do
-        opportunistically populate ``self.urn`` if it's still null and
-        the scrape returns one.
+    def get_profile(self, session, refresh: bool = False) -> dict | None:
+        """Fiche LinkedIn parsée — snapshot DB d'abord, scrape Voyager sinon.
+
+        La 1re lecture réussie stocke ``profile_snapshot`` ; les accès
+        suivants (verdict LLM, résumé follow-up, génération de message)
+        sont servis depuis la DB : ZÉRO lecture LinkedIn supplémentaire,
+        et ils continuent de fonctionner cap lectures atteint.
+        ``refresh=True`` force une relecture live.
         """
         from linkedin.api.client import PlaywrightLinkedinAPI
         from linkedin.exceptions import ProfileInaccessibleError
+
+        if not refresh and self.profile_snapshot:
+            age_ok = (
+                self.profile_snapshot_at is not None
+                and (timezone.now() - self.profile_snapshot_at).days
+                < self.PROFILE_SNAPSHOT_MAX_AGE_DAYS
+            )
+            if age_ok:
+                return self.profile_snapshot
 
         session.ensure_browser()
         api = PlaywrightLinkedinAPI(session=session)
@@ -64,6 +86,10 @@ class Lead(models.Model):
             return None
         if not profile:
             return None
+
+        self.profile_snapshot = profile
+        self.profile_snapshot_at = timezone.now()
+        self.save(update_fields=["profile_snapshot", "profile_snapshot_at"])
 
         urn = profile.get("urn") or None
         if urn and self.urn != urn:
