@@ -134,8 +134,10 @@ class TestSendColdEmailSuccess:
         assert pjs and pjs[0][0] == "EKOALU - Guide des solutions.pdf"
         assert pjs[0][1] == "application/pdf"
         assert len(pjs[0][2]) > 100_000  # vrai PDF, pas un placeholder
-        # > 2,3 Mo : part par le flux upload session (pas de limite 4 Mo)
-        assert len(pjs[0][2]) < 8_000_000  # raisonnable pour un cold mail B2B
+        # Original sans degradation (9,4 Mo, decision Richard 12/06) — part par
+        # le flux upload session. Garde-fou : si le fichier explose un jour
+        # (mauvais remplacement), on le voit ici.
+        assert len(pjs[0][2]) < 15_000_000
 
         captured.clear()
         lead2, po_fu = make_lead_with_po(
