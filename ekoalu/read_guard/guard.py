@@ -24,9 +24,9 @@ from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
 
-# Consensus praticien 2025-2026 : < 50 lectures de profils/jour pour un compte
-# gratuit (StaffSpy, CloselyHQ, Kondo). On prend 40 = marge sous le seuil.
-# L'incident du 06/06 etait a ~1700/j (~35x trop). Cf. benchmark anti-detection.
+# Repere 2026 compte gratuit : ~80 lectures/jour admissibles. Montee decidee
+# par Richard le 12/06 : 60/j tout de suite, 75/j a partir du lundi 15/06
+# (via EKOALU_PROFILE_READS_CAP_RAMP). L'incident du 06/06 etait a ~1700/j.
 DEFAULT_DAILY_READS_CAP = 40
 
 
@@ -34,8 +34,34 @@ class ReadCapExceededError(RuntimeError):
     """Levee quand une lecture de profil depasserait le cap journalier."""
 
 
+def _ramp_cap(today: date) -> int | None:
+    """Cap programme a date via EKOALU_PROFILE_READS_CAP_RAMP.
+
+    Format : "YYYY-MM-DD:cap[,YYYY-MM-DD:cap...]" — le cap retenu est celui
+    de la derniere date atteinte. None si aucune date atteinte / env absent.
+    """
+    raw = os.environ.get("EKOALU_PROFILE_READS_CAP_RAMP", "").strip()
+    if not raw:
+        return None
+    best: tuple[date, int] | None = None
+    for part in raw.split(","):
+        try:
+            d_str, cap_str = part.strip().split(":")
+            d = date.fromisoformat(d_str)
+            cap = int(cap_str)
+        except (ValueError, TypeError):
+            logger.warning("EKOALU_PROFILE_READS_CAP_RAMP : segment invalide %r", part)
+            continue
+        if d <= today and (best is None or d > best[0]):
+            best = (d, cap)
+    return best[1] if best else None
+
+
 def daily_reads_cap() -> int:
-    """Lit le cap depuis l'env (defaut 60/j)."""
+    """Cap du jour : ramp programme si une date est atteinte, sinon env/defaut."""
+    ramped = _ramp_cap(_today_local())
+    if ramped is not None:
+        return ramped
     try:
         return int(os.environ.get(
             "EKOALU_DAILY_PROFILE_READS_CAP", DEFAULT_DAILY_READS_CAP,
