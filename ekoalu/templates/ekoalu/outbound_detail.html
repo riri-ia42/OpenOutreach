@@ -25,29 +25,73 @@
 <!-- Infos prospect -->
 <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
     <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Prospect</h2>
-    <div class="space-y-2 text-sm">
-        <div class="text-lg font-semibold text-gray-900">
-            {{ prospect_display.name|default:outbound.prospect_public_id }}
-            {% if prospect_display.company %}
-            <span class="text-base font-normal text-gray-700">— {{ prospect_display.company }}</span>
-            {% endif %}
-        </div>
-        {% if prospect_display.location %}
-        <div class="text-sm text-gray-600">📍 {{ prospect_display.location }}</div>
+    <div class="text-lg font-semibold text-gray-900 mb-1">
+        {{ prospect_display.name|default:outbound.prospect_public_id }}
+        {% if prospect_display.job_title %}
+        <span class="text-sm font-normal text-gray-500">· {{ prospect_display.job_title }}</span>
         {% endif %}
-        <div>
-            <span class="text-gray-500">Slug LinkedIn :</span>
-            <a href="{{ linkedin_url }}" target="_blank" class="text-blue-600 hover:underline">
-                {{ outbound.prospect_public_id }} ↗
-            </a>
-        </div>
-        {% if outbound.campaign_name %}
-        <div>
-            <span class="text-gray-500">Cible (campagne) :</span>
-            <span class="font-medium text-gray-900">{{ outbound.campaign_name|cut:"EKOALU - " }}</span>
-        </div>
+        {% if prospect_display.company %}
+        <span class="text-base font-normal text-gray-700">— {{ prospect_display.company }}</span>
         {% endif %}
     </div>
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm mt-3">
+        {% if prospect_facts.email %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Email</dt>
+            <dd>
+                <a href="mailto:{{ prospect_facts.email }}" class="text-blue-600 hover:underline">{{ prospect_facts.email }}</a>
+                {% if prospect_facts.email_bounced %}<span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 ml-1">bounce</span>{% endif %}
+                {% if prospect_facts.unsubscribed %}<span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 ml-1">désinscrit</span>{% endif %}
+            </dd>
+        </div>
+        {% endif %}
+        {% if prospect_display.location %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Localisation</dt>
+            <dd class="text-gray-900">📍 {{ prospect_display.location }}</dd>
+        </div>
+        {% endif %}
+        {% if prospect_facts.activite %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Activité</dt>
+            <dd class="text-gray-900">{{ prospect_facts.activite }}{% if prospect_facts.code_naf %} <span class="text-gray-400">(NAF {{ prospect_facts.code_naf }})</span>{% endif %}</dd>
+        </div>
+        {% endif %}
+        {% if prospect_facts.effectif %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Effectif</dt>
+            <dd class="text-gray-900">{{ prospect_facts.effectif }}</dd>
+        </div>
+        {% endif %}
+        {% if prospect_facts.siren %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">SIREN</dt>
+            <dd><a href="https://www.pappers.fr/recherche?q={{ prospect_facts.siren }}" target="_blank" class="text-blue-600 hover:underline">{{ prospect_facts.siren }} ↗</a></dd>
+        </div>
+        {% endif %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Source</dt>
+            <dd class="text-gray-900">{{ prospect_facts.source }}</dd>
+        </div>
+        {% if not is_mail_only %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">LinkedIn</dt>
+            <dd><a href="{{ linkedin_url }}" target="_blank" class="text-blue-600 hover:underline">{{ outbound.prospect_public_id }} ↗</a></dd>
+        </div>
+        {% endif %}
+        {% if outbound.campaign_name %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Campagne</dt>
+            <dd class="font-medium text-gray-900">{{ outbound.campaign_name|cut:"EKOALU - " }}</dd>
+        </div>
+        {% endif %}
+        {% if prospect_lead %}
+        <div class="flex gap-2">
+            <dt class="text-gray-500 w-28 shrink-0">Fiche</dt>
+            <dd><a href="{% url 'ekoalu:lead_detail' outbound.prospect_public_id %}" class="text-blue-600 hover:underline">Voir la fiche prospect →</a></dd>
+        </div>
+        {% endif %}
+    </dl>
 </div>
 
 <!-- Brouillon IA (read-only) -->

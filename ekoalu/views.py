@@ -1612,7 +1612,7 @@ def outbound_detail(request, pk: int):
                 )
             return redirect("ekoalu:outbound_detail", pk=pk)
 
-    from crm.models import Deal
+    from crm.models import Deal, Lead
     from ekoalu.prospect_display import resolve_prospect_display
     deal = (
         Deal.objects
@@ -1624,24 +1624,72 @@ def outbound_detail(request, pk: int):
         outbound.prospect_public_id, deal=deal, company_hint=outbound.prospect_company,
     )
 
+    # Fiche prospect complete : tout ce qu'on sait du contact (demande Richard
+    # 12/06). Les leads BDD PROSPECT portent leurs donnees dans EmailLeadData ;
+    # les leads LinkedIn dans le profile_summary (via resolve_prospect_display).
+    lead = Lead.objects.filter(
+        public_identifier=outbound.prospect_public_id,
+    ).select_related("email_data").first()
+    email_data = getattr(lead, "email_data", None) if lead else None
+    is_mail_only = outbound.prospect_public_id.startswith("bdd-prospect-")
+    if email_data:
+        if email_data.dirigeant:
+            display["name"] = email_data.dirigeant
+        display["company"] = email_data.entreprise or display.get("company", "")
+        loc_bits = [b for b in (email_data.ville, email_data.cp) if b]
+        if loc_bits:
+            display["location"] = " ".join(loc_bits) + (
+                f" ({email_data.dpt})" if email_data.dpt else ""
+            )
+        if not display.get("job_title"):
+            display["job_title"] = "Dirigeant" if email_data.dirigeant else ""
+    prospect_facts = {
+        "email": getattr(lead, "contact_email", "") or "",
+        "email_bounced": bool(lead and lead.email_bounced_at),
+        "unsubscribed": bool(lead and lead.unsubscribed_at),
+        "activite": getattr(email_data, "activite", "") or "",
+        "code_naf": getattr(email_data, "code_naf", "") or "",
+        "siren": getattr(email_data, "siren", "") or "",
+        "effectif": (
+            f"{email_data.effectif_min}-{email_data.effectif_max} salariés"
+            if email_data and email_data.effectif_max else ""
+        ),
+        "source": (
+            "BDD PROSPECT" if (email_data and email_data.source == "bdd_prospect")
+            else ("Saisie manuelle" if email_data and email_data.source == "manual" else "LinkedIn")
+        ),
+    }
+
     # Apercu signature pour les emails : le bloc coordonnees est appose par
     # le sender a l'envoi — on le montre ici pour que Richard voie le mail
-    # COMPLET (sans logo : le cid inline ne se rend pas dans un navigateur).
+    # COMPLET. Le logo part en cid: inline (invisible hors client mail) ->
+    # on le substitue par un data URI base64 pour l'apercu navigateur.
     signature_preview = ""
     if outbound.kind in (OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP):
-        from ekoalu.email_canal.sender import signature_block_html
+        import base64
+
+        from ekoalu.email_canal.sender import LOGO_CID, get_logo_bytes, signature_block_html
         signature_preview = signature_block_html(
-            formal_first=(outbound.kind == OutboundKind.EMAIL_COLD), with_logo=False,
+            formal_first=(outbound.kind == OutboundKind.EMAIL_COLD), with_logo=True,
         )
+        logo = get_logo_bytes()
+        if logo:
+            signature_preview = signature_preview.replace(
+                f"cid:{LOGO_CID}",
+                "data:image/png;base64," + base64.b64encode(logo).decode("ascii"),
+            )
 
     context = {
         "outbound": outbound,
         "linkedin_url": f"https://www.linkedin.com/in/{outbound.prospect_public_id}/",
+        "is_mail_only": is_mail_only,
         "is_pending": outbound.status == OutboundStatus.PENDING,
         "is_approved": outbound.status == OutboundStatus.APPROVED,
         "can_regenerate": outbound.kind != OutboundKind.INVITATION
             and outbound.status == OutboundStatus.PENDING,
         "prospect_display": display,
+        "prospect_facts": prospect_facts,
+        "prospect_lead": lead,
         "signature_preview": signature_preview,
     }
     return render(request, "ekoalu/outbound_detail.html", context)

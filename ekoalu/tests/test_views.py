@@ -106,6 +106,56 @@ class TestCampaignFunnel:
 
 
 @pytest.mark.django_db
+class TestOutboundDetailProspect:
+    """Fiche prospect complète dans le détail message (demande Richard 12/06)."""
+
+    def _make_email_po(self):
+        from crm.models import Lead
+        from ekoalu.email_canal.models import EmailLeadData
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+        lead = Lead.objects.create(
+            linkedin_url="https://bdd-prospect.local/siren/330465550",
+            public_identifier="bdd-prospect-330465550",
+            contact_email="m.allouis@faceintec.fr",
+        )
+        EmailLeadData.objects.create(
+            lead=lead, source="bdd_prospect", siren="330465550",
+            entreprise="ALLOUIS FACE INTEC", dirigeant="Marc Allouis",
+            code_naf="43.32B", activite="Menuiserie métallique et serrurerie",
+            cp="69100", dpt="69", ville="Villeurbanne",
+            effectif_min=10, effectif_max=19,
+        )
+        return PendingOutbound.objects.create(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.EMAIL_COLD,
+            subject="Sujet",
+            ai_draft="corps",
+            status=OutboundStatus.PENDING,
+        )
+
+    def test_fiche_prospect_complete_pour_lead_bdd(self, client_logged):
+        po = self._make_email_po()
+        r = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk]))
+        assert r.status_code == 200
+        content = r.content.decode()
+        assert "Marc Allouis" in content              # nom réel, pas "Bdd Prospect"
+        assert "ALLOUIS FACE INTEC" in content        # entreprise
+        assert "m.allouis@faceintec.fr" in content    # email
+        assert "Villeurbanne" in content              # localisation
+        assert "43.32B" in content                    # NAF
+        assert "10-19" in content                     # effectif
+        assert "330465550" in content                 # siren
+        assert "BDD PROSPECT" in content              # source
+        assert "Slug LinkedIn" not in content         # plus de faux lien LinkedIn
+
+    def test_logo_visible_dans_apercu_signature(self, client_logged):
+        po = self._make_email_po()
+        r = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk]))
+        assert "data:image/png;base64," in r.content.decode()
+
+
+@pytest.mark.django_db
 class TestCampaignsViews:
     def test_campaigns_list_accessible(self, client_logged):
         r = client_logged.get(reverse("ekoalu:campaigns_list"))
