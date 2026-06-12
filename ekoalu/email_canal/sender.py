@@ -3,8 +3,10 @@
 Wrapper léger autour de `ekoalu.notifications.graph_mailer.send_mail` :
 - résout le destinataire depuis le PendingOutbound (via Lead.contact_email)
 - convertit le body texte en HTML simple (paragraphes + <br>)
-- inclut un footer désinscription minimal (RGPD art. 21)
 - retourne (success: bool, error_msg: str) — pas d'exception remontée
+
+L'opt-out reste géré par le poller inbox (intent OPT_OUT → unsubscribed_at),
+sans footer désinscription dans le mail (retiré sur demande Richard 12/06).
 """
 from __future__ import annotations
 
@@ -26,16 +28,6 @@ from ekoalu.outbound_validation.models import OutboundKind, PendingOutbound
 logger = logging.getLogger(__name__)
 
 EMAIL_KINDS = (OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP)
-
-_UNSUB_FOOTER_HTML = (
-    "<hr style='border:none;border-top:1px solid #ddd;margin:24px 0 12px;'>"
-    "<p style='color:#888;font-size:11px;font-family:Arial,sans-serif;'>"
-    "Vous recevez ce message car votre activité tertiaire correspond à notre champ. "
-    "Pour ne plus recevoir nos messages, répondez « stop » à cet email — "
-    "exclusion immédiate de notre base."
-    "</p>"
-)
-
 
 # Logo EKOALU embarqué inline (cid:) — extrait de la signature Outlook native
 # (image002.png, 119x139). Fichier : ekoalu/assets/logo_ekoalu.png.
@@ -137,11 +129,11 @@ def text_body_to_html(body: str) -> str:
 
 def build_html_email(body: str) -> str:
     """Body texte → HTML complet : paragraphes + bloc signature charte
-    (formal-first, mention Dirigeant) + footer désinscription."""
+    (formal-first, mention Dirigeant). Pas de footer désinscription
+    (retiré sur demande Richard 12/06 — l'opt-out par réponse reste actif)."""
     return (
         text_body_to_html(body)
         + "\n" + signature_block_html(formal_first=True)
-        + "\n" + _UNSUB_FOOTER_HTML
     )
 
 

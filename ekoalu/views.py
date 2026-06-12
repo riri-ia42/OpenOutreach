@@ -21,6 +21,118 @@ from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, Pend
 from ekoalu.personas import PERSONAS
 
 
+def _campaign_funnel(campaign) -> dict:
+    """Funnel commercial cohérent d'une campagne — partagé dashboard + page campagnes.
+
+    Lecture responsable ventes, et arithmétique vérifiable :
+    total = a_contacter + invites + connectes + hors_cible + echecs.
+
+    - a_contacter : Qualified + Ready_to_connect (stock en file)
+    - invites     : Pending (invitation envoyée, en attente de réponse)
+    - connectes   : Connected + Completed (invitation ACCEPTÉE — même définition
+                    que le taux d'acceptation, qui était calculé sur Connected+Completed
+                    alors que la colonne n'affichait que Connected)
+    - hors_cible  : Failed/wrong_fit (rejet qualifier — jamais contactés)
+    - echecs      : Failed restants (sans réponse, erreurs d'envoi…)
+    - accept_rate : connectes / (invites + connectes + sans-réponse)
+    """
+    from crm.models import Deal
+
+    rows = (
+        Deal.objects.filter(campaign=campaign)
+        .exclude(outcome__in=SHADOW_OUTCOMES)
+        .values("state", "outcome")
+        .annotate(n=Count("id"))
+    )
+    by_state: dict[str, int] = defaultdict(int)
+    wrong_fit = 0
+    unresponsive = 0
+    for r in rows:
+        by_state[r["state"]] += r["n"]
+        if r["state"] == "Failed" and r["outcome"] == "wrong_fit":
+            wrong_fit += r["n"]
+        if r["state"] == "Failed" and r["outcome"] == "unresponsive":
+            unresponsive += r["n"]
+
+    a_contacter = by_state["Qualified"] + by_state["Ready_to_connect"]
+    invites = by_state["Pending"]
+    connectes = by_state["Connected"] + by_state["Completed"]
+    echecs = by_state["Failed"] - wrong_fit
+    total = sum(by_state.values())
+
+    invited_total = invites + connectes + unresponsive
+    accept_rate = (
+        round(connectes / invited_total * 100, 1) if invited_total > 0 else None
+    )
+
+    return {
+        "a_contacter": a_contacter,
+        "invites": invites,
+        "connectes": connectes,
+        "hors_cible": wrong_fit,
+        "echecs": echecs,
+        "total": total,
+        "invited_total": invited_total,
+        "accept_rate": accept_rate,
+    }
+
+
+def _activity_chart_data(days: int = 10) -> dict:
+    """Séries jour par jour pour le graphique d'activité du dashboard.
+
+    4 séries sur `days` jours glissants (aujourd'hui inclus) :
+    emails envoyés, invitations LinkedIn envoyées, messages LinkedIn envoyés
+    (follow-up + reply), invitations acceptées (Deal.connected_at).
+    """
+    import json
+    from datetime import timedelta
+
+    from crm.models import Deal
+
+    today = timezone.localdate()
+    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    start = timezone.make_aware(
+        timezone.datetime.combine(day_list[0], timezone.datetime.min.time()),
+    )
+
+    def _series_by_day(qs, dt_field: str) -> dict:
+        counts = defaultdict(int)
+        for dt in qs.values_list(dt_field, flat=True):
+            counts[timezone.localtime(dt).date()] += 1
+        return counts
+
+    sent = PendingOutbound.objects.filter(
+        status=OutboundStatus.SENT, sent_at__gte=start,
+    )
+    emails = _series_by_day(
+        sent.filter(kind__in=[OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP]),
+        "sent_at",
+    )
+    invitations = _series_by_day(sent.filter(kind=OutboundKind.INVITATION), "sent_at")
+    lk_messages = _series_by_day(
+        sent.filter(kind__in=[OutboundKind.FOLLOW_UP, OutboundKind.REPLY]), "sent_at",
+    )
+    accepted = _series_by_day(
+        Deal.objects.filter(connected_at__gte=start)
+        .exclude(outcome__in=SHADOW_OUTCOMES),
+        "connected_at",
+    )
+
+    return {
+        "labels": json.dumps([d.strftime("%d/%m") for d in day_list]),
+        "emails": json.dumps([emails.get(d, 0) for d in day_list]),
+        "invitations": json.dumps([invitations.get(d, 0) for d in day_list]),
+        "lk_messages": json.dumps([lk_messages.get(d, 0) for d in day_list]),
+        "accepted": json.dumps([accepted.get(d, 0) for d in day_list]),
+        "totals": {
+            "emails": sum(emails.values()),
+            "invitations": sum(invitations.values()),
+            "lk_messages": sum(lk_messages.values()),
+            "accepted": sum(accepted.values()),
+        },
+    }
+
+
 @staff_member_required
 def dashboard(request):
     """Vue dashboard principal."""
@@ -32,7 +144,7 @@ def dashboard(request):
     profile = LinkedInProfile.objects.filter(active=True).first()
     site_cfg = SiteConfig.load()
 
-    # ---- Campaigns EKOALU avec stats ----
+    # ---- Campaigns EKOALU avec stats (funnel partagé avec la page campagnes) ----
     campaigns_data = []
     for campaign in Campaign.objects.filter(name__startswith="EKOALU - ").order_by("pk"):
         # Identifier le persona depuis le label de la campagne
@@ -42,27 +154,25 @@ def dashboard(request):
                 persona_slug = p.slug
                 break
 
-        deals_by_state = (
-            Deal.objects.filter(campaign=campaign)
-            .exclude(outcome__in=SHADOW_OUTCOMES)
-            .values("state")
-            .annotate(n=Count("id"))
-        )
-        state_counts = {d["state"]: d["n"] for d in deals_by_state}
+        funnel = _campaign_funnel(campaign)
+        # Tableau dashboard = vue synthèse : on masque les campagnes vides
+        # (42 campagnes ABM dont beaucoup à 0 → bruit pur).
+        if funnel["total"] == 0:
+            continue
 
         campaigns_data.append({
             "campaign": campaign,
             "persona_slug": persona_slug,
-            "states": {
-                "qualified": state_counts.get("Qualified", 0),
-                "ready_to_connect": state_counts.get("Ready_to_connect", 0),
-                "pending": state_counts.get("Pending", 0),
-                "connected": state_counts.get("Connected", 0),
-                "completed": state_counts.get("Completed", 0),
-                "failed": state_counts.get("Failed", 0),
-            },
-            "total_leads": sum(state_counts.values()),
+            "funnel": funnel,
         })
+
+    # Campagnes les plus actives en premier (connectés, puis invités, puis stock)
+    campaigns_data.sort(
+        key=lambda c: (
+            c["funnel"]["connectes"], c["funnel"]["invites"], c["funnel"]["a_contacter"],
+        ),
+        reverse=True,
+    )
 
     # ---- KPI globaux ----
     # Exclusion globale des Deals shadows (duplicate_campaign / pre_existing_relation)
@@ -151,6 +261,9 @@ def dashboard(request):
         status=CompanyStatus.PENDING,
     ).count()
 
+    # ---- Graphique activité 10 derniers jours ----
+    activity_chart = _activity_chart_data(days=10)
+
     # ---- Apprentissage inbox_assist ----
     corrections_count = CorrectionExample.objects.count()
     corrections_in_use = CorrectionExample.objects.filter(used_in_prompt=True).count()
@@ -193,6 +306,7 @@ def dashboard(request):
             "tasks_24h": tasks_24h,
         },
         "companies_pending_count": companies_pending_count,
+        "activity_chart": activity_chart,
         "learning": {
             "total": corrections_count,
             "in_use": corrections_in_use,
@@ -928,11 +1042,6 @@ def campaigns_list(request):
 
     campaigns_data = []
     for campaign in queryset:
-        deals = Deal.objects.filter(campaign=campaign).exclude(outcome__in=SHADOW_OUTCOMES)
-        state_counts = {}
-        for d in deals.values("state").annotate(n=Count("id")):
-            state_counts[d["state"]] = d["n"]
-
         persona_slug = None
         for p in PERSONAS.values():
             if p.label in campaign.name:
@@ -948,50 +1057,28 @@ def campaigns_list(request):
             status=OutboundStatus.APPROVED,
         ).count()
 
-        # G3 : metriques d'efficacite
-        qualified = state_counts.get("Qualified", 0)
-        ready = state_counts.get("Ready_to_connect", 0)
-        pending = state_counts.get("Pending", 0)
-        connected = state_counts.get("Connected", 0) + state_counts.get("Completed", 0)
-        failed = state_counts.get("Failed", 0)
-        unresponsive = Deal.objects.filter(
-            campaign=campaign, state="Failed", outcome="unresponsive",
-        ).count()
-        wrong_fit = Deal.objects.filter(
-            campaign=campaign, state="Failed", outcome="wrong_fit",
-        ).count()
-        invited_total = pending + connected + unresponsive
-        accept_rate = (
-            round(connected / invited_total * 100, 1)
-            if invited_total > 0 else None
-        )
-        disqualif_rate = (
-            round(wrong_fit / (qualified + failed) * 100, 1)
-            if (qualified + failed) > 0 else None
-        )
-
         campaigns_data.append({
             "campaign": campaign,
             "persona_slug": persona_slug,
             "abm_company": abm_by_campaign.get(campaign.pk),
-            "states": {
-                "qualified": qualified,
-                "ready": ready,
-                "pending": pending,
-                "connected": state_counts.get("Connected", 0),
-                "completed": state_counts.get("Completed", 0),
-                "failed": failed,
-            },
-            "total": sum(state_counts.values()),
+            "funnel": _campaign_funnel(campaign),
             "pending_out": pending_out,
             "approved_out": approved_out,
             "is_active": campaign.pk in active_campaign_ids and not campaign.is_freemium,
-            "metrics": {
-                "invited_total": invited_total,
-                "accept_rate": accept_rate,
-                "disqualif_rate": disqualif_rate,
-            },
         })
+
+    # Lecture responsable ventes : actives d'abord, puis celles qui produisent
+    # (connectés, invités, stock), les campagnes vides en queue.
+    campaigns_data.sort(
+        key=lambda c: (
+            c["is_active"],
+            c["funnel"]["connectes"],
+            c["funnel"]["invites"],
+            c["funnel"]["a_contacter"],
+            c["funnel"]["total"],
+        ),
+        reverse=True,
+    )
 
     return render(request, "ekoalu/campaigns_list.html", {
         "campaigns_data": campaigns_data,
@@ -1469,16 +1556,15 @@ def outbound_detail(request, pk: int):
         outbound.prospect_public_id, deal=deal, company_hint=outbound.prospect_company,
     )
 
-    # Apercu signature pour les emails : le bloc coordonnees + footer RGPD
-    # sont apposes par le sender a l'envoi — on les montre ici pour que
-    # Richard voie le mail COMPLET (sans logo : le cid inline ne se rend
-    # pas dans un navigateur).
+    # Apercu signature pour les emails : le bloc coordonnees est appose par
+    # le sender a l'envoi — on le montre ici pour que Richard voie le mail
+    # COMPLET (sans logo : le cid inline ne se rend pas dans un navigateur).
     signature_preview = ""
     if outbound.kind in (OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP):
-        from ekoalu.email_canal.sender import _UNSUB_FOOTER_HTML, signature_block_html
+        from ekoalu.email_canal.sender import signature_block_html
         signature_preview = signature_block_html(
             formal_first=(outbound.kind == OutboundKind.EMAIL_COLD), with_logo=False,
-        ) + _UNSUB_FOOTER_HTML
+        )
 
     context = {
         "outbound": outbound,

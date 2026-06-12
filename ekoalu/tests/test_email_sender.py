@@ -45,14 +45,19 @@ class TestTextBodyToHtml:
 
 
 class TestBuildHtmlEmail:
-    def test_footer_desinscription_inclus(self):
+    def test_pas_de_footer_desinscription(self):
+        # Retiré sur demande Richard 12/06 — le mail se termine sur la signature.
         out = build_html_email("Bonjour, corps.")
-        assert "stop" in out.lower()
-        assert "exclusion" in out.lower() or "ne plus recevoir" in out.lower()
+        assert "exclusion" not in out.lower()
+        assert "ne plus recevoir" not in out.lower()
+
+    def test_signature_incluse(self):
+        out = build_html_email("Bonjour, corps.")
+        assert "Richard" in out
 
     def test_body_vide_ne_casse_pas(self):
         out = build_html_email("")
-        assert "stop" in out.lower()
+        assert "Richard" in out
 
 
 # --- send_cold_email ---------------------------------------------------------
