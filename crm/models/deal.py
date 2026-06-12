@@ -48,6 +48,9 @@ class Deal(models.Model):
     chat_summary = models.JSONField(null=True, blank=True, default=None)
     creation_date = models.DateTimeField(default=timezone.now)
     update_date = models.DateTimeField(auto_now=True)
+    # Date d'acceptation de l'invitation (1er passage en CONNECTED).
+    # Posé par set_profile_state ; sert aux stats "invitations acceptées/jour".
+    connected_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         lead_str = str(self.lead) if self.lead_id else "?"

@@ -38,6 +38,74 @@ class TestDashboardView:
 
 
 @pytest.mark.django_db
+class TestCampaignFunnel:
+    """Cohérence arithmétique du funnel partagé dashboard + page campagnes."""
+
+    def _make_deal(self, campaign, slug, state, outcome=""):
+        from crm.models import Deal, Lead
+        lead = Lead.objects.create(
+            linkedin_url=f"https://www.linkedin.com/in/{slug}",
+            public_identifier=slug,
+        )
+        return Deal.objects.create(lead=lead, campaign=campaign, state=state, outcome=outcome)
+
+    def test_total_egal_somme_des_colonnes(self):
+        from ekoalu.views import _campaign_funnel
+        from linkedin.models import Campaign
+        camp = Campaign.objects.create(name="EKOALU - Funnel test")
+        self._make_deal(camp, "f-qual", "Qualified")
+        self._make_deal(camp, "f-ready", "Ready_to_connect")
+        self._make_deal(camp, "f-pend", "Pending")
+        self._make_deal(camp, "f-conn", "Connected")
+        self._make_deal(camp, "f-comp", "Completed", outcome="converted")
+        self._make_deal(camp, "f-wf", "Failed", outcome="wrong_fit")
+        self._make_deal(camp, "f-unresp", "Failed", outcome="unresponsive")
+
+        f = _campaign_funnel(camp)
+        assert f["a_contacter"] == 2
+        assert f["invites"] == 1
+        assert f["connectes"] == 2  # Connected + Completed
+        assert f["hors_cible"] == 1
+        assert f["echecs"] == 1
+        assert f["total"] == 7
+        assert f["total"] == (
+            f["a_contacter"] + f["invites"] + f["connectes"]
+            + f["hors_cible"] + f["echecs"]
+        )
+
+    def test_accept_rate_coherent_avec_colonne_connectes(self):
+        from ekoalu.views import _campaign_funnel
+        from linkedin.models import Campaign
+        camp = Campaign.objects.create(name="EKOALU - Funnel accept")
+        self._make_deal(camp, "fa-conn", "Connected")
+        self._make_deal(camp, "fa-comp", "Completed", outcome="converted")
+        self._make_deal(camp, "fa-pend", "Pending")
+        self._make_deal(camp, "fa-unresp", "Failed", outcome="unresponsive")
+
+        f = _campaign_funnel(camp)
+        # 2 acceptées / (1 en attente + 2 acceptées + 1 sans réponse) = 50%
+        assert f["accept_rate"] == 50.0
+        assert f["invited_total"] == 4
+
+    def test_deals_shadow_exclus(self):
+        from ekoalu.views import _campaign_funnel
+        from linkedin.models import Campaign
+        camp = Campaign.objects.create(name="EKOALU - Funnel shadow")
+        self._make_deal(camp, "fs-dup", "Completed", outcome="duplicate_campaign")
+        self._make_deal(camp, "fs-pre", "Completed", outcome="pre_existing_relation")
+        f = _campaign_funnel(camp)
+        assert f["total"] == 0
+
+    def test_campagne_vide(self):
+        from ekoalu.views import _campaign_funnel
+        from linkedin.models import Campaign
+        camp = Campaign.objects.create(name="EKOALU - Funnel vide")
+        f = _campaign_funnel(camp)
+        assert f["total"] == 0
+        assert f["accept_rate"] is None
+
+
+@pytest.mark.django_db
 class TestCampaignsViews:
     def test_campaigns_list_accessible(self, client_logged):
         r = client_logged.get(reverse("ekoalu:campaigns_list"))

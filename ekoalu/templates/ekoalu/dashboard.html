@@ -45,6 +45,48 @@
     </div>
 </section>
 
+    <!-- Activité 10 derniers jours -->
+    <section>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Activité — 10 derniers jours</h2>
+            <div class="flex flex-wrap gap-3 text-xs text-gray-600">
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#2563eb"></span>Emails : <b>{{ activity_chart.totals.emails }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#ea580c"></span>Invitations : <b>{{ activity_chart.totals.invitations }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#7c3aed"></span>Messages LKD : <b>{{ activity_chart.totals.lk_messages }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Acceptées : <b>{{ activity_chart.totals.accepted }}</b></span>
+            </div>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div class="relative h-56 md:h-64">
+                <canvas id="activityChart"></canvas>
+            </div>
+        </div>
+    </section>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script>
+    new Chart(document.getElementById('activityChart'), {
+        type: 'bar',
+        data: {
+            labels: {{ activity_chart.labels|safe }},
+            datasets: [
+                { label: 'Emails envoyés', data: {{ activity_chart.emails|safe }}, backgroundColor: '#2563eb' },
+                { label: 'Invitations envoyées', data: {{ activity_chart.invitations|safe }}, backgroundColor: '#ea580c' },
+                { label: 'Messages LinkedIn envoyés', data: {{ activity_chart.lk_messages|safe }}, backgroundColor: '#7c3aed' },
+                { label: 'Invitations acceptées', data: {{ activity_chart.accepted|safe }}, type: 'line', borderColor: '#16a34a', backgroundColor: '#16a34a', tension: 0.3, pointRadius: 3 },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+                x: { grid: { display: false } },
+                y: { beginAtZero: true, ticks: { precision: 0 } },
+            },
+        },
+    });
+    </script>
+
     <!-- Messages sortants en attente de validation -->
     {% if pending_outbound_count > 0 or approved_outbound_count > 0 or failed_outbound_count > 0 %}
     <section>
@@ -130,37 +172,40 @@
     </section>
     {% endif %}
 
-    <!-- Campaigns par persona -->
+    <!-- Campagnes (funnel synthèse — mêmes définitions que la page Campagnes) -->
     <section>
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Campagnes par persona</h2>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Campagnes actives</h2>
+            <a href="{% url 'ekoalu:campaigns_list' %}" class="text-sm text-blue-600 hover:underline">Toutes les campagnes →</a>
+        </div>
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Persona</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qualif.</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Prêt</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Connecté</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Échec</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagne</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Qualifiés + prêts : stock restant à inviter">À contacter</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Invitation envoyée, en attente de réponse">Invités</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Invitation acceptée (en cours + clôturés)">Connectés</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Rejetés par le tri IA — jamais contactés">Hors cible</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Sans réponse, erreurs d'envoi">Échecs</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="= À contacter + Invités + Connectés + Hors cible + Échecs">Total</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
                     {% for c in campaigns_data %}
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3">
-                            <a href="/admin/linkedin/campaign/{{ c.campaign.pk }}/change/"
+                            <a href="{% url 'ekoalu:campaign_detail' c.campaign.pk %}"
                                class="text-sm font-medium text-gray-900 hover:text-blue-600">
                                 {{ c.campaign.name|cut:"EKOALU - " }}
                             </a>
                         </td>
-                        <td class="px-4 py-3 text-right text-sm text-gray-600">{{ c.states.qualified }}</td>
-                        <td class="px-4 py-3 text-right text-sm text-yellow-700">{{ c.states.ready_to_connect }}</td>
-                        <td class="px-4 py-3 text-right text-sm text-orange-700">{{ c.states.pending }}</td>
-                        <td class="px-4 py-3 text-right text-sm text-green-700 font-medium">{{ c.states.connected }}</td>
-                        <td class="px-4 py-3 text-right text-sm text-gray-400">{{ c.states.failed }}</td>
-                        <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.total_leads }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-gray-600">{{ c.funnel.a_contacter }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-orange-700">{{ c.funnel.invites }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-green-700 font-medium">{{ c.funnel.connectes }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-gray-400">{{ c.funnel.hors_cible }}</td>
+                        <td class="px-4 py-3 text-right text-sm text-red-600">{{ c.funnel.echecs }}</td>
+                        <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.funnel.total }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

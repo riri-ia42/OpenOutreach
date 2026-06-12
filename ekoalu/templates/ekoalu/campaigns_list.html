@@ -12,27 +12,32 @@
     </div>
 </div>
 
-<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+<p class="text-xs text-gray-500">
+    Lecture funnel : <b>Total = À contacter + Invités + Connectés + Hors cible + Échecs</b>.
+    « Connectés » = invitation acceptée (même définition que le taux d'acceptation).
+    « Hors cible » = rejetés par le tri IA, jamais contactés.
+</p>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
     <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
             <tr>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagne</th>
                 <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">État</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qualif.</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Prêt</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Connecté</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">À valider</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Approuvé</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Connectés / (Pending + Connectés + Non-réponses)">Accept.</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="wrong_fit / (Qualifiés + Failed)">Hors cible</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Qualifiés + prêts : stock restant à inviter">À contacter</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Invitation envoyée, en attente de réponse">Invités</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Invitation acceptée (en cours + clôturés)">Connectés</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Connectés / (Invités + Connectés + Sans réponse)">Accept.</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Messages en file : à valider / approuvés prêts à partir">File msg</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Rejetés par le tri IA — jamais contactés">Hors cible</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Sans réponse, erreurs d'envoi">Échecs</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="= À contacter + Invités + Connectés + Hors cible + Échecs">Total</th>
                 <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
             {% for c in campaigns_data %}
-            <tr class="hover:bg-gray-50">
+            <tr class="hover:bg-gray-50 {% if not c.is_active and c.funnel.total == 0 %}opacity-50{% endif %}">
                 <td class="px-4 py-3">
                     <div class="flex items-center gap-2 flex-wrap">
                         <a href="{% url 'ekoalu:campaign_detail' c.campaign.pk %}"
@@ -54,28 +59,29 @@
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">○ pause</span>
                     {% endif %}
                 </td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600">{{ c.states.qualified }}</td>
-                <td class="px-4 py-3 text-right text-sm text-yellow-700">{{ c.states.ready }}</td>
-                <td class="px-4 py-3 text-right text-sm text-orange-700">{{ c.states.pending }}</td>
-                <td class="px-4 py-3 text-right text-sm text-green-700 font-medium">{{ c.states.connected }}</td>
-                <td class="px-4 py-3 text-right text-sm {% if c.pending_out %}text-yellow-700 font-medium{% else %}text-gray-400{% endif %}">{{ c.pending_out }}</td>
-                <td class="px-4 py-3 text-right text-sm {% if c.approved_out %}text-blue-700 font-medium{% else %}text-gray-400{% endif %}">{{ c.approved_out }}</td>
-                <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.total }}</td>
+                <td class="px-4 py-3 text-right text-sm text-gray-600">{{ c.funnel.a_contacter }}</td>
+                <td class="px-4 py-3 text-right text-sm text-orange-700">{{ c.funnel.invites }}</td>
+                <td class="px-4 py-3 text-right text-sm text-green-700 font-medium">{{ c.funnel.connectes }}</td>
                 <td class="px-4 py-3 text-right text-sm">
-                    {% if c.metrics.accept_rate is not None %}
-                        <span class="{% if c.metrics.accept_rate >= 30 %}text-green-700 font-medium{% elif c.metrics.accept_rate >= 20 %}text-yellow-700{% else %}text-red-700{% endif %}">{{ c.metrics.accept_rate }}%</span>
-                        <span class="text-xs text-gray-400 block">{{ c.metrics.invited_total }} invit.</span>
+                    {% if c.funnel.accept_rate is not None %}
+                        <span class="{% if c.funnel.accept_rate >= 30 %}text-green-700 font-medium{% elif c.funnel.accept_rate >= 20 %}text-yellow-700{% else %}text-red-700{% endif %}">{{ c.funnel.accept_rate }}%</span>
+                        <span class="text-xs text-gray-400 block">{{ c.funnel.invited_total }} invit.</span>
                     {% else %}
                         <span class="text-gray-300">—</span>
                     {% endif %}
                 </td>
                 <td class="px-4 py-3 text-right text-sm">
-                    {% if c.metrics.disqualif_rate is not None %}
-                        <span class="{% if c.metrics.disqualif_rate >= 80 %}text-red-700 font-medium{% elif c.metrics.disqualif_rate >= 50 %}text-orange-700{% else %}text-gray-700{% endif %}">{{ c.metrics.disqualif_rate }}%</span>
+                    {% if c.pending_out or c.approved_out %}
+                        <span class="{% if c.pending_out %}text-yellow-700 font-medium{% else %}text-gray-400{% endif %}" title="à valider">{{ c.pending_out }}</span>
+                        <span class="text-gray-300">/</span>
+                        <span class="{% if c.approved_out %}text-blue-700 font-medium{% else %}text-gray-400{% endif %}" title="approuvés, prêts à partir">{{ c.approved_out }}</span>
                     {% else %}
                         <span class="text-gray-300">—</span>
                     {% endif %}
                 </td>
+                <td class="px-4 py-3 text-right text-sm text-gray-400">{{ c.funnel.hors_cible }}</td>
+                <td class="px-4 py-3 text-right text-sm {% if c.funnel.echecs %}text-red-600{% else %}text-gray-300{% endif %}">{{ c.funnel.echecs }}</td>
+                <td class="px-4 py-3 text-right text-sm font-medium text-gray-900">{{ c.funnel.total }}</td>
                 <td class="px-4 py-3 text-right">
                     {% if not c.campaign.is_freemium %}
                     <form method="post" class="inline">
@@ -92,7 +98,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="12" class="px-4 py-8 text-center text-gray-500 text-sm">Aucune campagne.</td>
+                <td colspan="11" class="px-4 py-8 text-center text-gray-500 text-sm">Aucune campagne.</td>
             </tr>
             {% endfor %}
         </tbody>

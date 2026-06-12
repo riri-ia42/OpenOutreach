@@ -103,6 +103,11 @@ def set_profile_state(session, public_identifier: str, new_state: str, reason: s
     if outcome:
         deal.outcome = outcome
 
+    # Date d'acceptation de l'invitation (stats dashboard) — 1er passage seulement.
+    if ps == ProfileState.CONNECTED and deal.connected_at is None:
+        from django.utils import timezone as _tz
+        deal.connected_at = _tz.now()
+
     deal.save()
 
     label, color, attrs = _STATE_LOG_STYLE.get(ps, ("ERROR", "red", ["bold"]))
