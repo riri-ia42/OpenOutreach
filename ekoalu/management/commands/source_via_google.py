@@ -29,11 +29,9 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true", help="Affiche les URLs sans rien creer.")
 
     def handle(self, *args, **opts):
-        from crm.models import Lead
         from linkedin.models import Campaign
-        from linkedin.url_utils import public_id_to_url, url_to_public_id
-        from ekoalu.google_sourcing import client, queries
-        from ekoalu.lead_routing.patch import record_discovery
+        from ekoalu.google_sourcing import client
+        from ekoalu.google_sourcing.service import source_campaign
 
         dry = opts["dry_run"]
         if not dry and not client.is_configured():
@@ -59,47 +57,28 @@ class Command(BaseCommand):
                 skipped.append(c.name)
                 continue
 
-            qlist = queries.build_abm_queries(c)
-            if not qlist:
+            res = source_campaign(
+                c,
+                max_profiles=opts["max"],
+                per_query=opts["per_query"],
+                query_budget=query_budget,
+                dry_run=dry,
+            )
+            query_budget -= res.queries_used
+            if res.urls_found == 0 and res.queries_used == 0:
                 self.stdout.write(f"[?] {c.name} : entreprise cible introuvable, ignoree.")
                 continue
 
-            found: list[str] = []
-            seen: set[str] = set()
-            for q in qlist:
-                if len(found) >= opts["max"] or query_budget <= 0:
-                    break
-                query_budget -= 1
-                try:
-                    urls = client.search_linkedin_profiles(q, max_results=opts["per_query"])
-                except Exception as e:  # reseau/quota : on n'arrete pas tout
-                    self.stderr.write(f"  [!] requete echouee ({q!r}) : {e}")
-                    continue
-                for u in urls:
-                    pid = url_to_public_id(u)
-                    if pid and pid not in seen:
-                        seen.add(pid)
-                        found.append(u)
-
-            found = found[: opts["max"]]
-            created = 0
-            for u in found:
-                pid = url_to_public_id(u)
-                if not pid:
-                    continue
-                if dry:
-                    self.stdout.write(f"  [dry] {c.name} <- {public_id_to_url(pid)}")
-                    continue
-                lead, _ = Lead.objects.get_or_create(
-                    public_identifier=pid,
-                    defaults={"linkedin_url": public_id_to_url(pid)},
-                )
-                record_discovery(lead.pk, c)
-                created += 1
-
-            total_created += created
+            for url in res.dry_run_urls:
+                self.stdout.write(f"  [dry] {c.name} <- {url}")
+            total_created += res.new_leads
             verb = "trouves" if dry else "crees/rattaches"
-            self.stdout.write(f"{c.name} : {len(found)} profils {verb} (budget requetes restant : {query_budget}).")
+            count = res.urls_found if dry else res.new_leads
+            self.stdout.write(
+                f"{c.name} : {count} profils {verb}"
+                f"{'' if dry else f' (+{res.already_known} deja connus)'}"
+                f" (budget requetes restant : {query_budget}).",
+            )
 
         if skipped:
             self.stdout.write(self.style.WARNING(

@@ -7,6 +7,7 @@ from ekoalu.company_validation.models import ApprovedCompany
 from ekoalu.doctor.models import DoctorAction, DoctorIncident
 from ekoalu.email_canal.models import EmailLeadData
 from ekoalu.follow_up.models import CampaignDmConfig
+from ekoalu.google_sourcing.models import GoogleSourcingState
 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
 from ekoalu.lead_routing.models import LeadDiscovery
 from ekoalu.llm_usage.models import ClaudeUsageLog
@@ -28,4 +29,5 @@ __all__ = [
     "EmailLeadData",
     "LeadDiscovery",
     "ProfileReadDay",
+    "GoogleSourcingState",
 ]

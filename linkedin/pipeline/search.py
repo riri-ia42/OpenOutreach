@@ -18,6 +18,13 @@ def run_search(session) -> str | None:
 
     campaign = session.campaign
 
+    # EKOALU : les campagnes ABM sont sourcées via Serper (requêtes Google
+    # exactes) — la recherche native par mots-clés ramène des homonymes
+    # mondiaux et consomme le cap lectures pour rien.
+    from ekoalu.google_sourcing.routing import native_search_allowed
+    if not native_search_allowed(campaign):
+        return None
+
     if not SearchKeyword.objects.filter(campaign=campaign, used=False).exists():
         used = list(
             SearchKeyword.objects.filter(campaign=campaign, used=True)
