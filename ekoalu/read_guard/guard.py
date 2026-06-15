@@ -87,6 +87,69 @@ def is_cap_reached() -> bool:
     return reads_today() >= daily_reads_cap()
 
 
+# ── Cadencement intra-journee (anti-burst matinal) ───────────────────────
+#
+# Probleme constate le 15/06 (remarque Richard) : 100% des lectures partaient
+# dans la 1re heure de la plage active (07h). 75 vues de profils en ~1h a la
+# connexion puis silence = signature comportementale de bot, et le cap etait
+# crame avant 09h => plus de budget pour les relances de la journee.
+#
+# Fix : le cap journalier n'est PAS disponible d'un coup au reveil. Il se
+# DEBLOQUE progressivement sur la plage active (lineaire). Le daemon n'execute
+# de tache lisant des fiches que dans la limite du budget deja debloque, et
+# dort entre deux => les lectures s'etalent en filet sur la journee.
+#
+# C'est un plafond MOU (gating du daemon, jamais de raise) distinct du cap dur
+# journalier (check_read_allowed, qui lui raise). Kill-switch EKOALU_READ_PACING=0.
+
+PACING_MIN_FLOOR = 5  # lectures debloquees des l'ouverture (demarrage non fige)
+
+
+def _pacing_enabled() -> bool:
+    return os.environ.get("EKOALU_READ_PACING", "1").lower() in ("1", "true", "yes")
+
+
+def _active_window_hours() -> tuple[int, int]:
+    """Bornes [start, end[ de la plage active, en heure locale."""
+    from linkedin.conf import ACTIVE_END_HOUR, ACTIVE_START_HOUR
+    return ACTIVE_START_HOUR, ACTIVE_END_HOUR
+
+
+def reads_budget_now(now: datetime | None = None) -> int:
+    """Budget de lectures DEBLOQUE a cet instant (etalement intra-journee).
+
+    Lineaire sur la plage active : a l'ouverture ~PACING_MIN_FLOOR, en fin de
+    plage = cap plein. Hors plage active (avant ouverture) = plancher ; apres
+    fermeture ou pacing desactive = cap plein (pas de gating). Force un debit
+    ~cap / duree_plage au lieu d'un burst au reveil.
+    """
+    cap = daily_reads_cap()
+    if not _pacing_enabled():
+        return cap
+    now = now or datetime.now()
+    start, end = _active_window_hours()
+    minutes_into = (now.hour - start) * 60 + now.minute
+    total = max(1, (end - start) * 60)
+    if minutes_into >= total:
+        return cap          # plage terminee : tout le cap est disponible
+    if minutes_into <= 0:
+        return min(cap, PACING_MIN_FLOOR)   # avant/au tout debut de plage
+    import math
+    budget = math.ceil(cap * minutes_into / total)
+    return min(cap, max(PACING_MIN_FLOOR, budget))
+
+
+def is_paced_cap_reached(now: datetime | None = None) -> bool:
+    """True si le budget de lectures DEBLOQUE a cet instant est atteint.
+
+    Inclut le cap dur (un cap dur atteint implique le plafond mou atteint).
+    Utilise par le daemon pour temporiser entre les bursts de lectures.
+    """
+    if is_cap_reached():
+        return True
+    return reads_today() >= reads_budget_now(now)
+
+
 def check_read_allowed() -> None:
     """Raise ReadCapExceededError si le cap est atteint.
 

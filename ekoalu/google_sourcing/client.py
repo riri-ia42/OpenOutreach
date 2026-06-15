@@ -53,14 +53,19 @@ def search_raw(query: str, num: int = 10, page: int = 1, timeout: int = 20) -> l
     return resp.json().get("organic", []) or []
 
 
-def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
-    """URLs de profils LinkedIn ``/in/`` pour la requete, dedupliquees par public_id."""
+def search_linkedin_results(query: str, max_results: int = 10) -> list[dict]:
+    """Resultats profils LinkedIn ``/in/`` pour la requete : dicts
+    ``{link, title, snippet}``, dedupliques par public_id.
+
+    Garde title/snippet (contrairement a search_linkedin_profiles) pour
+    permettre un pre-filtre AVANT la lecture LinkedIn (cf. prefilter.py).
+    """
     from linkedin.url_utils import url_to_public_id
 
-    urls: list[str] = []
+    out: list[dict] = []
     seen: set[str] = set()
     page = 1
-    while len(urls) < max_results and page <= MAX_PAGE:
+    while len(out) < max_results and page <= MAX_PAGE:
         items = search_raw(query, num=10, page=page)
         if not items:
             break
@@ -72,8 +77,17 @@ def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
             if not pid or pid in seen:
                 continue
             seen.add(pid)
-            urls.append(link)
-            if len(urls) >= max_results:
+            out.append({
+                "link": link,
+                "title": (it.get("title") or "").strip(),
+                "snippet": (it.get("snippet") or "").strip(),
+            })
+            if len(out) >= max_results:
                 break
         page += 1
-    return urls
+    return out
+
+
+def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
+    """URLs de profils LinkedIn ``/in/`` pour la requete, dedupliquees par public_id."""
+    return [r["link"] for r in search_linkedin_results(query, max_results=max_results)]

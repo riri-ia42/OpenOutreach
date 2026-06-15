@@ -67,15 +67,20 @@ class TestSourceCampaign:
         from linkedin.models import Campaign
         return Campaign.objects.create(name=name)
 
+    @staticmethod
+    def _results(*urls):
+        # titre neutre "métreur" : passe le pré-filtre (domaine bâtiment)
+        return [{"link": u, "title": "Métreur", "snippet": ""} for u in urls]
+
     def test_cree_leads_et_compte_les_nouveaux(self):
         camp = self._campaign()
-        urls = [
+        results = self._results(
             "https://www.linkedin.com/in/jean-test-1/",
             "https://www.linkedin.com/in/marie-test-2/",
-        ]
+        )
         with patch(
-            "ekoalu.google_sourcing.client.search_linkedin_profiles",
-            return_value=urls,
+            "ekoalu.google_sourcing.client.search_linkedin_results",
+            return_value=results,
         ):
             res = source_campaign(camp, max_profiles=10, query_budget=1)
 
@@ -85,10 +90,10 @@ class TestSourceCampaign:
 
     def test_profils_deja_connus_comptes_separement(self):
         camp = self._campaign("EKOALU - ABM - Eiffage")
-        urls = ["https://www.linkedin.com/in/deja-connu-1/"]
+        results = self._results("https://www.linkedin.com/in/deja-connu-1/")
         with patch(
-            "ekoalu.google_sourcing.client.search_linkedin_profiles",
-            return_value=urls,
+            "ekoalu.google_sourcing.client.search_linkedin_results",
+            return_value=results,
         ):
             r1 = source_campaign(camp, max_profiles=10, query_budget=1)
             r2 = source_campaign(camp, max_profiles=10, query_budget=1)
@@ -100,7 +105,7 @@ class TestSourceCampaign:
     def test_budget_requetes_respecte(self):
         camp = self._campaign("EKOALU - ABM - Bouygues")
         with patch(
-            "ekoalu.google_sourcing.client.search_linkedin_profiles",
+            "ekoalu.google_sourcing.client.search_linkedin_results",
             return_value=[],
         ) as mock_search:
             res = source_campaign(camp, max_profiles=10, query_budget=3)

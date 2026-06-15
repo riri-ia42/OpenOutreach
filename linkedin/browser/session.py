@@ -36,9 +36,15 @@ class AccountSession:
 
     @cached_property
     def campaigns(self):
-        """All campaigns this user belongs to (cached)."""
+        """Active campaigns this user belongs to (cached).
+
+        Filtre ``active=True`` : une campagne mise en pause (Campaign.active=
+        False, ex. VIP le 15/06) ne seede plus de connect, n'est plus
+        qualifiee et ne construit plus de qualifier — elle cesse de consommer
+        le budget lectures. La reactiver (active=True) la remet dans la boucle.
+        """
         from linkedin.models import Campaign
-        return list(Campaign.objects.filter(users=self.django_user))
+        return list(Campaign.objects.filter(users=self.django_user, active=True))
 
     def ensure_browser(self):
         """Launch or recover browser + login if needed. Call before using .page"""

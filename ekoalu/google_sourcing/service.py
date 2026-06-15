@@ -22,6 +22,7 @@ class SourcingResult:
     urls_found: int = 0
     new_leads: int = 0        # leads nouvellement rattachés à la campagne
     already_known: int = 0    # profils déjà découverts pour cette campagne
+    prefiltered: int = 0      # résultats écartés AVANT lecture (hors-domaine)
     errors: int = 0
     dry_run_urls: list[str] = field(default_factory=list)
 
@@ -41,7 +42,7 @@ def source_campaign(
     """
     from crm.models import Lead
     from linkedin.url_utils import public_id_to_url, url_to_public_id
-    from ekoalu.google_sourcing import client, queries
+    from ekoalu.google_sourcing import client, prefilter, queries
     from ekoalu.lead_routing.models import LeadDiscovery
 
     result = SourcingResult(campaign_name=campaign.name)
@@ -58,16 +59,24 @@ def source_campaign(
             break
         result.queries_used += 1
         try:
-            urls = client.search_linkedin_profiles(q, max_results=per_query)
+            results = client.search_linkedin_results(q, max_results=per_query)
         except Exception as e:  # réseau/quota : on n'arrête pas tout
             logger.warning("Requête Serper échouée (%r) : %s", q, e)
             result.errors += 1
             continue
-        for u in urls:
+        for r in results:
+            u = r["link"]
             pid = url_to_public_id(u)
-            if pid and pid not in seen:
-                seen.add(pid)
-                found.append(u)
+            if not pid or pid in seen:
+                continue
+            # Pre-filtre AVANT lecture : on n'enregistre pas un profil dont le
+            # titre/snippet montre un metier hors-domaine (economise 1 lecture).
+            if not prefilter.passes_prefilter(r):
+                result.prefiltered += 1
+                logger.debug("Pre-filtre Serper : %s ecarte (%r)", pid, r.get("title", ""))
+                continue
+            seen.add(pid)
+            found.append(u)
 
     found = found[:max_profiles]
     result.urls_found = len(found)

@@ -403,7 +403,13 @@ def run_daemon(session):
         # pas les envois). Cap atteint => plus aucune task (qualif,
         # follow-up, check_pending lisent des fiches), mais le drain de la
         # file approved ci-dessus continue. Reset auto a minuit.
-        from ekoalu.read_guard.guard import daily_reads_cap, is_cap_reached
+        from ekoalu.read_guard.guard import (
+            daily_reads_cap,
+            is_cap_reached,
+            is_paced_cap_reached,
+            reads_budget_now,
+            reads_today,
+        )
         if is_cap_reached():
             logger.warning(
                 colored("READ_CAP", "yellow", attrs=["bold"])
@@ -413,6 +419,27 @@ def run_daemon(session):
             )
             sleep_with_heartbeat(
                 1800, heartbeat, "READ_CAP atteint - tasks en pause, reset minuit",
+            )
+            rhythm.reset()
+            continue
+
+        # Cadencement intra-journee (anti-burst matinal, remarque Richard
+        # 15/06) : le cap journalier se debloque progressivement sur la plage
+        # active. Tant que le budget DEBLOQUE est atteint, on temporise ~10min
+        # (avec jitter) sans claim de task — les lectures s'etalent en filet au
+        # lieu de partir en rafale au reveil. Le drain des envois approuves
+        # ci-dessus continue (il ne lit pas de fiche). Plafond MOU : aucun raise.
+        if is_paced_cap_reached():
+            wait = random.uniform(540, 900)
+            logger.info(
+                colored("READ_PACING", "yellow")
+                + " - budget lectures debloque atteint (%d/%d, cap jour %d) ;"
+                + " temporisation %dmin pour etaler sur la journee",
+                reads_today(), reads_budget_now(), daily_reads_cap(),
+                int(wait // 60),
+            )
+            sleep_with_heartbeat(
+                wait, heartbeat, "READ_PACING - filet de lectures, temporisation",
             )
             rhythm.reset()
             continue
@@ -444,6 +471,18 @@ def run_daemon(session):
         if not campaign:
             logger.error("Campaign %s not found", task.payload.get("campaign_id"))
             task.mark_failed()
+            continue
+
+        # Campagne en pause (active=False) : on draine ses tasks residuelles
+        # SANS les executer (sinon la boucle connect se re-enfile via
+        # _reschedule et la pause est vide de sens). mark_completed pour
+        # qu'elles sortent de la file sans compter comme echec.
+        if not campaign.active:
+            logger.info(
+                "Task %s ignoree : campagne %r en pause (active=False)",
+                task, campaign.name,
+            )
+            task.mark_completed()
             continue
 
         session.campaign = campaign

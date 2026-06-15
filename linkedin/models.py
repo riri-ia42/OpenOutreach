@@ -62,6 +62,11 @@ class Campaign(models.Model):
     product_docs = models.TextField(blank=True)
     campaign_objective = models.TextField(blank=True)
     booking_link = models.URLField(max_length=500, blank=True)
+    # Pause d'une campagne (decision Richard 15/06, VIP) : active=False => plus
+    # de seed connect, plus de qualification, pas de qualifier construit (cf.
+    # AccountSession.campaigns filtre active=True). Le daemon draine ses tasks
+    # residuelles sans les executer. Reactiver = remettre active=True.
+    active = models.BooleanField(default=True)
     is_freemium = models.BooleanField(default=False)
     action_fraction = models.FloatField(default=0.2)
     seed_public_ids = models.JSONField(default=list, blank=True)

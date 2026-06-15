@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from django.core.management import call_command
 
-from ekoalu.google_sourcing import client, queries
+from ekoalu.google_sourcing import client, prefilter, queries
 
 
 # --------------------------------------------------------------------------
@@ -105,6 +105,64 @@ def test_search_linkedin_profiles_respecte_max():
 
 
 # --------------------------------------------------------------------------
+# prefilter — filtre négatif hors-domaine AVANT lecture (preuve : rejets 15/06)
+# --------------------------------------------------------------------------
+
+def test_prefilter_garde_les_profils_batiment():
+    # Cas réels du sourcing ABM
+    assert prefilter.passes_prefilter(
+        {"title": "Jean Dupont - Conducteur de travaux - Bateg", "snippet": ""})
+    assert prefilter.passes_prefilter(
+        {"title": "Marie - Chargée d'affaires métallerie", "snippet": "façades, serrurerie"})
+
+
+def test_prefilter_ecarte_le_hors_domaine():
+    # Tous tirés des 51 rejets wrong_fit du 15/06
+    assert not prefilter.passes_prefilter(
+        {"title": "Luigi Sibille - Postdoctoral Researcher", "snippet": "Princeton University, civil engineering"})
+    assert not prefilter.passes_prefilter(
+        {"title": "Nathalie - Consultante formatrice en anglais", "snippet": "coach linguistique"})
+    assert not prefilter.passes_prefilter(
+        {"title": "Nicolas - Psychothérapeute / producteur artistique", "snippet": ""})
+    assert not prefilter.passes_prefilter(
+        {"title": "Achille - Avocat en droit de la construction", "snippet": "Cinetic Avocats"})
+    assert not prefilter.passes_prefilter(
+        {"title": "Abrar - Data Engineer / Data Analyst", "snippet": "BI, ETL, Power BI"})
+
+
+def test_prefilter_insensible_accents_casse():
+    assert prefilter.is_offdomain("PHOTOGRAPHE indépendant", "")
+    assert prefilter.is_offdomain("Géomètre-expert", "")
+
+
+def test_prefilter_kill_switch(monkeypatch):
+    monkeypatch.setenv("EKOALU_SERPER_PREFILTER", "0")
+    # désactivé : même un avocat passe
+    assert prefilter.passes_prefilter({"title": "Avocat", "snippet": ""})
+
+
+@pytest.mark.django_db
+def test_source_campaign_prefiltre_avant_lecture(abm_campaign, monkeypatch):
+    """Le hors-domaine ne crée PAS de lead (donc pas de lecture à payer)."""
+    from crm.models import Lead
+    from ekoalu.google_sourcing.service import source_campaign
+
+    monkeypatch.setenv("SERPER_API_KEY", "k")
+    monkeypatch.setenv("EKOALU_SERPER_PREFILTER", "1")
+    results = [
+        {"link": "https://www.linkedin.com/in/bon-profil/", "title": "Conducteur de travaux", "snippet": ""},
+        {"link": "https://www.linkedin.com/in/un-avocat/", "title": "Avocat", "snippet": "barreau de Lyon"},
+    ]
+    with patch.object(client, "search_linkedin_results", return_value=results):
+        res = source_campaign(abm_campaign, max_profiles=10, query_budget=1)
+
+    assert res.prefiltered == 1
+    assert res.new_leads == 1
+    assert Lead.objects.filter(public_identifier="bon-profil").exists()
+    assert not Lead.objects.filter(public_identifier="un-avocat").exists()
+
+
+# --------------------------------------------------------------------------
 # Commande source_via_google
 # --------------------------------------------------------------------------
 
@@ -122,8 +180,11 @@ def test_command_cree_leads_url_only_et_discovery(abm_campaign, monkeypatch):
 
     monkeypatch.setenv("SERPER_API_KEY", "k")
 
-    urls = ["https://www.linkedin.com/in/alice-x/", "https://www.linkedin.com/in/bob-y/"]
-    with patch("ekoalu.google_sourcing.client.search_linkedin_profiles", return_value=urls):
+    results = [
+        {"link": "https://www.linkedin.com/in/alice-x/", "title": "Alice X - Directrice", "snippet": ""},
+        {"link": "https://www.linkedin.com/in/bob-y/", "title": "Bob Y - Conducteur de travaux", "snippet": ""},
+    ]
+    with patch("ekoalu.google_sourcing.client.search_linkedin_results", return_value=results):
         call_command("source_via_google", "--campaign", "Test Boite", "--max", "10", stdout=StringIO())
 
     assert Lead.objects.filter(public_identifier="alice-x").exists()
@@ -139,8 +200,8 @@ def test_command_cree_leads_url_only_et_discovery(abm_campaign, monkeypatch):
 def test_command_dry_run_ne_cree_rien(abm_campaign):
     from crm.models import Lead
 
-    urls = ["https://www.linkedin.com/in/zoe/"]
-    with patch("ekoalu.google_sourcing.client.search_linkedin_profiles", return_value=urls):
+    results = [{"link": "https://www.linkedin.com/in/zoe/", "title": "Zoe - Métreur", "snippet": ""}]
+    with patch("ekoalu.google_sourcing.client.search_linkedin_results", return_value=results):
         out = StringIO()
         call_command("source_via_google", "--campaign", "Test Boite", "--dry-run", stdout=out)
     assert not Lead.objects.filter(public_identifier="zoe").exists()
@@ -153,8 +214,8 @@ def test_command_idempotent(abm_campaign, monkeypatch):
     from ekoalu.lead_routing.models import LeadDiscovery
 
     monkeypatch.setenv("SERPER_API_KEY", "k")
-    urls = ["https://www.linkedin.com/in/alice-x/"]
-    with patch("ekoalu.google_sourcing.client.search_linkedin_profiles", return_value=urls):
+    results = [{"link": "https://www.linkedin.com/in/alice-x/", "title": "Alice X - Directrice", "snippet": ""}]
+    with patch("ekoalu.google_sourcing.client.search_linkedin_results", return_value=results):
         call_command("source_via_google", "--campaign", "Test Boite", stdout=StringIO())
         call_command("source_via_google", "--campaign", "Test Boite", stdout=StringIO())
 
