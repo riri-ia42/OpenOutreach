@@ -188,6 +188,16 @@ class TestVentilationParUsage:
         record_read("get_profile")
         assert ProfileReadDay.objects.get(date=date.today()).sources.get("get_profile") == 1
 
+    def test_visite_page_comptee_a_part(self, monkeypatch):
+        """Une visite de page (visit_profile) est comptée comme interaction, et
+        n'est JAMAIS recatégorisée en sélection même dans un bloc selection."""
+        monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "150")
+        with guard.read_purpose("selection"):
+            record_read("visit_profile")
+        src = ProfileReadDay.objects.get(date=date.today()).sources
+        assert src.get("visit_profile") == 1
+        assert "selection" not in src
+
 
 class TestAlerteMail:
     def test_mail_envoye_une_seule_fois_au_franchissement(self, monkeypatch):

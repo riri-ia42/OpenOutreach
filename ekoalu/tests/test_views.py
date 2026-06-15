@@ -67,6 +67,39 @@ class TestEfficaciteTri:
         # taux réel = 2 / 10 = 20% (PAS 2/15 ni 2/17)
         assert t["today_rate"] == 20.0
 
+    def test_compte_toutes_interactions_et_deux_taux(self):
+        """Toutes les interactions comptées (fetch + degré + visite) + 2 taux :
+        efficacité (sél/lectures-sél) et part recherche (lectures-sél/total)."""
+        from ekoalu.views import _search_efficiency_data
+        from crm.models import Deal, Lead
+        from ekoalu.read_guard.models import ProfileReadDay
+        from linkedin.models import Campaign
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        # 10 sélection + 4 follow-up + 6 degré + 5 visites = 25 interactions
+        ProfileReadDay.objects.create(
+            date=today, count=25,
+            sources={"selection": 10, "follow_up": 4,
+                     "get_connection_degree": 6, "visit_profile": 5},
+        )
+        camp = Campaign.objects.create(name="EKOALU - Inter test")
+        for i in range(3):  # 3 sélectionnés
+            lead = Lead.objects.create(public_identifier=f"int-{i}",
+                                       linkedin_url=f"https://www.linkedin.com/in/int-{i}")
+            Deal.objects.create(lead=lead, campaign=camp, state="Qualified")
+
+        t = _search_efficiency_data(days=10)["totals"]
+        assert t["interactions"] == 25
+        assert t["selection_reads"] == 10
+        assert t["followup_reads"] == 4
+        assert t["degree_reads"] == 6
+        assert t["visit_reads"] == 5
+        # efficacité = 3/10 = 30%
+        assert t["today_rate"] == 30.0
+        # part recherche = 10/25 = 40%
+        assert t["today_research_share"] == 40.0
+
     def test_jour_herite_sans_ventilation_retombe_sur_total(self):
         from ekoalu.views import _search_efficiency_data
         from ekoalu.read_guard.models import ProfileReadDay

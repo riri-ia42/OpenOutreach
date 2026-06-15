@@ -18,6 +18,18 @@ SELECTORS = {
 def _go_to_profile(session: "AccountSession", url: str, public_identifier: str):
     if f"/in/{public_identifier}" in session.page.url:
         return
+    # EKOALU : une navigation réelle vers une fiche /in/ EST une "vue de profil"
+    # côté LinkedIn (notification + chargement complet de la page), au même titre
+    # qu'un fetch Voyager. On la compte donc dans le garde-fou (source
+    # "visit_profile") pour que le total reflète TOUTES les interactions vues par
+    # LinkedIn (demande Richard 15/06). Compte la tentative, ne bloque pas (le
+    # gating du cap se fait au niveau du daemon ; bloquer ici ferait échouer un
+    # envoi d'invitation en cours).
+    try:
+        from ekoalu.read_guard.guard import record_read
+        record_read(source="visit_profile")
+    except Exception:
+        logger.debug("read_guard record_read(visit_profile) a échoué", exc_info=True)
     logger.debug("Direct navigation → %s", public_identifier)
     try:
         goto_page(

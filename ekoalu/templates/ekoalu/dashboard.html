@@ -67,12 +67,14 @@
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-gray-900">Efficacité du tri <span class="text-sm font-normal text-gray-500">— depuis le {{ efficiency_chart.totals.since }}</span></h2>
             <div class="flex flex-wrap gap-3 text-xs text-gray-600">
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Lectures sélection : <b>{{ efficiency_chart.totals.selection_reads }}</b></span>
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#cbd5e1"></span>dont follow-up exclus : <b>{{ efficiency_chart.totals.followup_reads }}</b></span>
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Sélectionnés : <b>{{ efficiency_chart.totals.selected }}</b></span>
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#dc2626"></span>Rejetés : <b>{{ efficiency_chart.totals.rejected }}</b></span>
-                <span class="font-medium">Taux réel du jour : <b>{% if efficiency_chart.totals.today_rate is not None %}{{ efficiency_chart.totals.today_rate }}%{% else %}—{% endif %}</b></span>
-                <span class="text-gray-400">(moyenne : {% if efficiency_chart.totals.rate is not None %}{{ efficiency_chart.totals.rate }}%{% else %}—{% endif %})</span>
+                <span title="Toutes les interactions LinkedIn sur des fiches : fetches + visites de page"><b>{{ efficiency_chart.totals.interactions }}</b> interactions</span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#475569"></span>Sélection : <b>{{ efficiency_chart.totals.selection_reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Follow-up : <b>{{ efficiency_chart.totals.followup_reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#cbd5e1"></span>Degré : <b>{{ efficiency_chart.totals.degree_reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#7dd3fc"></span>Visites : <b>{{ efficiency_chart.totals.visit_reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Sélectionnés : <b>{{ efficiency_chart.totals.selected }}</b> · <span style="color:#dc2626">Rejetés : {{ efficiency_chart.totals.rejected }}</span></span>
+                <span class="font-medium text-blue-700" title="profils sélectionnés / lectures de sélection">Efficacité tri : <b>{% if efficiency_chart.totals.today_rate is not None %}{{ efficiency_chart.totals.today_rate }}%{% else %}—{% endif %}</b> <span class="text-gray-400 font-normal">(moy {% if efficiency_chart.totals.rate is not None %}{{ efficiency_chart.totals.rate }}%{% else %}—{% endif %})</span></span>
+                <span class="font-medium text-amber-700" title="lectures de sélection / total interactions">Part recherche : <b>{% if efficiency_chart.totals.today_research_share is not None %}{{ efficiency_chart.totals.today_research_share }}%{% else %}—{% endif %}</b> <span class="text-gray-400 font-normal">(moy {% if efficiency_chart.totals.research_share is not None %}{{ efficiency_chart.totals.research_share }}%{% else %}—{% endif %})</span></span>
             </div>
         </div>
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
@@ -80,13 +82,14 @@
                 <canvas id="efficiencyChart"></canvas>
             </div>
             <p class="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">
-                Aujourd'hui : {{ efficiency_chart.totals.today_reads }} lecture{{ efficiency_chart.totals.today_reads|pluralize }} de fiche
+                Aujourd'hui : {{ efficiency_chart.totals.today_interactions }} interaction{{ efficiency_chart.totals.today_interactions|pluralize }} LinkedIn
                 dont {{ efficiency_chart.totals.today_selection_reads }} pour la sélection de candidats
                 {% if efficiency_chart.today_sources %}
-                — par usage : {% for label, n in efficiency_chart.today_sources %}{{ n }} {{ label }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                — détail : {% for label, n in efficiency_chart.today_sources %}{{ n }} {{ label }}{% if not forloop.last %} · {% endif %}{% endfor %}
                 {% endif %}.
-                <br>Le <b>taux réel</b> = profils sélectionnés / lectures de <b>sélection</b> seulement
-                (les relances de leads déjà connectés et les contrôles de degré sont exclus).
+                <br><b>On compte désormais TOUTES les interactions vues par LinkedIn</b> (fetches API + visites de page), sous le cap quotidien anti-ban.
+                <span class="text-blue-700">Efficacité tri</span> = sélectionnés / lectures de <b>sélection</b>.
+                <span class="text-amber-700">Part recherche</span> = lectures de sélection / total interactions (quelle part de l'activité sert vraiment à chercher des candidats).
             </p>
         </div>
     </section>
@@ -98,11 +101,14 @@
         data: {
             labels: {{ efficiency_chart.labels|safe }},
             datasets: [
-                { label: 'Lectures sélection', data: {{ efficiency_chart.reads_selection|safe }}, backgroundColor: '#94a3b8', yAxisID: 'y', stack: 'reads' },
-                { label: 'Lectures follow-up (hors taux)', data: {{ efficiency_chart.reads_followup|safe }}, backgroundColor: '#cbd5e1', yAxisID: 'y', stack: 'reads' },
-                { label: 'Profils sélectionnés', data: {{ efficiency_chart.selected|safe }}, backgroundColor: '#16a34a', yAxisID: 'y' },
-                { label: 'Rejetés (hors cible)', data: {{ efficiency_chart.rejected|safe }}, backgroundColor: '#dc2626', yAxisID: 'y' },
-                { label: 'Taux réel de sélection (%)', data: {{ efficiency_chart.rates|safe }}, type: 'line', borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.3, pointRadius: 3, spanGaps: true, yAxisID: 'y2' },
+                { label: 'Sélection (fetch)', data: {{ efficiency_chart.reads_selection|safe }}, backgroundColor: '#475569', yAxisID: 'y', stack: 'inter' },
+                { label: 'Follow-up', data: {{ efficiency_chart.reads_followup|safe }}, backgroundColor: '#94a3b8', yAxisID: 'y', stack: 'inter' },
+                { label: 'Degré', data: {{ efficiency_chart.reads_degree|safe }}, backgroundColor: '#cbd5e1', yAxisID: 'y', stack: 'inter' },
+                { label: 'Visites de page', data: {{ efficiency_chart.reads_visit|safe }}, backgroundColor: '#7dd3fc', yAxisID: 'y', stack: 'inter' },
+                { label: 'Profils sélectionnés', data: {{ efficiency_chart.selected|safe }}, backgroundColor: '#16a34a', yAxisID: 'y', stack: 'out' },
+                { label: 'Rejetés (hors cible)', data: {{ efficiency_chart.rejected|safe }}, backgroundColor: '#dc2626', yAxisID: 'y', stack: 'out' },
+                { label: 'Efficacité tri (%)', data: {{ efficiency_chart.rates|safe }}, type: 'line', borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.3, pointRadius: 3, spanGaps: true, yAxisID: 'y2' },
+                { label: 'Part recherche (%)', data: {{ efficiency_chart.research_share|safe }}, type: 'line', borderColor: '#d97706', backgroundColor: '#d97706', borderDash: [5,4], tension: 0.3, pointRadius: 2, spanGaps: true, yAxisID: 'y2' },
             ],
         },
         options: {

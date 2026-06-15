@@ -172,30 +172,38 @@ def _search_efficiency_data(days: int = 10) -> dict:
         timezone.datetime.combine(day_list[0], timezone.datetime.min.time()),
     )
 
-    # Décomposition des lectures par usage (demande Richard 15/06 : isoler les
-    # lectures qui ont VRAIMENT servi à sélectionner de nouveaux candidats pour
-    # un taux d'efficacité réel) :
-    #   - selection : enrichissement + verdict de tri (read_purpose "selection")
-    #   - follow_up : relance d'un lead déjà connecté (read_purpose "follow_up")
-    #   - degré     : contrôle technique avant invitation (exclu, comme avant)
-    # Le DÉNOMINATEUR du taux = lectures "selection" seulement.
-    # Jours hérités (avant le 15/06) : pas de ventilation par usage → on retombe
-    # sur l'ancienne approx (tout sauf degré = sélection).
+    # Décomposition de TOUTES les interactions sur une fiche LinkedIn (demande
+    # Richard 15/06 : « compter tout », car LinkedIn voit aussi les visites de
+    # page, pas seulement nos fetches API). 4 catégories :
+    #   - selection : fetch Voyager d'enrichissement/verdict d'un NOUVEAU candidat
+    #   - follow_up : fetch Voyager de relance (lead déjà connecté)
+    #   - degré     : fetch get_connection_degree (contrôle avant invitation)
+    #   - visite    : navigation réelle sur la page /in/ (visit_profile) — vue
+    #                 que LinkedIn enregistre, jusqu'ici NON comptée
+    # DÉNOMINATEUR du taux d'efficacité = "selection" seulement.
+    # Jours hérités (avant le 15/06, pas de ventilation) → tout get_profile = sélection.
     reads_sel_by_day: dict = {}
     reads_fu_by_day: dict = {}
+    reads_degree_by_day: dict = {}
+    reads_visit_by_day: dict = {}
+    total_by_day: dict = {}
     for r in ProfileReadDay.objects.filter(date__gte=day_list[0]):
         src = r.sources or {}
         degree = src.get("get_connection_degree", 0)
+        visit = src.get("visit_profile", 0)
         has_usage = ("selection" in src) or ("follow_up" in src)
         if has_usage:
-            # get_profile non catégorisé (chemins sans purpose) compté en sélection
             sel = src.get("selection", 0) + src.get("get_profile", 0)
             fu = src.get("follow_up", 0)
         else:
-            sel = max(r.count - degree, 0)
+            # héritage : tout sauf degré/visite = sélection
+            sel = max(r.count - degree - visit, 0)
             fu = 0
         reads_sel_by_day[r.date] = sel
         reads_fu_by_day[r.date] = fu
+        reads_degree_by_day[r.date] = degree
+        reads_visit_by_day[r.date] = visit
+        total_by_day[r.date] = r.count  # compteur atomique = total interactions
 
     selected_by_day: dict = defaultdict(int)
     rejected_by_day: dict = defaultdict(int)
@@ -213,18 +221,32 @@ def _search_efficiency_data(days: int = 10) -> dict:
 
     reads_sel = [reads_sel_by_day.get(d, 0) for d in day_list]
     reads_fu = [reads_fu_by_day.get(d, 0) for d in day_list]
-    reads = [s + f for s, f in zip(reads_sel, reads_fu)]  # total tri (hors degré)
+    reads_degree = [reads_degree_by_day.get(d, 0) for d in day_list]
+    reads_visit = [reads_visit_by_day.get(d, 0) for d in day_list]
+    # Total interactions = compteur atomique du jour (fallback = somme des 4 cats)
+    interactions = [
+        total_by_day.get(d, s + f + dg + v)
+        for d, s, f, dg, v in zip(day_list, reads_sel, reads_fu, reads_degree, reads_visit)
+    ]
     selected = [selected_by_day.get(d, 0) for d in day_list]
     rejected = [rejected_by_day.get(d, 0) for d in day_list]
-    # Taux RÉEL = sélectionnés / lectures de SÉLECTION (pas le total).
+    # Taux d'EFFICACITÉ = sélectionnés / lectures de SÉLECTION (pas le total).
     rates = [
         round(s / r * 100, 1) if r else None
         for s, r in zip(selected, reads_sel)
     ]
+    # Part RECHERCHE-SÉLECTION = lectures sélection / total interactions (quelle
+    # fraction de l'activité LinkedIn sert vraiment à chercher des candidats).
+    research_share = [
+        round(rs / it * 100, 1) if it else None
+        for rs, it in zip(reads_sel, interactions)
+    ]
 
-    total_reads = sum(reads)
+    total_interactions = sum(interactions)
     total_sel_reads = sum(reads_sel)
     total_fu_reads = sum(reads_fu)
+    total_degree = sum(reads_degree)
+    total_visit = sum(reads_visit)
     total_selected = sum(selected)
 
     # Ventilation des lectures du jour par usage (réponse à « où sont les
@@ -232,8 +254,9 @@ def _search_efficiency_data(days: int = 10) -> dict:
     today_row = ProfileReadDay.objects.filter(date=today).first()
     src = (today_row.sources or {}) if today_row else {}
     _SRC_LABELS = {
-        "selection": "sélection de candidats (enrichissement/tri)",
+        "selection": "sélection de candidats (fetch enrichissement/tri)",
         "follow_up": "relances (leads déjà connectés)",
+        "visit_profile": "visites de page (avant invitation / inspection)",
         "get_profile": "fiches non catégorisées",
         "get_connection_degree": "contrôles de degré (avant invitation)",
         "autre": "autres",
@@ -244,23 +267,31 @@ def _search_efficiency_data(days: int = 10) -> dict:
 
     return {
         "labels": json.dumps([d.strftime("%d/%m") for d in day_list]),
-        "reads": json.dumps(reads),
+        "interactions": json.dumps(interactions),
         "reads_selection": json.dumps(reads_sel),
         "reads_followup": json.dumps(reads_fu),
+        "reads_degree": json.dumps(reads_degree),
+        "reads_visit": json.dumps(reads_visit),
         "selected": json.dumps(selected),
         "rejected": json.dumps(rejected),
         "rates": json.dumps(rates),
+        "research_share": json.dumps(research_share),
         "totals": {
-            "reads": total_reads,
+            "interactions": total_interactions,
             "selection_reads": total_sel_reads,
             "followup_reads": total_fu_reads,
+            "degree_reads": total_degree,
+            "visit_reads": total_visit,
             "selected": total_selected,
             "rejected": sum(rejected),
-            # Taux réel = sélectionnés / lectures de sélection (dénominateur juste)
+            # Taux d'efficacité = sélectionnés / lectures de sélection
             "rate": round(total_selected / total_sel_reads * 100, 1) if total_sel_reads else None,
+            # Part recherche-sélection = lectures sélection / total interactions
+            "research_share": round(total_sel_reads / total_interactions * 100, 1) if total_interactions else None,
             "today_rate": rates[-1] if rates else None,
+            "today_research_share": research_share[-1] if research_share else None,
             "since": day_list[0].strftime("%d/%m"),
-            "today_reads": reads[-1] if reads else 0,
+            "today_interactions": interactions[-1] if interactions else 0,
             "today_selection_reads": reads_sel[-1] if reads_sel else 0,
             "today_verdicts": (selected[-1] + rejected[-1]) if selected else 0,
         },
