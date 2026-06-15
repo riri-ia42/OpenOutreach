@@ -18,11 +18,34 @@ compte, et au-dela du cap toute nouvelle lecture raise ReadCapExceededError.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import os
 from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
+
+# Usage courant d'une lecture de fiche (pour la ventilation efficacité du tri,
+# demande Richard 15/06 : distinguer les lectures qui servent à SÉLECTIONNER
+# de nouveaux candidats de celles de follow-up/relance — seules les premières
+# comptent dans le taux d'efficacité réel). Posé via read_purpose() autour des
+# appels Voyager : "selection" (qualif/enrichissement) ou "follow_up".
+_read_purpose: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "ekoalu_read_purpose", default="",
+)
+
+
+@contextlib.contextmanager
+def read_purpose(label: str):
+    """Marque toutes les lectures de fiche (get_profile) faites dans ce bloc
+    avec l'usage ``label`` (ex. "selection", "follow_up"). N'affecte PAS les
+    contrôles de degré (get_connection_degree restent comptés à part)."""
+    token = _read_purpose.set(label)
+    try:
+        yield
+    finally:
+        _read_purpose.reset(token)
 
 # Repere 2026 compte gratuit : ~80 lectures/jour admissibles. Montee decidee
 # par Richard le 12/06 : 60/j tout de suite, 75/j a partir du lundi 15/06
@@ -184,8 +207,13 @@ def record_read(source: str = "") -> int:
     row.refresh_from_db()
 
     # Ventilation par usage (read-modify-write : course bénigne, le total
-    # de référence reste `count` qui est lui atomique).
+    # de référence reste `count` qui est lui atomique). Pour une lecture de
+    # fiche (get_profile), l'usage actif (selection/follow_up) prime sur le nom
+    # de méthode → le dashboard isole les lectures qui ont servi à la sélection.
+    purpose = _read_purpose.get()
     key = source or "autre"
+    if purpose and source == "get_profile":
+        key = purpose
     row.sources[key] = row.sources.get(key, 0) + 1
     ProfileReadDay.objects.filter(pk=row.pk).update(sources=row.sources)
 

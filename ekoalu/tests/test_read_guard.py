@@ -155,6 +155,40 @@ class TestCadencement:
         assert is_paced_cap_reached(datetime(2026, 6, 15, 19, 59))
 
 
+class TestVentilationParUsage:
+    """Labellisation des lectures par usage (demande Richard 15/06) : isoler les
+    lectures de SÉLECTION des relances pour un taux d'efficacité réel."""
+
+    def test_get_profile_marque_selection(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "50")
+        with guard.read_purpose("selection"):
+            record_read("get_profile")
+            record_read("get_profile")
+        row = ProfileReadDay.objects.get(date=date.today())
+        assert row.sources.get("selection") == 2
+        assert "get_profile" not in row.sources
+
+    def test_get_profile_marque_follow_up(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "50")
+        with guard.read_purpose("follow_up"):
+            record_read("get_profile")
+        assert ProfileReadDay.objects.get(date=date.today()).sources.get("follow_up") == 1
+
+    def test_degre_jamais_recatalogue(self, monkeypatch):
+        """Le contrôle de degré reste compté à part même dans un bloc selection."""
+        monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "50")
+        with guard.read_purpose("selection"):
+            record_read("get_connection_degree")
+        src = ProfileReadDay.objects.get(date=date.today()).sources
+        assert src.get("get_connection_degree") == 1
+        assert "selection" not in src
+
+    def test_sans_purpose_garde_le_nom_de_methode(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "50")
+        record_read("get_profile")
+        assert ProfileReadDay.objects.get(date=date.today()).sources.get("get_profile") == 1
+
+
 class TestAlerteMail:
     def test_mail_envoye_une_seule_fois_au_franchissement(self, monkeypatch):
         calls = []

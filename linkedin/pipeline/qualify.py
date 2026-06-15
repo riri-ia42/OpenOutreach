@@ -64,14 +64,23 @@ def fetch_qualification_candidates(session):
 
 def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
     """Qualify one unlabelled profile via BALD/auto-decision/LLM. Returns public_id or None."""
-    from linkedin.ml.qualifier import qualify_with_llm, format_prediction
-
     if _qualifier_disabled():
         logger.info(
             "qualifier disabled via DAEMON_DISABLE_QUALIFIER -- "
             "ingestion paused, daemon continues on existing deals",
         )
         return None
+
+    # EKOALU : toutes les lectures de fiche de ce bloc (enrichissement embedding
+    # + texte profil pour le verdict) servent a SELECTIONNER un nouveau candidat
+    # -> on les marque "selection" pour la ventilation efficacite (Richard 15/06).
+    from ekoalu.read_guard.guard import read_purpose
+    with read_purpose("selection"):
+        return _run_qualification_inner(session, qualifier)
+
+
+def _run_qualification_inner(session, qualifier: BayesianQualifier) -> str | None:
+    from linkedin.ml.qualifier import qualify_with_llm, format_prediction
 
     candidates = fetch_qualification_candidates(session)
     if not candidates:

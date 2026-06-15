@@ -111,7 +111,12 @@ def materialize_profile_summary_if_missing(deal, session) -> None:
         return
 
     lead = deal.lead
-    profile = lead.get_profile(session)
+    # Lecture de relance (lead déjà connecté) — pas une sélection de nouveau
+    # candidat : marquée "follow_up" pour l'exclure du taux d'efficacité du tri
+    # (demande Richard 15/06).
+    from ekoalu.read_guard.guard import read_purpose
+    with read_purpose("follow_up"):
+        profile = lead.get_profile(session)
     if not profile:
         logger.warning(
             "materialize_profile_summary: empty profile for deal=%s lead=%s",

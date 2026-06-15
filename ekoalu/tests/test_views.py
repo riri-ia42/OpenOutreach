@@ -38,6 +38,53 @@ class TestDashboardView:
 
 
 @pytest.mark.django_db
+class TestEfficaciteTri:
+    """Taux réel basé sur les seules lectures de SÉLECTION (demande Richard 15/06)."""
+
+    def test_taux_exclut_les_lectures_follow_up(self):
+        from ekoalu.views import _search_efficiency_data
+        from crm.models import Deal, Lead
+        from ekoalu.read_guard.models import ProfileReadDay
+        from linkedin.models import Campaign
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        # 10 lectures de sélection + 5 de follow-up + 2 de degré
+        ProfileReadDay.objects.create(
+            date=today, count=17,
+            sources={"selection": 10, "follow_up": 5, "get_connection_degree": 2},
+        )
+        camp = Campaign.objects.create(name="EKOALU - Eff test")
+        for i in range(2):  # 2 sélectionnés aujourd'hui
+            lead = Lead.objects.create(public_identifier=f"eff-sel-{i}",
+                                       linkedin_url=f"https://www.linkedin.com/in/eff-sel-{i}")
+            Deal.objects.create(lead=lead, campaign=camp, state="Qualified")
+
+        data = _search_efficiency_data(days=10)
+        t = data["totals"]
+        assert t["selection_reads"] == 10
+        assert t["followup_reads"] == 5
+        # taux réel = 2 / 10 = 20% (PAS 2/15 ni 2/17)
+        assert t["today_rate"] == 20.0
+
+    def test_jour_herite_sans_ventilation_retombe_sur_total(self):
+        from ekoalu.views import _search_efficiency_data
+        from ekoalu.read_guard.models import ProfileReadDay
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        # jour "ancien régime" : pas de clés selection/follow_up
+        ProfileReadDay.objects.create(
+            date=today, count=12,
+            sources={"get_profile": 10, "get_connection_degree": 2},
+        )
+        data = _search_efficiency_data(days=10)
+        # fallback : sélection = tout sauf degré = 10
+        assert data["totals"]["selection_reads"] == 10
+        assert data["totals"]["followup_reads"] == 0
+
+
+@pytest.mark.django_db
 class TestCampaignFunnel:
     """Cohérence arithmétique du funnel partagé dashboard + page campagnes."""
 

@@ -67,10 +67,11 @@
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-gray-900">Efficacité du tri <span class="text-sm font-normal text-gray-500">— depuis le {{ efficiency_chart.totals.since }}</span></h2>
             <div class="flex flex-wrap gap-3 text-xs text-gray-600">
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Fiches lues (tri) : <b>{{ efficiency_chart.totals.reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#94a3b8"></span>Lectures sélection : <b>{{ efficiency_chart.totals.selection_reads }}</b></span>
+                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#cbd5e1"></span>dont follow-up exclus : <b>{{ efficiency_chart.totals.followup_reads }}</b></span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Sélectionnés : <b>{{ efficiency_chart.totals.selected }}</b></span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#dc2626"></span>Rejetés : <b>{{ efficiency_chart.totals.rejected }}</b></span>
-                <span class="font-medium">Taux du jour : <b>{% if efficiency_chart.totals.today_rate is not None %}{{ efficiency_chart.totals.today_rate }}%{% else %}—{% endif %}</b></span>
+                <span class="font-medium">Taux réel du jour : <b>{% if efficiency_chart.totals.today_rate is not None %}{{ efficiency_chart.totals.today_rate }}%{% else %}—{% endif %}</b></span>
                 <span class="text-gray-400">(moyenne : {% if efficiency_chart.totals.rate is not None %}{{ efficiency_chart.totals.rate }}%{% else %}—{% endif %})</span>
             </div>
         </div>
@@ -79,12 +80,13 @@
                 <canvas id="efficiencyChart"></canvas>
             </div>
             <p class="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">
-                Aujourd'hui : {{ efficiency_chart.totals.today_reads }} lecture{{ efficiency_chart.totals.today_reads|pluralize }}
-                dont {{ efficiency_chart.totals.today_verdicts }} verdict{{ efficiency_chart.totals.today_verdicts|pluralize }} de tri
+                Aujourd'hui : {{ efficiency_chart.totals.today_reads }} lecture{{ efficiency_chart.totals.today_reads|pluralize }} de fiche
+                dont {{ efficiency_chart.totals.today_selection_reads }} pour la sélection de candidats
                 {% if efficiency_chart.today_sources %}
                 — par usage : {% for label, n in efficiency_chart.today_sources %}{{ n }} {{ label }}{% if not forloop.last %} · {% endif %}{% endfor %}
                 {% endif %}.
-                Les contrôles de degré (avant invitation) sont exclus du taux.
+                <br>Le <b>taux réel</b> = profils sélectionnés / lectures de <b>sélection</b> seulement
+                (les relances de leads déjà connectés et les contrôles de degré sont exclus).
             </p>
         </div>
     </section>
@@ -96,10 +98,11 @@
         data: {
             labels: {{ efficiency_chart.labels|safe }},
             datasets: [
-                { label: 'Fiches lues', data: {{ efficiency_chart.reads|safe }}, backgroundColor: '#94a3b8', yAxisID: 'y' },
+                { label: 'Lectures sélection', data: {{ efficiency_chart.reads_selection|safe }}, backgroundColor: '#94a3b8', yAxisID: 'y', stack: 'reads' },
+                { label: 'Lectures follow-up (hors taux)', data: {{ efficiency_chart.reads_followup|safe }}, backgroundColor: '#cbd5e1', yAxisID: 'y', stack: 'reads' },
                 { label: 'Profils sélectionnés', data: {{ efficiency_chart.selected|safe }}, backgroundColor: '#16a34a', yAxisID: 'y' },
                 { label: 'Rejetés (hors cible)', data: {{ efficiency_chart.rejected|safe }}, backgroundColor: '#dc2626', yAxisID: 'y' },
-                { label: 'Taux de sélection (%)', data: {{ efficiency_chart.rates|safe }}, type: 'line', borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.3, pointRadius: 3, spanGaps: true, yAxisID: 'y2' },
+                { label: 'Taux réel de sélection (%)', data: {{ efficiency_chart.rates|safe }}, type: 'line', borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.3, pointRadius: 3, spanGaps: true, yAxisID: 'y2' },
             ],
         },
         options: {

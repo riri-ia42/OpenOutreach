@@ -172,15 +172,30 @@ def _search_efficiency_data(days: int = 10) -> dict:
         timezone.datetime.combine(day_list[0], timezone.datetime.min.time()),
     )
 
-    # Dénominateur = lectures de FICHES uniquement (tri/enrichissement).
-    # Les contrôles de degré avant invitation (get_connection_degree) sont des
-    # lectures techniques qui biaisaient le taux (remarque Richard 12/06).
-    # NB : avec le snapshot de fiche (Lead.profile_snapshot), verdicts et
-    # follow-ups ne relisent plus LinkedIn — 1 lead = 1 lecture max.
-    reads_by_day = {}
+    # Décomposition des lectures par usage (demande Richard 15/06 : isoler les
+    # lectures qui ont VRAIMENT servi à sélectionner de nouveaux candidats pour
+    # un taux d'efficacité réel) :
+    #   - selection : enrichissement + verdict de tri (read_purpose "selection")
+    #   - follow_up : relance d'un lead déjà connecté (read_purpose "follow_up")
+    #   - degré     : contrôle technique avant invitation (exclu, comme avant)
+    # Le DÉNOMINATEUR du taux = lectures "selection" seulement.
+    # Jours hérités (avant le 15/06) : pas de ventilation par usage → on retombe
+    # sur l'ancienne approx (tout sauf degré = sélection).
+    reads_sel_by_day: dict = {}
+    reads_fu_by_day: dict = {}
     for r in ProfileReadDay.objects.filter(date__gte=day_list[0]):
-        degree = (r.sources or {}).get("get_connection_degree", 0)
-        reads_by_day[r.date] = max(r.count - degree, 0)
+        src = r.sources or {}
+        degree = src.get("get_connection_degree", 0)
+        has_usage = ("selection" in src) or ("follow_up" in src)
+        if has_usage:
+            # get_profile non catégorisé (chemins sans purpose) compté en sélection
+            sel = src.get("selection", 0) + src.get("get_profile", 0)
+            fu = src.get("follow_up", 0)
+        else:
+            sel = max(r.count - degree, 0)
+            fu = 0
+        reads_sel_by_day[r.date] = sel
+        reads_fu_by_day[r.date] = fu
 
     selected_by_day: dict = defaultdict(int)
     rejected_by_day: dict = defaultdict(int)
@@ -196,15 +211,20 @@ def _search_efficiency_data(days: int = 10) -> dict:
         elif state != "Failed":
             selected_by_day[d] += 1
 
-    reads = [reads_by_day.get(d, 0) for d in day_list]
+    reads_sel = [reads_sel_by_day.get(d, 0) for d in day_list]
+    reads_fu = [reads_fu_by_day.get(d, 0) for d in day_list]
+    reads = [s + f for s, f in zip(reads_sel, reads_fu)]  # total tri (hors degré)
     selected = [selected_by_day.get(d, 0) for d in day_list]
     rejected = [rejected_by_day.get(d, 0) for d in day_list]
+    # Taux RÉEL = sélectionnés / lectures de SÉLECTION (pas le total).
     rates = [
         round(s / r * 100, 1) if r else None
-        for s, r in zip(selected, reads)
+        for s, r in zip(selected, reads_sel)
     ]
 
     total_reads = sum(reads)
+    total_sel_reads = sum(reads_sel)
+    total_fu_reads = sum(reads_fu)
     total_selected = sum(selected)
 
     # Ventilation des lectures du jour par usage (réponse à « où sont les
@@ -212,7 +232,9 @@ def _search_efficiency_data(days: int = 10) -> dict:
     today_row = ProfileReadDay.objects.filter(date=today).first()
     src = (today_row.sources or {}) if today_row else {}
     _SRC_LABELS = {
-        "get_profile": "fiches complètes (enrichissement/tri/follow-up)",
+        "selection": "sélection de candidats (enrichissement/tri)",
+        "follow_up": "relances (leads déjà connectés)",
+        "get_profile": "fiches non catégorisées",
         "get_connection_degree": "contrôles de degré (avant invitation)",
         "autre": "autres",
     }
@@ -223,17 +245,23 @@ def _search_efficiency_data(days: int = 10) -> dict:
     return {
         "labels": json.dumps([d.strftime("%d/%m") for d in day_list]),
         "reads": json.dumps(reads),
+        "reads_selection": json.dumps(reads_sel),
+        "reads_followup": json.dumps(reads_fu),
         "selected": json.dumps(selected),
         "rejected": json.dumps(rejected),
         "rates": json.dumps(rates),
         "totals": {
             "reads": total_reads,
+            "selection_reads": total_sel_reads,
+            "followup_reads": total_fu_reads,
             "selected": total_selected,
             "rejected": sum(rejected),
-            "rate": round(total_selected / total_reads * 100, 1) if total_reads else None,
+            # Taux réel = sélectionnés / lectures de sélection (dénominateur juste)
+            "rate": round(total_selected / total_sel_reads * 100, 1) if total_sel_reads else None,
             "today_rate": rates[-1] if rates else None,
             "since": day_list[0].strftime("%d/%m"),
             "today_reads": reads[-1] if reads else 0,
+            "today_selection_reads": reads_sel[-1] if reads_sel else 0,
             "today_verdicts": (selected[-1] + rejected[-1]) if selected else 0,
         },
         "today_sources": today_sources,
