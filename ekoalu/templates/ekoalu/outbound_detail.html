@@ -73,7 +73,7 @@
             <dt class="text-gray-500 w-28 shrink-0">Source</dt>
             <dd class="text-gray-900">{{ prospect_facts.source }}</dd>
         </div>
-        {% if not is_mail_only %}
+        {% if not is_mail_only and linkedin_url %}
         <div class="flex gap-2">
             <dt class="text-gray-500 w-28 shrink-0">LinkedIn</dt>
             <dd><a href="{{ linkedin_url }}" target="_blank" class="text-blue-600 hover:underline">{{ outbound.prospect_public_id }} ↗</a></dd>
@@ -99,6 +99,20 @@
     <h2 class="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">Brouillon IA (Claude)</h2>
     <div class="bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap font-mono">{{ outbound.ai_draft }}</div>
     <p class="text-xs text-gray-400 mt-2">{{ outbound.ai_draft|length }} caractères</p>
+
+    {% if is_pending %}
+    <!-- Validation rapide (demande Richard 15/06) : approuver le brouillon TEL QUEL
+         sans dérouler la section régénération/édition. Passe direct au suivant. -->
+    <form method="post" class="mt-3 pt-3 border-t border-gray-100">
+        {% csrf_token %}
+        {# pas de final_content : content_to_send retombe sur ai_draft (envoi tel quel) #}
+        <button type="submit" name="action" value="approve"
+                class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">
+            ✓ Valider ce brouillon tel quel → suivant
+        </button>
+        <span class="text-xs text-gray-500 ml-2">si OK, pas besoin de tout dérouler</span>
+    </form>
+    {% endif %}
 </div>
 
 {% if can_regenerate %}

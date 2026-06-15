@@ -154,6 +154,85 @@ class TestOutboundDetailProspect:
         r = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk]))
         assert "data:image/png;base64," in r.content.decode()
 
+    # --- Demandes Richard 15/06 (captures) ---
+
+    def _make_real_linkedin_po(self):
+        from crm.models import Lead
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+        lead = Lead.objects.create(
+            linkedin_url="https://www.linkedin.com/in/jean-dupont-1234/",
+            public_identifier="jean-dupont-1234",
+        )
+        return PendingOutbound.objects.create(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.INVITATION, subject="", ai_draft="Bonjour Jean",
+            status=OutboundStatus.PENDING,
+        )
+
+    def _make_mailjet_hot_po(self):
+        """Lead Mailjet hot : URL synthétique *.local, PAS un vrai LinkedIn (capture #472)."""
+        from crm.models import Lead
+        from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+        lead = Lead.objects.create(
+            linkedin_url="https://mailjet-hot.local/a-peyron-blanchet",
+            public_identifier="mailjet-hot-a-peyron-blanchet",
+            contact_email="a.peyron@blanchet-sa.fr",
+        )
+        return PendingOutbound.objects.create(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.EMAIL_COLD, subject="S", ai_draft="corps",
+            status=OutboundStatus.PENDING,
+        )
+
+    def test_lien_linkedin_affiche_pour_vrai_profil(self, client_logged):
+        po = self._make_real_linkedin_po()
+        content = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk])).content.decode()
+        assert "https://www.linkedin.com/in/jean-dupont-1234/" in content
+
+    def test_pas_de_faux_lien_linkedin_pour_mailjet_hot(self, client_logged):
+        """Capture #472 : un lead Mailjet hot (URL .local) ne doit PAS afficher
+        de lien LinkedIn (slug synthétique)."""
+        po = self._make_mailjet_hot_po()
+        content = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk])).content.decode()
+        assert "mailjet-hot.local" not in content
+        assert "linkedin.com/in/mailjet-hot" not in content
+
+    def test_bouton_validation_rapide_present(self, client_logged):
+        """Capture #58-07 : bouton de validation juste après le brouillon."""
+        po = self._make_email_po()
+        content = client_logged.get(reverse("ekoalu:outbound_detail", args=[po.pk])).content.decode()
+        assert "Valider ce brouillon tel quel" in content
+
+    def test_validation_rapide_sans_final_content_envoie_le_draft(self, client_logged):
+        from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
+
+        po = self._make_email_po()
+        # bouton rapide = approve SANS final_content
+        client_logged.post(reverse("ekoalu:outbound_detail", args=[po.pk]), {"action": "approve"})
+        po.refresh_from_db()
+        assert po.status == OutboundStatus.APPROVED
+        assert po.content_to_send == "corps"  # retombe sur ai_draft
+
+    def test_validation_enchaine_sur_le_suivant(self, client_logged):
+        """Capture #56-54 : après validation, on va direct au prochain message pending."""
+        po1 = self._make_email_po()
+        po2 = self._make_mailjet_hot_po()
+        r = client_logged.post(
+            reverse("ekoalu:outbound_detail", args=[po1.pk]), {"action": "approve"},
+        )
+        assert r.status_code == 302
+        assert r.url == reverse("ekoalu:outbound_detail", args=[po2.pk])
+
+    def test_validation_du_dernier_revient_a_la_liste(self, client_logged):
+        po = self._make_email_po()
+        r = client_logged.post(
+            reverse("ekoalu:outbound_detail", args=[po.pk]), {"action": "approve"},
+        )
+        assert r.status_code == 302
+        assert r.url == reverse("ekoalu:outbound_list")
+
     def test_fiche_prospect_lead_detail_enrichie_et_lien_retour_message(self, client_logged):
         """La fiche prospect porte les mêmes infos en partie haute + le lien
         vers le message en attente de validation (captures Richard 12/06)."""

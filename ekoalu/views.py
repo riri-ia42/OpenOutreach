@@ -63,11 +63,25 @@ def _build_prospect_card(slug: str, deal=None, company_hint: str = "") -> dict:
             else ("Saisie manuelle" if email_data and email_data.source == "manual" else "LinkedIn")
         ),
     }
+    # Vrai lien LinkedIn vs slug synthétique (bdd-prospect- = BDD PROSPECT,
+    # mailjet-hot- = leads Mailjet, URL en *.local). On n'affiche le lien que
+    # s'il pointe vers un vrai profil linkedin.com/in/ (demande Richard 15/06,
+    # capture #472 montrait un faux lien LinkedIn sur un lead mail-only Mailjet).
+    synthetic = slug.startswith("bdd-prospect-") or slug.startswith("mailjet-hot-")
+    real_url = (getattr(lead, "linkedin_url", "") or "") if lead else ""
+    has_real_linkedin = "linkedin.com/in/" in real_url
+    if has_real_linkedin:
+        linkedin_url = real_url
+    elif not synthetic:
+        linkedin_url = f"https://www.linkedin.com/in/{slug}/"
+    else:
+        linkedin_url = ""
     return {
         "display": display,
         "facts": facts,
         "lead": lead,
-        "is_mail_only": slug.startswith("bdd-prospect-"),
+        "is_mail_only": synthetic and not has_real_linkedin,
+        "linkedin_url": linkedin_url,
     }
 
 
@@ -638,7 +652,7 @@ def lead_detail(request, slug: str):
 
     return render(request, "ekoalu/lead_detail.html", {
         "lead": lead,
-        "linkedin_url": f"https://www.linkedin.com/in/{slug}/",
+        "linkedin_url": card["linkedin_url"],
         "deals": deals,
         "chat_messages": chat_messages,
         "pending_outbound": pending_outbound,
@@ -1609,6 +1623,29 @@ def _regenerate_outbound_draft(outbound: PendingOutbound, instruction: str) -> t
     return True, ""
 
 
+def _next_pending_outbound_pk(exclude_pk: int):
+    """PK du prochain message EN ATTENTE de validation (triage en rafale,
+    demande Richard 15/06 : enchaîner sur la fiche suivante après validation).
+    None s'il n'en reste plus. Ordre = plus ancien d'abord (FIFO de la file)."""
+    return (
+        PendingOutbound.objects
+        .filter(status=OutboundStatus.PENDING)
+        .exclude(pk=exclude_pk)
+        .order_by("created_at", "pk")
+        .values_list("pk", flat=True)
+        .first()
+    )
+
+
+def _redirect_next_or_list(request, exclude_pk: int):
+    """Après une action terminale, va au prochain message à valider ; sinon liste."""
+    nxt = _next_pending_outbound_pk(exclude_pk)
+    if nxt:
+        return redirect("ekoalu:outbound_detail", pk=nxt)
+    django_messages.info(request, "Plus aucun message en attente de validation. 🎉")
+    return redirect("ekoalu:outbound_list")
+
+
 @staff_member_required
 def outbound_detail(request, pk: int):
     """Détail d'un message sortant + édition + actions."""
@@ -1634,7 +1671,7 @@ def outbound_detail(request, pk: int):
                 )
 
             django_messages.success(request, "Message approuvé. Il sera envoyé au prochain cycle.")
-            return redirect("ekoalu:outbound_list")
+            return _redirect_next_or_list(request, outbound.pk)
 
         elif action == "reject":
             rejection_reason = request.POST.get("rejection_reason", "")
@@ -1649,7 +1686,7 @@ def outbound_detail(request, pk: int):
             if n_leads:
                 msg += " Prospect retiré du pipeline (Lead disqualifié)."
             django_messages.warning(request, msg)
-            return redirect("ekoalu:outbound_list")
+            return _redirect_next_or_list(request, outbound.pk)
 
         elif action == "save_draft":
             outbound.final_content = final_content
@@ -1662,7 +1699,7 @@ def outbound_detail(request, pk: int):
             outbound.sent_at = timezone.now()
             outbound.save()
             django_messages.success(request, "Marqué comme envoyé manuellement.")
-            return redirect("ekoalu:outbound_list")
+            return _redirect_next_or_list(request, outbound.pk)
 
         elif action == "regenerate":
             instruction = request.POST.get("regen_instruction", "").strip()
@@ -1741,7 +1778,7 @@ def outbound_detail(request, pk: int):
 
     context = {
         "outbound": outbound,
-        "linkedin_url": f"https://www.linkedin.com/in/{outbound.prospect_public_id}/",
+        "linkedin_url": card["linkedin_url"],
         "is_mail_only": is_mail_only,
         "is_pending": outbound.status == OutboundStatus.PENDING,
         "is_approved": outbound.status == OutboundStatus.APPROVED,
