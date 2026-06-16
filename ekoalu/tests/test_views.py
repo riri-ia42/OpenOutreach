@@ -38,6 +38,51 @@ class TestDashboardView:
 
 
 @pytest.mark.django_db
+class TestProspectCardSnapshot:
+    """Poste + région remontés depuis profile_snapshot sur la page de
+    validation, même sans profile_summary mem0 (invitation en attente —
+    demande Richard 16/06)."""
+
+    def _make_lead(self, **snap):
+        from crm.models import Lead
+        return Lead.objects.create(
+            public_identifier="aydin-akin-a739b8b7",
+            linkedin_url="https://www.linkedin.com/in/aydin-akin-a739b8b7/",
+            profile_snapshot=snap or None,
+        )
+
+    def test_headline_et_localisation_depuis_snapshot(self):
+        from ekoalu.views import _build_prospect_card
+        self._make_lead(
+            headline="Directeur d'agence chez ENTREPRISE BONGLET SAS",
+            location_name="Greater Besancon Area",
+            positions=[{"title": "Directeur d'agence", "company_name": "ENTREPRISE BONGLET SAS"}],
+        )
+        card = _build_prospect_card("aydin-akin-a739b8b7")
+        assert card["display"]["job_title"] == "Directeur d'agence chez ENTREPRISE BONGLET SAS"
+        assert card["display"]["location"] == "Greater Besancon Area"
+
+    def test_fallback_positions_si_pas_de_headline(self):
+        from ekoalu.views import _build_prospect_card
+        self._make_lead(
+            headline="",
+            location_name="Lyon",
+            positions=[{"title": "Gérant", "company_name": "ACME"}],
+        )
+        card = _build_prospect_card("aydin-akin-a739b8b7")
+        assert card["display"]["job_title"] == "Gérant"
+        assert card["display"]["company"] == "ACME"
+        assert card["display"]["location"] == "Lyon"
+
+    def test_sans_snapshot_pas_de_crash(self):
+        from ekoalu.views import _build_prospect_card
+        self._make_lead()  # profile_snapshot=None
+        card = _build_prospect_card("aydin-akin-a739b8b7")
+        assert card["display"]["job_title"] == ""
+        assert card["display"]["location"] == ""
+
+
+@pytest.mark.django_db
 class TestEfficaciteTri:
     """Taux réel basé sur les seules lectures de SÉLECTION (demande Richard 15/06)."""
 

@@ -47,6 +47,33 @@ def _build_prospect_card(slug: str, deal=None, company_hint: str = "") -> dict:
         if not display.get("job_title"):
             display["job_title"] = "Dirigeant" if email_data.dirigeant else ""
 
+    # Enrichissement depuis le profile_snapshot LinkedIn (crm 0015). Pour une
+    # invitation EN ATTENTE de validation, le profile_summary mem0 n'est pas
+    # encore matérialisé (il l'est au 1er follow-up) → job_title/location
+    # restent vides. Le snapshot, lui, est posé dès la lecture de
+    # qualification : on y lit le titre (headline = sous-titre affiché sur la
+    # page LinkedIn) et la ville, pour que Richard sache qui est le prospect
+    # sans ouvrir LinkedIn (demande 16/06).
+    snapshot = getattr(lead, "profile_snapshot", None) if lead else None
+    if isinstance(snapshot, dict):
+        if not display.get("job_title"):
+            headline = (snapshot.get("headline") or "").strip()
+            if headline:
+                display["job_title"] = headline
+            else:
+                positions = snapshot.get("positions") or []
+                p0 = positions[0] if positions and isinstance(positions[0], dict) else {}
+                title = (p0.get("title") or "").strip()
+                if title and title != "Unknown Title":
+                    display["job_title"] = title
+                comp = (p0.get("company_name") or "").strip()
+                if comp and comp != "Unknown Company" and not display.get("company"):
+                    display["company"] = comp
+        if not display.get("location"):
+            loc = (snapshot.get("location_name") or "").strip()
+            if loc:
+                display["location"] = loc
+
     facts = {
         "email": getattr(lead, "contact_email", "") or "",
         "email_bounced": bool(lead and lead.email_bounced_at),
