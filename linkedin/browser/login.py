@@ -42,6 +42,19 @@ COMPLY_LOCATORS = [
 
 COMPLY_PROBE_TIMEOUT_MS = 5000
 
+# Bandeau de consentement cookies ("LinkedIn respects your privacy" — Accept /
+# Reject). Il REVIENT a chaque session tant qu'aucun choix n'est persiste dans
+# le profil : rien ne cliquait dessus, donc le cookie de consentement n'etait
+# jamais pose (remarque Richard 16/06). Un seul clic "Accept" persiste le choix
+# dans le profil disque → le bandeau ne reapparait plus aux sessions suivantes.
+COOKIE_CONSENT_LOCATORS = [
+    lambda p: p.locator('button[action-type="ACCEPT"]'),
+    lambda p: p.get_by_role("button", name="Accept", exact=True),
+    lambda p: p.locator("button.artdeco-global-alert-action", has_text="Accept"),
+]
+
+COOKIE_PROBE_TIMEOUT_MS = 3000
+
 
 def dismiss_comply_gate(page, timeout_ms: int = COMPLY_PROBE_TIMEOUT_MS) -> bool:
     """Click LinkedIn's 'Agree to comply' interstitial if present. Return True if clicked."""
@@ -54,6 +67,26 @@ def dismiss_comply_gate(page, timeout_ms: int = COMPLY_PROBE_TIMEOUT_MS) -> bool
         except PlaywrightTimeoutError:
             continue
         logger.info(colored("Dismissing 'Agree to comply' interstitial", "yellow"))
+        locator.click()
+        return True
+    return False
+
+
+def dismiss_cookie_consent(page, timeout_ms: int = COOKIE_PROBE_TIMEOUT_MS) -> bool:
+    """Click the cookie consent 'Accept' banner if present. Return True if clicked.
+
+    Cliquer une fois suffit : le choix est persiste dans le profil persistant,
+    donc le bandeau ne revient plus. Cote anti-detection c'est neutre (un humain
+    fait exactement ce geste a sa premiere visite)."""
+    from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    for factory in COOKIE_CONSENT_LOCATORS:
+        locator = factory(page).first
+        try:
+            locator.wait_for(state="visible", timeout=timeout_ms)
+        except PlaywrightTimeoutError:
+            continue
+        logger.info(colored("Dismissing cookie consent banner (Accept)", "yellow"))
         locator.click()
         return True
     return False
@@ -113,6 +146,7 @@ def is_authenticated(page) -> bool:
     try:
         page.goto(LINKEDIN_FEED_URL)
         dismiss_comply_gate(page)
+        dismiss_cookie_consent(page)
         page.wait_for_load_state("domcontentloaded")
     except Exception:
         logger.exception("Echec de navigation vers /feed")
