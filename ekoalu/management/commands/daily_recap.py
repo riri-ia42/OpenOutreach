@@ -79,6 +79,8 @@ class DailyStats:
     profile_reads_cap: int
     # Audit de coherence CRM (check_crm_integrity)
     integrity_issues: int
+    # Analyse d'efficacite + preco (recap du soir uniquement, sinon None)
+    efficiency: dict | None = None
 
 
 def read_system_status() -> SystemStatus:
@@ -133,6 +135,97 @@ def read_system_status() -> SystemStatus:
         api_limit_regain_text=regain_text,
         blocking=blocking,
     )
+
+
+def build_efficiency_analysis(day: date) -> dict:
+    """Analyse d'efficacité du tri pour `day` + préconisation de correction auto.
+
+    Demande Richard 16/06 : chaque recap du soir doit (1) mesurer l'efficacité
+    réelle (toutes interactions LinkedIn décomposées + 2 taux) et (2) en déduire
+    UNE préco de correction priorisée, persistée pour le prochain démarrage.
+
+    Règles 100% déterministes (pas d'appel LLM) : on déclenche les alertes par
+    seuil, la 1re de la liste = la préco principale.
+    """
+    from crm.models import Deal
+    from ekoalu.dedup.consolidator import SHADOW_OUTCOMES
+    from ekoalu.read_guard.guard import daily_reads_cap
+    from ekoalu.read_guard.models import ProfileReadDay
+
+    tz = dj_tz.get_current_timezone()
+    day_start = dj_tz.make_aware(datetime.combine(day, datetime.min.time()), tz)
+    day_end = day_start + timedelta(days=1)
+
+    row = ProfileReadDay.objects.filter(date=day).first()
+    src = (row.sources or {}) if row else {}
+    total = row.count if row else 0
+    degree = src.get("get_connection_degree", 0)
+    visit = src.get("visit_profile", 0)
+    if ("selection" in src) or ("follow_up" in src):
+        sel = src.get("selection", 0) + src.get("get_profile", 0)
+        fu = src.get("follow_up", 0)
+    else:  # jour hérité, pas de ventilation par usage
+        sel = max(total - degree - visit, 0)
+        fu = 0
+
+    deals = Deal.objects.filter(creation_date__gte=day_start, creation_date__lt=day_end)
+    selected = deals.exclude(state="Failed").exclude(outcome__in=SHADOW_OUTCOMES).count()
+    rejected = deals.filter(state="Failed", outcome="wrong_fit").count()
+
+    cap = daily_reads_cap()
+    efficacite = round(100.0 * selected / sel, 1) if sel else None
+    part_recherche = round(100.0 * sel / total, 1) if total else None
+
+    overdue = Task.objects.filter(
+        status="pending", scheduled_at__lt=day_start,
+    ).count()
+    invit_sent = PendingOutbound.objects.filter(
+        kind="invitation", status=OutboundStatus.SENT,
+        sent_at__gte=day_start, sent_at__lt=day_end,
+    ).count()
+    invit_pending = PendingOutbound.objects.filter(
+        kind="invitation", status=OutboundStatus.PENDING,
+    ).count()
+
+    # --- Préconisations (ordre = priorité, la 1re est "la" préco) ---
+    precos: list[str] = []
+    if total and total >= 0.9 * cap:
+        precos.append(
+            f"Cap interactions presque atteint ({total}/{cap}). Risque anti-ban : "
+            f"lever le cap doucement OU réduire le sourcing du jour.")
+    if sel == 0 and total > 0:
+        precos.append(
+            "Aucune lecture de SÉLECTION aujourd'hui (que relances/visites/degrés). "
+            "Sourcing à l'arrêt ? Vérifier la rotation Serper + les campagnes actives.")
+    if efficacite is not None and efficacite < 15 and sel >= 10:
+        precos.append(
+            f"Efficacité tri faible ({efficacite}% vs cible 20-30%). Resserrer le "
+            f"pré-filtre Serper / revoir l'ICP de la campagne la plus rejetée "
+            f"({rejected} rejets hors cible aujourd'hui).")
+    if part_recherche is not None and part_recherche < 40 and total >= 20:
+        precos.append(
+            f"Seulement {part_recherche}% des interactions servent à chercher des "
+            f"candidats (le reste = relances/visites/degrés). Prioriser la sélection "
+            f"ou réduire les relances.")
+    if overdue > 50:
+        precos.append(
+            f"Backlog de relances en retard ({overdue} tâches). Réserver un quota de "
+            f"lectures aux follow-up pour le résorber.")
+    if invit_pending > 0 and invit_sent == 0:
+        precos.append(
+            f"{invit_pending} invitation(s) validée(s) non partie(s) aujourd'hui. "
+            f"Vérifier le drain de la file / la session LinkedIn.")
+    if not precos:
+        precos.append("RAS — régime sain, rien à corriger aujourd'hui.")
+
+    return {
+        "total": total, "selection": sel, "follow_up": fu,
+        "degree": degree, "visit": visit, "cap": cap,
+        "selected": selected, "rejected": rejected,
+        "efficacite": efficacite, "part_recherche": part_recherche,
+        "overdue": overdue, "invit_sent": invit_sent, "invit_pending": invit_pending,
+        "precos": precos, "preco_top": precos[0],
+    }
 
 
 def compute_stats(day: date, period: str = "day") -> DailyStats:
@@ -284,6 +377,7 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         profile_reads_today=reads_today(),
         profile_reads_cap=daily_reads_cap(),
         integrity_issues=integrity_issues,
+        efficiency=build_efficiency_analysis(day) if period == "day" else None,
     )
 
 
@@ -373,6 +467,39 @@ def _render_ab_rows(by_variant: dict[str, int],
     return "\n".join(rows)
 
 
+def _render_efficiency_html(eff: dict) -> str:
+    """Section 'Efficacité du tri + préconisation' du recap du soir."""
+    if not eff:
+        return ""
+    effi = f"{eff['efficacite']}%" if eff["efficacite"] is not None else "n/a"
+    part = f"{eff['part_recherche']}%" if eff["part_recherche"] is not None else "n/a"
+    preco_items = "".join(
+        f"<li style='margin-bottom:4px'>{p}</li>" for p in eff["precos"]
+    )
+    top = eff["preco_top"]
+    return f"""
+<h2 style="color:#1f2937;">Efficacité du tri</h2>
+<table style="width:100%;border-collapse:collapse;margin:12px 0;">
+  <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;">Interactions LinkedIn (total)</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:bold;">{eff['total']} / {eff['cap']}</td></tr>
+  <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;">&nbsp;&nbsp;sélection / follow-up / degré / visites</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">{eff['selection']} / {eff['follow_up']} / {eff['degree']} / {eff['visit']}</td></tr>
+  <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;">Sélectionnés / rejetés</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;"><span style="color:#16a34a">{eff['selected']}</span> / <span style="color:#dc2626">{eff['rejected']}</span></td></tr>
+  <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;"><strong>Efficacité tri</strong> (sélectionnés / lectures sélection)</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:bold;color:#2563eb;">{effi}</td></tr>
+  <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;"><strong>Part recherche</strong> (lectures sélection / total)</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:bold;color:#d97706;">{part}</td></tr>
+  <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;">Relances en retard (backlog)</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;color:{'#16a34a' if eff['overdue'] <= 50 else '#dc2626'};">{eff['overdue']}</td></tr>
+</table>
+<div style="background:#eff6ff;border-left:4px solid #2563eb;padding:12px 16px;border-radius:8px;margin:12px 0;">
+  <strong>Préconisation de correction :</strong> {top}
+  {f'<ul style="margin:8px 0 0 0;padding-left:20px;color:#374151;font-size:13px;">{preco_items}</ul>' if len(eff['precos']) > 1 else ''}
+</div>
+"""
+
+
 def render_html(s: DailyStats) -> str:
     day_str = s.day.strftime("%A %d %B %Y").replace("January", "janvier").replace(
         "February", "fevrier").replace("March", "mars").replace("April", "avril").replace(
@@ -435,6 +562,8 @@ def render_html(s: DailyStats) -> str:
   <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Coherence CRM (anomalies)</td>
       <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; color: {'#16a34a' if s.integrity_issues == 0 else '#dc2626'};">{s.integrity_issues if s.integrity_issues >= 0 else 'audit KO'}</td></tr>
 </table>
+
+{_render_efficiency_html(s.efficiency)}
 
 <h2 style="color: #1f2937;">Canal email</h2>
 <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
@@ -521,6 +650,21 @@ def render_text(s: DailyStats) -> str:
         f"Tasks completed/failed: {s.tasks_completed} / {s.tasks_failed}",
         f"Lectures profil LK   : {s.profile_reads_today} / {s.profile_reads_cap} (cap anti-ban)",
         f"Coherence CRM        : {s.integrity_issues if s.integrity_issues >= 0 else 'audit KO'} anomalie(s)",
+    ]
+    if s.efficiency:
+        e = s.efficiency
+        effi = f"{e['efficacite']}%" if e["efficacite"] is not None else "n/a"
+        part = f"{e['part_recherche']}%" if e["part_recherche"] is not None else "n/a"
+        lines += [
+            "",
+            "-- Efficacite du tri --",
+            f"Interactions LK     : {e['total']}/{e['cap']} (sel {e['selection']} / fu {e['follow_up']} / degre {e['degree']} / visites {e['visit']})",
+            f"Selectionnes/rejetes: {e['selected']} / {e['rejected']}",
+            f"Efficacite tri      : {effi}   Part recherche : {part}",
+            f"Backlog relances    : {e['overdue']}",
+            f">> PRECO : {e['preco_top']}",
+        ]
+    lines += [
         "",
         "Dashboard : http://ekoalu-prospection:3210/ekoalu/",
     ]
@@ -549,6 +693,37 @@ class Command(BaseCommand):
             help="Dump le HTML mais n'envoie pas le mail (debug)",
         )
 
+    def _persist_preco(self, day: date, eff: dict) -> None:
+        """Ecrit la preco du soir dans data/preco_correction.md (ecrasee chaque
+        soir = derniere preco). Lue par Claude au prochain demarrage de session.
+        Append aussi une ligne d'historique dans data/preco_history.md."""
+        data_dir = Path(settings.ROOT_DIR) / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        effi = f"{eff['efficacite']}%" if eff["efficacite"] is not None else "n/a"
+        part = f"{eff['part_recherche']}%" if eff["part_recherche"] is not None else "n/a"
+        precos_md = "\n".join(f"{i+1}. {p}" for i, p in enumerate(eff["precos"]))
+        body = (
+            f"# Préco de correction — soir du {day:%Y-%m-%d}\n\n"
+            f"_Généré automatiquement par le recap du soir (daily_recap). "
+            f"À relire et proposer à Richard au prochain démarrage._\n\n"
+            f"## Préco principale\n{eff['preco_top']}\n\n"
+            f"## Toutes les pistes\n{precos_md}\n\n"
+            f"## Mesures du jour\n"
+            f"- Interactions LinkedIn : {eff['total']}/{eff['cap']} "
+            f"(sélection {eff['selection']} / follow-up {eff['follow_up']} / "
+            f"degré {eff['degree']} / visites {eff['visit']})\n"
+            f"- Sélectionnés / rejetés : {eff['selected']} / {eff['rejected']}\n"
+            f"- Efficacité tri : {effi} · Part recherche : {part}\n"
+            f"- Backlog relances en retard : {eff['overdue']}\n"
+            f"- Invitations envoyées / en attente : {eff['invit_sent']} / {eff['invit_pending']}\n"
+        )
+        (data_dir / "preco_correction.md").write_text(body, encoding="utf-8")
+        hist = data_dir / "preco_history.md"
+        line = f"- {day:%Y-%m-%d} · efficacité {effi} · part recherche {part} · {eff['preco_top']}\n"
+        with hist.open("a", encoding="utf-8") as f:
+            f.write(line)
+        self.stdout.write(f"Préco du soir persistée: {data_dir / 'preco_correction.md'}")
+
     def handle(self, *args, **opts):
         if opts["date"]:
             day = datetime.strptime(opts["date"], "%Y-%m-%d").date()
@@ -568,6 +743,11 @@ class Command(BaseCommand):
         recap_path.write_text(html, encoding="utf-8")
         self.stdout.write(f"Recap HTML dump: {recap_path}")
         logger.info("Recap %s (%s) ecrit dans %s", day, period, recap_path)
+
+        # Persiste la preco du soir pour le prochain demarrage (demande Richard
+        # 16/06 : Claude la relit et la propose a l'ouverture de la session).
+        if period == "day" and stats.efficiency:
+            self._persist_preco(day, stats.efficiency)
 
         if opts["no_send"]:
             self.stdout.write(self.style.WARNING("--no-send : pas d'envoi"))
