@@ -282,6 +282,45 @@ class TestGenerateColdEmailsCommand:
         call_command("generate_cold_emails", limit=10, stdout=StringIO())
         assert PendingOutbound.objects.count() == 0
 
+    def test_exclu_si_disqualifie(self, make_lead, monkeypatch, fake_draft):
+        """Un Lead disqualifié (refus Richard = exclusion permanente) ne doit
+        jamais regénérer de cold mail — sinon le même prospect revient chaque
+        jour en attente de validation (bug signalé par Richard le 16/06)."""
+        from ekoalu.outbound_validation.models import PendingOutbound
+        lead = make_lead()
+        lead.disqualified = True
+        lead.save(update_fields=["disqualified"])
+        monkeypatch.setattr(
+            "ekoalu.management.commands.generate_cold_emails.generate_cold_email",
+            lambda **kw: fake_draft,
+        )
+        call_command("generate_cold_emails", limit=10, stdout=StringIO())
+        assert PendingOutbound.objects.count() == 0
+
+    def test_exclu_si_cold_mail_deja_refuse(self, make_lead, monkeypatch, fake_draft):
+        """Un cold mail REJECTED bloque toute nouvelle génération (refus définitif)."""
+        from ekoalu.outbound_validation.models import (
+            OutboundKind,
+            OutboundStatus,
+            PendingOutbound,
+        )
+        lead = make_lead()
+        PendingOutbound.objects.create(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.EMAIL_COLD,
+            subject="déjà refusé",
+            ai_draft="corps refusé",
+            status=OutboundStatus.REJECTED,
+        )
+        monkeypatch.setattr(
+            "ekoalu.management.commands.generate_cold_emails.generate_cold_email",
+            lambda **kw: fake_draft,
+        )
+        call_command("generate_cold_emails", limit=10, stdout=StringIO())
+        # Toujours 1 seul PO (le rejeté), aucune régénération.
+        assert PendingOutbound.objects.filter(kind=OutboundKind.EMAIL_COLD).count() == 1
+        assert PendingOutbound.objects.filter(status=OutboundStatus.PENDING).count() == 0
+
     def test_exclu_si_pas_de_niche_dans_draft(self, make_lead, monkeypatch):
         """Si Claude oublie de mentionner une niche → on rejette le draft."""
         from ekoalu.outbound_validation.models import PendingOutbound

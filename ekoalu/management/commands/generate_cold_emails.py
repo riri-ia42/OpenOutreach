@@ -4,8 +4,10 @@ Pour chaque Lead éligible :
 - a un `contact_email`
 - a un `EmailLeadData` (source bdd_prospect ou autre, peu importe)
 - pas d'`unsubscribed_at`
-- n'a PAS déjà un PendingOutbound(kind=email_cold) en statut ouvert
-  (pending/approved/sent/blocked_company) — idempotence stricte
+- n'est PAS `disqualified` (refus Richard = exclusion permanente — sinon on
+  régénère un cold mail chaque jour pour un prospect déjà refusé)
+- n'a PAS déjà un PendingOutbound(kind=email_cold) en statut ouvert OU refusé
+  (pending/approved/sent/blocked_company/rejected) — idempotence stricte
 
 Génère un cold mail via Claude (Sonnet 4.6 par défaut) et le persiste en
 `PendingOutbound(kind=email_cold, subject=..., ai_draft=body, status=pending)`
@@ -29,12 +31,15 @@ from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, Pend
 
 logger = logging.getLogger(__name__)
 
-# Statuts qui bloquent une nouvelle génération (cold mail "en cours" ou déjà envoyé)
+# Statuts qui bloquent une nouvelle génération : cold mail "en cours", déjà
+# envoyé, OU refusé. Un refus est définitif (cf. lead_exclusion) : on ne
+# regénère jamais un cold mail pour un prospect déjà refusé.
 _BLOCKING_STATUSES = (
     OutboundStatus.PENDING,
     OutboundStatus.APPROVED,
     OutboundStatus.SENT,
     OutboundStatus.BLOCKED_COMPANY,
+    OutboundStatus.REJECTED,
 )
 
 
@@ -75,6 +80,7 @@ class Command(BaseCommand):
                 contact_email__isnull=False,
                 unsubscribed_at__isnull=True,
                 email_bounced_at__isnull=True,
+                disqualified=False,
             )
             .exclude(contact_email="")
             .filter(email_data__isnull=False)
