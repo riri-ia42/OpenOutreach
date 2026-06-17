@@ -33,11 +33,19 @@ except ImportError:
 
 BASE_DIR = ROOT_DIR
 
-SECRET_KEY = "openoutreach-local-dev-key-change-in-production"
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY", "openoutreach-local-dev-key-change-in-production"
+)
 
-DEBUG = True
+# Defauts non-bloquants pour ne pas casser le dashboard live : tant que les vars
+# d'env ne sont pas posees dans .env.production, on garde le comportement actuel.
+# Durcissement complet (DEBUG=false + ALLOWED_HOSTS restreints) = revue 17/06
+# P1-7, a faire avec verification du service statique (Lot 2).
+DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("1", "true", "yes", "on")
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if h.strip()
+]
 
 INSTALLED_APPS = [
     "django.contrib.sites",
