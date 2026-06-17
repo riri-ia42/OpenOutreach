@@ -36,6 +36,30 @@ def _resolve_profile_dict(po: PendingOutbound) -> dict:
     }
 
 
+def _lead_exclusion_reason(po: PendingOutbound) -> str:
+    """Motif d'exclusion du Lead au MOMENT de l'envoi, ou '' s'il est contactable.
+
+    Un opt-out email (unsubscribed_at, RGPD art. 21), un hard bounce
+    (email_bounced_at) ou un refus Richard (disqualified) peuvent survenir APRES
+    l'approbation d'une invitation/follow-up LinkedIn, sans toujours repasser par
+    la cascade qui rejette le PendingOutbound. Sans ce garde-fou, le daemon
+    enverrait quand meme (le canal email re-checke deja, pas le canal LinkedIn).
+    Cf. revue 17/06 P1-2.
+    """
+    from crm.models import Lead
+
+    lead = Lead.objects.filter(public_identifier=po.prospect_public_id).first()
+    if lead is None:
+        return ""
+    if lead.disqualified:
+        return "disqualified"
+    if lead.unsubscribed_at is not None:
+        return "unsubscribed"
+    if lead.email_bounced_at is not None:
+        return "bounced"
+    return ""
+
+
 def _send_invitation(session, po: PendingOutbound) -> tuple[bool, str]:
     """Envoie une invitation. Retourne (success, error_msg)."""
     original = get_original_send_connection_request()
@@ -119,6 +143,19 @@ def send_one(session, po: PendingOutbound) -> bool:
         logger.warning("Skip PendingOutbound %s : status=%s (must be approved)", po.pk, po.status)
         return False
 
+    # Garde-fou exclusion AU MOMENT de l'envoi (P1-2) : un opt-out / bounce /
+    # refus Richard survenu apres l'approbation ne doit jamais partir.
+    exclusion = _lead_exclusion_reason(po)
+    if exclusion:
+        po.status = OutboundStatus.REJECTED
+        po.rejection_reason = f"Lead exclu au moment de l'envoi ({exclusion})"
+        po.save(update_fields=["status", "rejection_reason"])
+        logger.info(
+            "Reject PendingOutbound #%s : lead %s exclu (%s)",
+            po.pk, po.prospect_public_id, exclusion,
+        )
+        return False
+
     logger.info(
         "Envoi PendingOutbound #%s : kind=%s prospect=%s",
         po.pk, po.kind, po.prospect_public_id,
@@ -177,6 +214,35 @@ def process_approved_queue(
     from django.utils import timezone
 
     now = timezone.localtime()
+
+    # Espacement minimum PERSISTANT entre 2 envois LinkedIn (P1-4). Le daemon
+    # draine 1 msg/tour (max_messages=1) → la temporisation inter-envoi de la
+    # boucle (i < len-1) ne s'execute jamais : les envois partaient au rythme de
+    # la boucle daemon = rafale (signature bot, constat Richard 04/06). On exige
+    # >= MIN_DELAY_SECONDS depuis le dernier envoi LinkedIn reel (sent_at).
+    last_sent_at = (
+        PendingOutbound.objects.filter(
+            kind__in=LINKEDIN_KINDS,
+            status=OutboundStatus.SENT,
+            sent_at__isnull=False,
+        )
+        .order_by("-sent_at")
+        .values_list("sent_at", flat=True)
+        .first()
+    )
+    if last_sent_at is not None:
+        elapsed = (now - last_sent_at).total_seconds()
+        if elapsed < conf.MIN_DELAY_SECONDS:
+            logger.info(
+                "Espacement envois LinkedIn : %.0fs depuis le dernier "
+                "(< %ds) — on patiente",
+                elapsed, conf.MIN_DELAY_SECONDS,
+            )
+            stats["skipped"] = PendingOutbound.objects.filter(
+                status=OutboundStatus.APPROVED, kind__in=LINKEDIN_KINDS,
+            ).count()
+            return stats
+
     invites_24h = PendingOutbound.objects.filter(
         kind=OutboundKind.INVITATION,
         status=OutboundStatus.SENT,

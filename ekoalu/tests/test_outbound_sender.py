@@ -33,6 +33,41 @@ class TestSendOne:
         po.refresh_from_db()
         assert po.status == OutboundStatus.PENDING  # inchangé
 
+    @pytest.mark.parametrize("field,value,motif", [
+        ("disqualified", True, "disqualified"),
+        ("unsubscribed_at", "now", "unsubscribed"),
+        ("email_bounced_at", "now", "bounced"),
+    ])
+    def test_reject_si_lead_exclu(self, field, value, motif):
+        """P1-2 : un lead exclu (refus Richard / opt-out / bounce) survenu apres
+        l'approbation ne doit PAS recevoir l'envoi — il est rejete au lieu de partir."""
+        from django.utils import timezone
+
+        from crm.models import Lead
+
+        if value == "now":
+            value = timezone.now()
+        lead = Lead.objects.create(
+            linkedin_url=f"https://www.linkedin.com/in/excl-{field}/",
+            public_identifier=f"excl-{field}",
+            **{field: value},
+        )
+        po = PendingOutbound.objects.create(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.INVITATION,
+            ai_draft="x",
+            status=OutboundStatus.APPROVED,
+            approved_at=timezone.now(),
+        )
+        session = MagicMock()
+
+        result = send_one(session, po)
+
+        assert result is False
+        po.refresh_from_db()
+        assert po.status == OutboundStatus.REJECTED
+        assert motif in po.rejection_reason
+
     def test_send_invitation_succes(self):
         """Si la fonction originale renvoie PENDING, on marque SENT."""
         from django.utils import timezone
