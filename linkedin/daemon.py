@@ -256,16 +256,31 @@ def _build_qualifiers(campaigns, cfg, kit_model=None):
 
 
 def seconds_until_active() -> float:
-    """Return seconds to wait before the next active window, or 0 if active now."""
+    """Return seconds to wait before the next active window, or 0 if active now.
+
+    Source de verite = scheduler EKOALU (ACTIVE_WINDOWS 7h30-12h + 14h-20h +
+    PAUSE DEJEUNER + jours actifs). Avant (revue 17/06 P1-5), le daemon gardait
+    les constantes OpenOutreach (7-20h, sans pause midi) : les LECTURES de profil
+    — declencheur du checkpoint du 06/06 — tournaient pendant le dejeuner et
+    jusqu'a 20h, hors de la fenetre humaine documentee. On aligne desormais le
+    gating du daemon sur la meme fenetre que les envois (sender.py)."""
     if not ENABLE_ACTIVE_HOURS:
         return 0.0
+
+    from django.apps import apps
+
+    if apps.is_installed("ekoalu"):
+        from ekoalu.human_scheduler import is_action_allowed_now, next_active_slot
+
+        if is_action_allowed_now():
+            return 0.0
+        return max((next_active_slot() - timezone.localtime()).total_seconds(), 0.0)
+
+    # Fallback OpenOutreach pur (extensions ekoalu absentes).
     tz = ZoneInfo(ACTIVE_TIMEZONE)
     now = timezone.localtime(timezone=tz)
-
     if now.weekday() not in REST_DAYS and ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR:
         return 0.0
-
-    # Find the next active start: try today first, then subsequent days
     candidate = timezone.make_aware(
         now.replace(hour=ACTIVE_START_HOUR, minute=0, second=0, microsecond=0, tzinfo=None),
         timezone=tz,

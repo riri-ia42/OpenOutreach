@@ -19,6 +19,19 @@ def _default_schedule(settings):
 
 
 class TestSecondsUntilActive:
+    @pytest.fixture(autouse=True)
+    def _force_openoutreach_fallback(self):
+        """Ces tests valident le windowing FALLBACK OpenOutreach (heures/jours/tz).
+
+        Depuis la revue 17/06 (P1-5), `seconds_until_active` delegue au scheduler
+        EKOALU quand l'app ekoalu est installee (fenetre + pause dejeuner). Ce
+        comportement-la est teste dans linkedin/tests/test_daemon_window.py. Ici
+        on force le chemin fallback pour continuer a couvrir la logique brute."""
+        with patch(
+            "django.apps.apps.is_installed", side_effect=lambda name: name != "ekoalu",
+        ):
+            yield
+
     @patch("linkedin.daemon.ENABLE_ACTIVE_HOURS", True)
     @patch("linkedin.daemon.ACTIVE_START_HOUR", 9)
     @patch("linkedin.daemon.ACTIVE_END_HOUR", 17)
