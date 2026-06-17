@@ -6,8 +6,9 @@ Pour chaque Lead éligible :
 - pas d'`unsubscribed_at`
 - n'est PAS `disqualified` (refus Richard = exclusion permanente — sinon on
   régénère un cold mail chaque jour pour un prospect déjà refusé)
-- n'a PAS déjà un PendingOutbound(kind=email_cold) en statut ouvert OU refusé
-  (pending/approved/sent/blocked_company/rejected) — idempotence stricte
+- n'a PAS déjà un PendingOutbound(kind=email_cold) en statut ouvert, refusé OU
+  échoué (pending/approved/sent/blocked_company/rejected/failed/expired) —
+  idempotence stricte
 
 Génère un cold mail via Claude (Sonnet 4.6 par défaut) et le persiste en
 `PendingOutbound(kind=email_cold, subject=..., ai_draft=body, status=pending)`
@@ -40,6 +41,11 @@ _BLOCKING_STATUSES = (
     OutboundStatus.SENT,
     OutboundStatus.BLOCKED_COMPANY,
     OutboundStatus.REJECTED,
+    # FAILED/EXPIRED bloquent aussi la regeneration (P2-1) : un cold mail dont
+    # l'envoi a echoue serait sinon regenere chaque jour → doublon en file. Le
+    # retry legitime d'un FAILED passe par triage_failed_outbound (→ re-pending).
+    OutboundStatus.FAILED,
+    OutboundStatus.EXPIRED,
 )
 
 
