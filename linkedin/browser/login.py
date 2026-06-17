@@ -17,6 +17,7 @@
 #    profil n'est plus authentifie : STOP + fenetre laissee ouverte pour login
 #    manuel, jamais de soumission auto de credentials (chaque resoumission
 #    durcit le blocage LinkedIn).
+import json
 import logging
 
 from patchright.sync_api import sync_playwright
@@ -92,6 +93,37 @@ def dismiss_cookie_consent(page, timeout_ms: int = COOKIE_PROBE_TIMEOUT_MS) -> b
     return False
 
 
+def _mark_profile_clean_exit() -> None:
+    """Force exit_type=Normal dans le profil Chrome AVANT le lancement.
+
+    Chrome marque exit_type="Crashed" / exited_cleanly=False quand le profil n'a
+    pas ete ferme proprement — cas du daemon arrete par taskkill ou par fin de
+    session TSE (le `while True` n'a pas de fermeture du contexte). Au lancement
+    suivant : bandeau "Restaurer les pages" (signature non-humaine, remarque
+    Richard 17/06) + corruption progressive du profil persistant, dont les
+    cookies li_at/li_rm device-trust sont le rempart anti-checkpoint. On reecrit
+    le flag a Normal avant chaque lancement pour supprimer le bandeau de maniere
+    deterministe (constate 17/06 : exit_type:"Crashed" en base)."""
+    prefs = LINKEDIN_PROFILE_DIR / "Default" / "Preferences"
+    if not prefs.exists():
+        return
+    try:
+        data = json.loads(prefs.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Profil: lecture de Preferences impossible", exc_info=True)
+        return
+    profile = data.setdefault("profile", {})
+    if profile.get("exit_type") == "Normal" and profile.get("exited_cleanly") is True:
+        return
+    profile["exit_type"] = "Normal"
+    profile["exited_cleanly"] = True
+    try:
+        prefs.write_text(json.dumps(data), encoding="utf-8")
+        logger.info("Profil: exit_type force a Normal (anti 'Restaurer les pages')")
+    except OSError:
+        logger.warning("Profil: ecriture de Preferences impossible", exc_info=True)
+
+
 def launch_persistent_browser():
     """Lance Chrome avec un PROFIL PERSISTANT sur disque (anti-detection).
 
@@ -99,6 +131,7 @@ def launch_persistent_browser():
     persistant le contexte EST le navigateur (pas d'objet browser separe).
     """
     LINKEDIN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    _mark_profile_clean_exit()
     playwright = sync_playwright().start()
 
     launch_kwargs = dict(
