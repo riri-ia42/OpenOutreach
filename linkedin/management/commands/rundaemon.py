@@ -17,8 +17,35 @@ class Command(BaseCommand):
         session = self._create_session()
         self._ensure_newsletter(session)
 
+        # Fermeture propre du navigateur a l'arret (revue 17/06 P0-1 volet B) :
+        # sur SIGTERM/SIGINT on appelle session.close() (→ context.close()) pour
+        # que Chrome marque exit_type=Normal et ne reaffiche pas "Restaurer les
+        # pages". Le volet A neutralise deja le flag au demarrage ; ceci reduit
+        # la source. taskkill /F (SIGKILL Windows) ne declenche PAS le handler →
+        # le volet A reste le filet deterministe.
+        import signal
+
+        def _graceful_shutdown(signum, _frame):
+            logger.warning("Signal %s recu — fermeture propre du navigateur", signum)
+            try:
+                session.close()
+            finally:
+                raise SystemExit(0)
+
+        for _sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(_sig, _graceful_shutdown)
+            except (ValueError, OSError):
+                pass  # hors thread principal ou signal non supporte
+
         from linkedin.daemon import run_daemon
-        run_daemon(session)
+        try:
+            run_daemon(session)
+        finally:
+            try:
+                session.close()
+            except Exception:
+                logger.debug("session.close() au shutdown a echoue", exc_info=True)
 
     # -- Steps ---------------------------------------------------------------
 
