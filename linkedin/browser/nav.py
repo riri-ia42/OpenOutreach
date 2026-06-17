@@ -1,11 +1,12 @@
 # linkedin/browser/nav.py
 import logging
 import random
+import time
 from urllib.parse import unquote, urlparse, urljoin
 
 from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from linkedin.conf import BROWSER_NAV_TIMEOUT_MS, DUMP_PAGES, FIXTURE_PAGES_DIR, HUMAN_TYPE_MIN_DELAY_MS, HUMAN_TYPE_MAX_DELAY_MS
+from linkedin.conf import BROWSER_NAV_TIMEOUT_MS, DUMP_PAGES, FIXTURE_PAGES_DIR
 from linkedin.exceptions import SkipProfile
 
 logger = logging.getLogger(__name__)
@@ -96,9 +97,36 @@ def find_top_card(session):
     return top_card
 
 
-def human_type(locator, text: str, min_delay: int = HUMAN_TYPE_MIN_DELAY_MS, max_delay: int = HUMAN_TYPE_MAX_DELAY_MS):
-    """Type text with randomized per-keystroke delay to mimic human input."""
-    locator.type(text, delay=random.randint(min_delay, max_delay))
+def _per_char_delay_bounds_ms(min_delay: int | None, max_delay: int | None) -> tuple[int, int]:
+    """Bornes de delai PAR CARACTERE en ms.
+
+    Par defaut, derivees de la cadence de frappe cible EKOALU 200-400 c/min
+    (HUMAN_TYPING_CHARS_PER_MIN_*) → ~150-300 ms/char."""
+    if min_delay is not None and max_delay is not None:
+        return min_delay, max_delay
+    from ekoalu.conf import (
+        HUMAN_TYPING_CHARS_PER_MIN_MAX,
+        HUMAN_TYPING_CHARS_PER_MIN_MIN,
+    )
+
+    lo = int(60_000 / HUMAN_TYPING_CHARS_PER_MIN_MAX)  # cadence haute → delai mini
+    hi = int(60_000 / HUMAN_TYPING_CHARS_PER_MIN_MIN)  # cadence basse → delai maxi
+    return lo, hi
+
+
+def human_type(locator, text: str, min_delay: int | None = None, max_delay: int | None = None):
+    """Frappe caractere par caractere avec un delai VARIABLE par caractere.
+
+    `locator.type(text, delay=)` tirait UN seul delai applique a toute la chaine
+    (rythme regulier = signature bot) et l'appelant message.py forcait 10-50
+    ms/char (1200-6000 c/min, surhumain). On tape desormais char par char avec
+    un delai retire a CHAQUE frappe dans la cadence humaine cible (200-400 c/min
+    ≈ 150-300 ms/char). LinkedIn instrumente le clavier du compose : c'est
+    l'action la plus surveillee. Cf. revue 17/06 P1-6."""
+    lo, hi = _per_char_delay_bounds_ms(min_delay, max_delay)
+    for ch in text:
+        locator.type(ch)
+        time.sleep(random.randint(lo, hi) / 1000.0)
 
 
 def dump_page_html(session: "AccountSession", profile: dict, category: str = "connect"):

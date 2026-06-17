@@ -139,7 +139,7 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
         step = "compose_input"
         compose = _find(session.page, "compose_input", timeout=12_000).first
         step = "type"
-        human_type(compose, message, min_delay=10, max_delay=50)
+        human_type(compose, message)
         step = "compose_send"
         _find(session.page, "compose_send", timeout=8_000).first.click(delay=200)
         session.wait(0.5, 1)
