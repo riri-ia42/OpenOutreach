@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class PollStats:
     fetched: int = 0
     already_seen: int = 0
+    self_skipped: int = 0
     no_lead_match: int = 0
     drafts_created: int = 0
     drafts_failed: int = 0
@@ -109,6 +110,17 @@ def process_message(msg: dict, *, generate_draft=True) -> str:
         logger.debug("Message %s sans expéditeur, skip", msg_id)
         return "no_lead_match"
 
+    # Garde-fou "adresse maison" (bug 18/06) : un mail dont l'expéditeur est
+    # Richard / la boîte d'envoi EKOALU n'est jamais une réponse de prospect
+    # (newsletter de test renvoyée à soi, récap Plaud interne…). Sans ce filtre,
+    # un Lead avec contact_email=richard@ekoalu.com générait des brouillons sur
+    # les propres mails de Richard.
+    from ekoalu.conf import own_email_addresses
+    if sender.strip().lower() in own_email_addresses():
+        logger.info("Message %s de notre propre adresse (%s) — skip (pas un prospect)",
+                    msg_id, sender)
+        return "self_skipped"
+
     lead = _lookup_lead_by_email(sender)
     if not lead:
         return "no_lead_match"
@@ -180,6 +192,8 @@ def poll_inbox(*, since_iso_utc: str, max_n: int = 50,
         result = process_message(msg, generate_draft=generate_drafts)
         if result == "already_seen":
             stats.already_seen += 1
+        elif result == "self_skipped":
+            stats.self_skipped += 1
         elif result == "no_lead_match":
             stats.no_lead_match += 1
         elif result == "draft_created":

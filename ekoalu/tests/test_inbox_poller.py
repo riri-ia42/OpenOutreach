@@ -100,6 +100,42 @@ class TestProcessMessage:
         assert result == "no_lead_match"
         assert PendingReply.objects.count() == 0
 
+    def test_self_address_jamais_traitee(self, make_lead_email, monkeypatch):
+        """Bug 18/06 : un Lead avec contact_email=richard@ekoalu.com ne doit JAMAIS
+        générer de brouillon sur les propres mails de Richard (newsletter de test,
+        récap Plaud interne…). Le garde-fou 'adresse maison' prime sur le match lead.
+        """
+        # Le Lead existe (cas réel : adresse de Richard importée par erreur)
+        make_lead_email(email="richard@ekoalu.com", siren="803673938")
+        monkeypatch.setattr(
+            "ekoalu.email_canal.inbox_poller.generate_email_reply",
+            lambda **kw: pytest.fail("ne doit JAMAIS être appelé sur notre propre adresse"),
+        )
+        for sender in ("richard@ekoalu.com", "Richard@Ekoalu.com", " richard@ekoalu.com "):
+            result = process_message(_msg(id=f"self-{sender.strip()}", from_email=sender))
+            assert result == "self_skipped"
+        assert PendingReply.objects.count() == 0
+
+    def test_self_address_comptee_dans_stats(self, make_lead_email, monkeypatch, fake_reply):
+        make_lead_email(email="richard@ekoalu.com", siren="803673938")
+        make_lead_email(email="vrai@prospect.fr", siren="1")
+        monkeypatch.setattr(
+            "ekoalu.email_canal.inbox_poller.list_inbox_messages",
+            lambda **kw: [
+                _msg(id="own1", from_email="richard@ekoalu.com"),
+                _msg(id="own2", from_email="richard@ekoalu.com"),
+                _msg(id="real", from_email="vrai@prospect.fr"),
+            ],
+        )
+        monkeypatch.setattr(
+            "ekoalu.email_canal.inbox_poller.generate_email_reply",
+            lambda **kw: fake_reply,
+        )
+        stats = poll_inbox(since_iso_utc="2026-05-27T00:00:00Z")
+        assert stats.self_skipped == 2
+        assert stats.drafts_created == 1
+        assert PendingReply.objects.count() == 1
+
     def test_match_case_insensitive(self, make_lead_email, monkeypatch, fake_reply):
         make_lead_email(email="dirigeant@acme.fr")
         monkeypatch.setattr(

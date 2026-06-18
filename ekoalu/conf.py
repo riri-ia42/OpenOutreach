@@ -87,6 +87,20 @@ SIGNATURE_TITLE = os.environ.get("EKOALU_SIGNATURE_TITLE", "Président EKOALU")
 SIGNATURE_MOBILE = os.environ.get("EKOALU_SIGNATURE_MOBILE", "06 14 26 31 24")
 SIGNATURE_EMAIL = os.environ.get("EKOALU_SIGNATURE_EMAIL", "richard@ekoalu.com")
 
+# Adresses "maison" EKOALU : un mail entrant dont l'expéditeur est l'une de ces
+# adresses n'est JAMAIS un prospect (c'est Richard lui-même, une newsletter de
+# test, un récap interne Plaud…). Le poller inbox les ignore (bug 18/06 : un Lead
+# avec contact_email=richard@ekoalu.com faisait générer des brouillons de réponse
+# sur les propres mails de Richard). Surchageable via EKOALU_OWN_EMAILS (CSV).
+GRAPH_USER_EMAIL = os.environ.get("GRAPH_USER_EMAIL", "")
+
+
+def own_email_addresses() -> set[str]:
+    """Ensemble des adresses EKOALU 'maison' (lowercase) à exclure de l'inbound."""
+    extra = os.environ.get("EKOALU_OWN_EMAILS", "")
+    raw = {SIGNATURE_EMAIL, GRAPH_USER_EMAIL, *extra.split(",")}
+    return {a.strip().lower() for a in raw if a and a.strip()}
+
 # ----------------------------------------------------------------------
 # Charte de signature EMAIL (source of truth :
 # C:\Users\RI.GROS\Documents\CLAUDE\jumeau-numerique\03-synthese-style\SIGNATURES.md)
