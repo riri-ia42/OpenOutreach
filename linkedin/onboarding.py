@@ -170,10 +170,13 @@ def _create_account(
 
     campaign.users.add(user)
 
+    # linkedin_password volontairement NON stocké (Lot 2 RGPD 18/06) : plus utilisé
+    # depuis la refonte anti-détection (login manuel). `password` reste dans la
+    # signature pour compat des appelants mais n'est jamais persisté en clair.
     profile = LinkedInProfile.objects.create(
         user=user,
         linkedin_username=email,
-        linkedin_password=password,
+        linkedin_password="",
         subscribe_newsletter=subscribe,
         connect_daily_limit=connect_daily,
         connect_weekly_limit=connect_weekly,

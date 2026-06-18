@@ -8,6 +8,8 @@ from django.contrib.auth.models import User
 from django.db import models
 from django.utils import timezone
 
+from ekoalu.crypto import EncryptedCharField
+
 logger = logging.getLogger(__name__)
 
 # action_type → (daily_limit_field, weekly_limit_field)
@@ -34,7 +36,9 @@ class SiteConfig(models.Model):
         choices=LLMProvider.choices,
         default=LLMProvider.OPENAI,
     )
-    llm_api_key = models.CharField(max_length=500, blank=True, default="")
+    # Chiffré at-rest (Fernet) — cf. ekoalu/crypto.py (Lot 2 RGPD 18/06). max_length
+    # élargi pour absorber l'overhead du ciphertext (préfixe + base64).
+    llm_api_key = EncryptedCharField(max_length=1000, blank=True, default="")
     ai_model = models.CharField(max_length=200, blank=True, default="")
     llm_api_base = models.CharField(max_length=500, blank=True, default="")
 
@@ -93,7 +97,11 @@ class LinkedInProfile(models.Model):
         related_name="+",
     )
     linkedin_username = models.CharField(max_length=200)
-    linkedin_password = models.CharField(max_length=200)
+    # Mot de passe LinkedIn : PLUS UTILISÉ depuis la refonte anti-détection 11/06
+    # (login manuel, jamais de re-login auto par mot de passe). Conservé vide pour
+    # ne pas casser le schéma, mais plus jamais renseigné (Lot 2 RGPD 18/06 — on ne
+    # stocke aucun mot de passe en clair). Cf. onboarding._create_account.
+    linkedin_password = models.CharField(max_length=200, blank=True, default="")
     subscribe_newsletter = models.BooleanField(default=True)
     active = models.BooleanField(default=True)
     connect_daily_limit = models.PositiveIntegerField(default=20)

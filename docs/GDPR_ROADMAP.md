@@ -29,7 +29,7 @@ The noisy embedding approach is necessary but not sufficient. The following gaps
 
 - **Consent and lawful basis** — Still no lawful basis documented for the initial data collection from LinkedIn
 - **Transparency** — Data subjects still not informed of collection at any point
-- **Credential security** — LinkedIn passwords and cookies still stored in plaintext
+- **Credential security** — Partiellement traité (Lot 2 RGPD, 18/06/2026) : le mot de passe LinkedIn n'est PLUS stocké (login manuel depuis 11/06, champ blanchi) ; la clé API Claude (`SiteConfig.llm_api_key`) est chiffrée at-rest via Fernet (`ekoalu/crypto.py`, clé dans `EKOALU_FIELD_ENCRYPTION_KEY` hors DB). Reste en clair : les PII prospects (noms/emails) — chiffrement du volume `data/` (BitLocker) à planifier (nécessite admin TSE)
 - **Transient processing** — Profile text still sent to external LLM APIs for qualification
 - **Operational PII** — Lead records still store names, the `public_identifier` is still linkable to a real person, and PII appears in logs/diagnostics
 - **Automated decision-making** — GP scoring and LLM qualification still lack Article 22 safeguards
