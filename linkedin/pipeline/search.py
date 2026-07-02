@@ -55,5 +55,11 @@ def run_search(session) -> str | None:
     kw.save()
 
     logger.info(colored("\u25b6 search", "magenta", attrs=["bold"]) + " keyword=%r", kw.keyword)
-    search_people(session, kw.keyword)
+    # Trace la requete native exacte : lue par le patch lead_routing quand il
+    # cree chaque LeadDiscovery (query), pour afficher LA requete utilisee au rapport.
+    session._ekoalu_search_keyword = kw.keyword
+    try:
+        search_people(session, kw.keyword)
+    finally:
+        session._ekoalu_search_keyword = ""
     return kw.keyword

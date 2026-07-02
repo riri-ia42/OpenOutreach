@@ -155,6 +155,30 @@ def test_create_enriched_lead_records_discovery(session):
     assert LeadDiscovery.objects.filter(lead_id=pk, campaign=session.campaign).exists()
 
 
+@pytest.mark.django_db
+def test_record_discovery_stocke_la_requete(session):
+    from ekoalu.lead_routing.models import LeadDiscovery
+
+    lead = _make_lead("carol-query")
+    record_discovery(lead.pk, session.campaign, query="Dirigeant maçonnerie Savoie Isère")
+    ld = LeadDiscovery.objects.get(lead=lead, campaign=session.campaign)
+    assert ld.query == "Dirigeant maçonnerie Savoie Isère"
+
+
+@pytest.mark.django_db
+def test_create_enriched_lead_loggue_le_mot_cle_natif(session):
+    """La requete native courante (posee par run_search) est journalisee."""
+    from linkedin.db import leads as leads_module
+    from ekoalu.lead_routing.models import LeadDiscovery
+
+    session._ekoalu_search_keyword = "Conducteur travaux maçonnerie Lyon"
+    profile = {"public_identifier": "dan-native", "urn": "urn:li:fsd_profile:dan",
+               "first_name": "Dan", "last_name": "Native", "headline": "Maçon"}
+    pk = leads_module.create_enriched_lead(session, "https://www.linkedin.com/in/dan-native", profile)
+    ld = LeadDiscovery.objects.get(lead_id=pk, campaign=session.campaign)
+    assert ld.query == "Conducteur travaux maçonnerie Lyon"
+
+
 # --------------------------------------------------------------------------
 # Criteres affines (builder pur)
 # --------------------------------------------------------------------------

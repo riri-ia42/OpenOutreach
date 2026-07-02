@@ -15,14 +15,22 @@ logger = logging.getLogger(__name__)
 _PATCH_APPLIED = False
 
 
-def record_discovery(lead_id: int, campaign) -> None:
-    """Rattache un lead a une campagne (idempotent)."""
+def record_discovery(lead_id: int, campaign, query: str = "") -> None:
+    """Rattache un lead a une campagne (idempotent).
+
+    ``query`` = requete exacte qui a trouve le profil. Pour la recherche
+    LinkedIn native c'est le mot-cle de recherche utilise (ex. "Conducteur
+    travaux maconnerie Lyon") — on le loge comme Serper le fait pour ses
+    requetes, afin d'afficher LA requete utilisee dans le rapport."""
     if lead_id is None or campaign is None:
         return
     try:
         from ekoalu.lead_routing.models import LeadDiscovery
 
-        LeadDiscovery.objects.get_or_create(lead_id=lead_id, campaign=campaign)
+        LeadDiscovery.objects.get_or_create(
+            lead_id=lead_id, campaign=campaign,
+            defaults={"query": query or ""},
+        )
     except Exception:
         logger.exception("Failed to record LeadDiscovery (lead=%s)", lead_id)
 
@@ -45,7 +53,10 @@ def apply_lead_routing_patch() -> None:
     def patched_create(session, url, profile):
         lead_pk = original_create(session, url, profile)
         if lead_pk is not None:
-            record_discovery(lead_pk, getattr(session, "campaign", None))
+            # Mot-cle de recherche native courant (pose par run_search) = la
+            # requete qui a trouve ce profil. Vide pour les autres chemins.
+            kw = getattr(session, "_ekoalu_search_keyword", "") or ""
+            record_discovery(lead_pk, getattr(session, "campaign", None), query=kw)
         return lead_pk
 
     leads_module.create_enriched_lead = patched_create

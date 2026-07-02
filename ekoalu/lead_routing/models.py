@@ -23,6 +23,10 @@ class LeadDiscovery(models.Model):
         related_name="discovered_leads",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Requete Serper exacte qui a trouve ce lead (sourcing Google). Vide quand la
+    # decouverte ne vient PAS d'une requete Google prouvee (recherche native,
+    # cross-attribution a l'enrichissement) -> tracabilite honnete de l'origine.
+    query = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         app_label = "ekoalu"
