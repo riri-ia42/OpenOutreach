@@ -30,13 +30,25 @@ def is_abm_campaign(campaign) -> bool:
     return " ABM - " in (campaign.name or "")
 
 
+def is_sector_campaign(campaign) -> bool:
+    """True si la campagne cible un secteur ('SECTEUR - ...' — sourcing Serper)."""
+    if campaign is None:
+        return False
+    return " SECTEUR - " in (campaign.name or "")
+
+
 def native_search_allowed(campaign) -> bool:
-    """False pour les campagnes ABM (servies par Serper), True sinon."""
+    """False pour les campagnes servies par Serper (ABM + SECTEUR), True sinon.
+
+    ABM = noms d'entreprise courts = homonymes mondiaux en recherche native.
+    SECTEUR = requetes Google exactes secteur+poste ; la recherche native
+    ramenerait le meme bruit non tracable (cf. capture MACON/bailleur 01/07).
+    """
     if os.environ.get("EKOALU_ABM_NATIVE_SEARCH", "") == "1":
         return True
-    if is_abm_campaign(campaign):
+    if is_abm_campaign(campaign) or is_sector_campaign(campaign):
         logger.info(
-            "Recherche LinkedIn native désactivée pour la campagne ABM %r "
+            "Recherche LinkedIn native désactivée pour la campagne %r "
             "(sourcing via Serper — cf. ekoalu/google_sourcing)",
             getattr(campaign, "name", "?"),
         )

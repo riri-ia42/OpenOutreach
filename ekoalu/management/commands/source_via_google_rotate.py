@@ -1,4 +1,4 @@
-"""Rotation Serper quotidienne — sert TOUTES les campagnes ABM à tour de rôle.
+"""Rotation Serper quotidienne — sert les campagnes ABM + SECTEUR à tour de rôle.
 
 Logique (décision Richard 12/06) :
 - on sert d'abord la campagne ABM active la moins récemment servie ;
@@ -54,7 +54,12 @@ class Command(BaseCommand):
 
         # Campagnes ABM ACTIVES (rattachées au profil LinkedIn actif)
         profile = LinkedInProfile.objects.filter(active=True).first()
-        camps_qs = Campaign.objects.filter(name__icontains=" ABM - ")
+        # Campagnes servies par Serper : ABM (1 entreprise) + SECTEUR (secteur+poste).
+        from django.db.models import Q
+        camps_qs = Campaign.objects.filter(
+            Q(name__icontains=" ABM - ") | Q(name__icontains=" SECTEUR - "),
+            active=True,
+        )
         if profile:
             camps_qs = camps_qs.filter(users=profile.user)
 

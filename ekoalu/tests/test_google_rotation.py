@@ -57,6 +57,75 @@ def test_run_search_skip_abm(monkeypatch):
     mock_search.assert_not_called()
 
 
+@pytest.mark.django_db
+def test_run_search_pose_le_mot_cle_natif(monkeypatch):
+    """run_search expose le mot-cle courant sur la session (lu par lead_routing),
+    puis le nettoie apres la recherche."""
+    monkeypatch.delenv("EKOALU_ABM_NATIVE_SEARCH", raising=False)
+    from linkedin.models import Campaign, SearchKeyword
+    from linkedin.pipeline.search import run_search
+
+    camp = Campaign.objects.create(name="EKOALU - MACON")
+    SearchKeyword.objects.create(campaign=camp, keyword="Conducteur travaux maçonnerie Lyon")
+    session = SimpleNamespace(campaign=camp)
+
+    seen = {}
+
+    def fake_search_people(sess, keyword, page=1):
+        seen["during"] = getattr(sess, "_ekoalu_search_keyword", None)
+
+    with patch("linkedin.actions.search.search_people", side_effect=fake_search_people):
+        kw = run_search(session)
+
+    assert kw == "Conducteur travaux maçonnerie Lyon"
+    assert seen["during"] == "Conducteur travaux maçonnerie Lyon"   # pose pendant
+    assert session._ekoalu_search_keyword == ""                     # nettoye apres
+
+
+@pytest.mark.django_db
+def test_run_search_skip_secteur(monkeypatch):
+    """run_search retourne None direct pour une SECTEUR (Serper only, pas de natif)."""
+    monkeypatch.delenv("EKOALU_ABM_NATIVE_SEARCH", raising=False)
+    from linkedin.models import Campaign
+    from linkedin.pipeline.search import run_search
+
+    camp = Campaign.objects.create(name="EKOALU - SECTEUR - Bailleurs sociaux RA")
+    session = SimpleNamespace(campaign=camp)
+    with patch("linkedin.actions.search.search_people") as mock_search:
+        assert run_search(session) is None
+    mock_search.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_rotation_inclut_les_campagnes_secteur(monkeypatch):
+    """La rotation Serper sert aussi les campagnes SECTEUR (pas que ABM)."""
+    from io import StringIO
+    from django.core.management import call_command
+    from django.contrib.auth import get_user_model
+    from linkedin.models import Campaign, LinkedInProfile
+
+    user = get_user_model().objects.create(username="rota-test")
+    prof = LinkedInProfile.objects.create(
+        user=user, linkedin_username="rota", active=True)
+    sect = Campaign.objects.create(
+        name="EKOALU - SECTEUR - Bailleurs sociaux RA", active=True)
+    sect.users.add(user)
+
+    monkeypatch.setenv("SERPER_API_KEY", "k")
+    served: list[str] = []
+
+    def fake_source(campaign, **kw):
+        served.append(campaign.name)
+        return SourcingResult(campaign_name=campaign.name, queries_used=1, new_leads=0)
+
+    with patch("ekoalu.google_sourcing.service.source_campaign",
+               side_effect=fake_source):
+        call_command("source_via_google_rotate", "--new-leads-target", "1",
+                     "--max-queries", "9", stdout=StringIO())
+
+    assert any("SECTEUR - Bailleurs sociaux RA" in n for n in served)
+
+
 # --------------------------------------------------------------------------
 # service : sourcing par campagne + état de rotation
 # --------------------------------------------------------------------------

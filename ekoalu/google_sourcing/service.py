@@ -47,13 +47,15 @@ def source_campaign(
 
     result = SourcingResult(campaign_name=campaign.name)
 
-    qlist = queries.build_abm_queries(campaign)
+    qlist = queries.build_queries(campaign)
     if not qlist:
-        logger.warning("Campagne %r : entreprise cible introuvable.", campaign.name)
+        logger.warning("Campagne %r : aucune requete Serper (entreprise ABM ou "
+                       "secteur introuvable).", campaign.name)
         return result
 
     found: list[str] = []
     seen: set[str] = set()
+    query_by_url: dict[str, str] = {}  # tracabilite : quelle requete a trouve quoi
     for q in qlist:
         if len(found) >= max_profiles or result.queries_used >= query_budget:
             break
@@ -77,6 +79,7 @@ def source_campaign(
                 continue
             seen.add(pid)
             found.append(u)
+            query_by_url[u] = q
 
     found = found[:max_profiles]
     result.urls_found = len(found)
@@ -94,6 +97,7 @@ def source_campaign(
         )
         _, created = LeadDiscovery.objects.get_or_create(
             lead_id=lead.pk, campaign=campaign,
+            defaults={"query": query_by_url.get(u, "")},
         )
         if created:
             result.new_leads += 1

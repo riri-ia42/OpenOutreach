@@ -41,6 +41,48 @@ def test_build_abm_queries_sans_cible_vide():
     assert queries.build_abm_queries(c) == []
 
 
+# --- Campagnes SECTEUR (secteur d'activite + poste, pas 1 entreprise) ---
+
+def test_sector_slug_parse_du_nom():
+    c = SimpleNamespace(name="EKOALU - SECTEUR - Bailleurs sociaux RA")
+    assert queries.sector_slug(c) == "bailleurs sociaux ra"
+    assert queries.sector_slug(SimpleNamespace(name="EKOALU - ABM - Bateg")) is None
+
+
+def test_build_sector_queries_ancre_x_poste_x_geo():
+    c = SimpleNamespace(name="EKOALU - SECTEUR - Bailleurs sociaux RA")
+    qs = queries.build_sector_queries(c)
+    spec = queries.SECTOR_SPECS["bailleurs sociaux ra"]
+    assert len(qs) == len(spec["roles"]) * len(spec["regions"])
+    assert all(q.startswith("site:linkedin.com/in") for q in qs)
+    assert all('"logement social"' in q for q in qs)       # ancre metier (pas "bailleur social")
+    assert all("Lyon" in q for q in qs)                    # biais Rhone-Alpes
+    assert any('"responsable travaux"' in q for q in qs)
+    # budget : rester <= --per-campaign-queries (9) pour tout servir en 1 passage
+    assert len(qs) <= 9
+
+
+def test_build_sector_queries_slug_inconnu_vide():
+    c = SimpleNamespace(name="EKOALU - SECTEUR - Secteur pas encore specifie")
+    assert queries.build_sector_queries(c) == []
+
+
+def test_build_queries_dispatch_abm_ou_secteur():
+    abm = SimpleNamespace(name="EKOALU - ABM - Léon Grosse")
+    sect = SimpleNamespace(name="EKOALU - SECTEUR - Bailleurs sociaux RA")
+    assert queries.build_queries(abm) == queries.build_abm_queries(abm)
+    assert queries.build_queries(sect) == queries.build_sector_queries(sect)
+
+
+def test_sector_campaign_serper_only():
+    from ekoalu.google_sourcing.routing import native_search_allowed, is_sector_campaign
+    sect = SimpleNamespace(name="EKOALU - SECTEUR - Bailleurs sociaux RA")
+    glob = SimpleNamespace(name="EKOALU - MACON")
+    assert is_sector_campaign(sect) is True
+    assert native_search_allowed(sect) is False   # Serper uniquement
+    assert native_search_allowed(glob) is True     # persona global garde le natif
+
+
 # --------------------------------------------------------------------------
 # client.search_raw (mock requests.post — contrat Serper)
 # --------------------------------------------------------------------------

@@ -40,12 +40,15 @@ class Command(BaseCommand):
                 "Cf. README. Utilise --dry-run pour tester sans clef.",
             )
 
-        camps = Campaign.objects.filter(name__icontains=" ABM - ").order_by("name")
+        from django.db.models import Q
+        camps = Campaign.objects.filter(
+            Q(name__icontains=" ABM - ") | Q(name__icontains=" SECTEUR - ")
+        ).order_by("name")
         if opts["campaign"]:
             camps = camps.filter(name__icontains=opts["campaign"])
         camps = list(camps)
         if not camps:
-            self.stdout.write("Aucune campagne ABM correspondante.")
+            self.stdout.write("Aucune campagne ABM/SECTEUR correspondante.")
             return
 
         query_budget = opts["max_queries"]
