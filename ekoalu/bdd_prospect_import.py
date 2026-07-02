@@ -24,12 +24,15 @@ NAF_P1 = frozenset({
 NAF_P2 = frozenset({
     "71.11Z",  # Activités d'architecture (prescripteurs)
     "71.12B",  # Ingénierie, études techniques (BET / MOE)
+    "25.12Z",  # Fabrication menuiserie métallique/alu — concurrent direct MAIS
+               # partenaire/client potentiel sur les niches (coupe-feu, désenfumage,
+               # pare-balles) de par la largeur de gamme EKOALU.
+               # Réintégré le 2026-06-26 (décision Richard, cf. CLAUDE.md).
 })
 NAF_P3 = frozenset({
     "74.10Z",  # Design (opt.)
 })
 NAF_EXCLUS = frozenset({
-    "25.12Z",  # EKOALU = concurrents directs
     "41.20A",  # Maisons individuelles = habitat, hors stratégie tertiaire
 })
 

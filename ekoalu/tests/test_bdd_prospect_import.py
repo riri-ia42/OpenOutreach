@@ -124,11 +124,13 @@ class TestEligibilityNaf:
         f = EligibilityFilters(naf_allowed=NAF_P1 | NAF_P2)
         assert is_eligible(c, f) is None
 
-    def test_exclus_2512z_rejette_meme_si_dans_allowed(self):
+    def test_2512z_reintegre_eligible_en_p2(self):
+        # 25.12Z réintégré le 2026-06-26 (concurrent direct mais partenaire/client
+        # potentiel sur les niches) : éligible dès que le périmètre inclut P2,
+        # et plus jamais "exclu". Cf. CLAUDE.md §coexistence BDD PROSPECT.
         c = parse_contact(_raw(code_naf="25.12Z"))
-        # On force 25.12Z dans allowed pour vérifier que excluded prime
-        f = EligibilityFilters(naf_allowed=frozenset({"25.12Z"}))
-        assert is_eligible(c, f) == REJECT_NAF_EXCLUDED
+        f = EligibilityFilters(naf_allowed=NAF_P1 | NAF_P2)
+        assert is_eligible(c, f) is None
 
     def test_exclus_4120a_rejette(self):
         c = parse_contact(_raw(code_naf="41.20A"))
@@ -222,7 +224,7 @@ class TestIterEligible:
             _raw(email="ok2@acme.com", siren="222"),
             _raw(email="contact@acme.com", siren="333"),  # generic
             _raw(email="dupont@gmail.com", siren="444"),  # b2c
-            _raw(email="x@y.com", siren="555", code_naf="25.12Z"),  # excluded
+            _raw(email="x@y.com", siren="555", code_naf="25.12Z"),  # hors P1 défaut (25.12Z=P2)
             {"email": "", "properties": {}},  # parse → None (skip)
         ]
         results = list(iter_eligible(rows, EligibilityFilters()))
@@ -231,7 +233,7 @@ class TestIterEligible:
         eligibles = [c for c, r in results if r is None]
         rejets = [r for c, r in results if r is not None]
         assert len(eligibles) == 2
-        assert sorted(rejets) == sorted([REJECT_EMAIL_GENERIC, REJECT_EMAIL_B2C, REJECT_NAF_EXCLUDED])
+        assert sorted(rejets) == sorted([REJECT_EMAIL_GENERIC, REJECT_EMAIL_B2C, REJECT_NAF_NOT_TARGET])
 
 
 # --- Helpers synthétiques ----------------------------------------------------
@@ -262,7 +264,7 @@ def fixture_source(tmp_path):
              dirigeant="ALICE MARTIN", effectif_min=15, effectif_max=49),
         _raw(email="bob@charpente-foret.fr", siren="222222222", code_naf="25.11Z",
              dirigeant="BOB FOREST", effectif_min=20, effectif_max=49),
-        # Rejet : NAF concurrent
+        # Rejet : NAF hors P1 par défaut (25.12Z = P2 depuis 2026-06-26)
         _raw(email="rejet1@x.com", siren="333", code_naf="25.12Z"),
         # Rejet : email générique
         _raw(email="contact@x-bat.fr", siren="444444444", code_naf="41.20B",
