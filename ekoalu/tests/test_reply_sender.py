@@ -196,7 +196,7 @@ class TestSendApprovedEmailRepliesCommand:
     def test_hors_plage_horaire_skip(self, monkeypatch):
         monkeypatch.setattr(
             "ekoalu.management.commands.send_approved_email_replies.is_action_allowed_now",
-            lambda: False,
+            lambda *a, **k: False,
         )
         monkeypatch.setattr(
             "ekoalu.management.commands.send_approved_email_replies.send_email_reply",

@@ -328,7 +328,7 @@ class TestSendApprovedEmailsCommand:
     def test_hors_plage_horaire_skip_tout(self, make_lead_with_po, monkeypatch):
         monkeypatch.setattr(
             "ekoalu.management.commands.send_approved_emails.is_action_allowed_now",
-            lambda: False,
+            lambda *a, **k: False,
         )
         # send_cold_email ne doit JAMAIS être appelé
         monkeypatch.setattr(

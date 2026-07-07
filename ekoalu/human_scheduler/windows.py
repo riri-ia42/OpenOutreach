@@ -58,7 +58,13 @@ def next_active_window_start(now: dt.datetime) -> dt.datetime:
 
 
 def _is_day_active(d: dt.datetime) -> bool:
-    return conf.WEEKDAY_WEIGHTS.get(d.weekday(), 0.0) > 0.0
+    """Jour candidat pour la prochaine fenêtre LinkedIn : poids > 0 ET pas
+    un jour off aléatoire (LOT E) — sinon next_active_window_start renverrait
+    un créneau dans un jour où aucune action LinkedIn n'est permise."""
+    if conf.WEEKDAY_WEIGHTS.get(d.weekday(), 0.0) <= 0.0:
+        return False
+    from ekoalu.human_scheduler.budget import is_day_off
+    return not is_day_off(d.date())
 
 
 def is_in_lunch_break(now: dt.datetime) -> bool:

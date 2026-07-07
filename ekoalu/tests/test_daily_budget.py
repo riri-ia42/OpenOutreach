@@ -17,7 +17,11 @@ import pytest
 
 # Imports directs = fonctions reelles (le conftest ne patche que l'attribut
 # de module, pas ces references locales).
-from ekoalu.human_scheduler.budget import daily_weight_factor
+from ekoalu.human_scheduler.budget import (
+    daily_weight_factor,
+    days_off_for_month,
+    is_day_off,
+)
 
 SATURDAY = dt.date(2026, 7, 11)   # samedi
 MONDAY = dt.date(2026, 7, 6)      # lundi
@@ -36,6 +40,86 @@ class TestDailyWeightFactor:
 
     def test_vendredi_70_pourcent(self):
         assert daily_weight_factor(dt.date(2026, 7, 10)) == 0.7
+
+
+class TestJoursOffAleatoires:
+    """Point 2 audit : RANDOM_DAYS_OFF_PER_MONTH n'etait jamais reference."""
+
+    def test_tirage_deterministe_par_mois(self):
+        assert days_off_for_month(2026, 9) == days_off_for_month(2026, 9)
+
+    def test_1_a_2_jours_ouvres_jamais_consecutifs(self):
+        for year, month in [(2026, m) for m in range(1, 13)]:
+            offs = days_off_for_month(year, month)
+            assert 1 <= len(offs) <= 2, f"{year}-{month}: {offs}"
+            for d in offs:
+                assert d.weekday() < 5, f"{d} n'est pas un jour ouvre"
+            if len(offs) == 2:
+                assert abs((offs[1] - offs[0]).days) >= 2, f"consecutifs: {offs}"
+
+    def test_mois_differents_tirages_differents(self):
+        """Sur 24 mois, au moins 2 tirages distincts (pas un tirage fige)."""
+        draws = {
+            days_off_for_month(y, m)
+            for y in (2026, 2027) for m in range(1, 13)
+        }
+        assert len(draws) > 1
+
+    def test_is_day_off_vrai_pour_un_jour_tire(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_RANDOM_DAYS_OFF", "1")
+        off = days_off_for_month(2026, 9)[0]
+        assert is_day_off(off)
+
+    def test_is_day_off_faux_hors_tirage(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_RANDOM_DAYS_OFF", "1")
+        offs = set(days_off_for_month(2026, 9))
+        d = dt.date(2026, 9, 1)
+        while d in offs:
+            d += dt.timedelta(days=1)
+        assert not is_day_off(d)
+
+    def test_kill_switch_env(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_RANDOM_DAYS_OFF", "0")
+        off = days_off_for_month(2026, 9)[0]
+        assert not is_day_off(off)
+
+
+class TestJourOffBloqueLinkedInPasEmail:
+    """Un jour off = hors plage pour LinkedIn ; email + manuel restent actifs."""
+
+    def _day_off_at_10h(self, monkeypatch) -> dt.datetime:
+        monkeypatch.setenv("EKOALU_RANDOM_DAYS_OFF", "1")
+        off = days_off_for_month(2026, 9)[0]
+        return dt.datetime(off.year, off.month, off.day, 10, 0,
+                           tzinfo=dt.timezone.utc)
+
+    def test_linkedin_refuse_le_jour_off(self, monkeypatch):
+        from ekoalu.human_scheduler.scheduler import is_action_allowed_now
+        now = self._day_off_at_10h(monkeypatch)
+        assert not is_action_allowed_now(now)
+
+    def test_email_passe_le_jour_off(self, monkeypatch):
+        from ekoalu.human_scheduler.scheduler import is_action_allowed_now
+        now = self._day_off_at_10h(monkeypatch)
+        assert is_action_allowed_now(now, channel="email")
+
+    def test_prochain_creneau_saute_le_jour_off(self, monkeypatch):
+        from ekoalu.human_scheduler.windows import next_active_window_start
+        now = self._day_off_at_10h(monkeypatch).replace(hour=6)
+        nxt = next_active_window_start(now)
+        assert nxt.date() != now.date()  # le creneau du jour off est saute
+
+    def test_log_au_premier_refus_seulement(self, monkeypatch, caplog):
+        import logging
+
+        from ekoalu.human_scheduler import scheduler
+        monkeypatch.setattr(scheduler, "_day_off_logged", None)
+        now = self._day_off_at_10h(monkeypatch)
+        with caplog.at_level(logging.INFO, logger="ekoalu.human_scheduler.scheduler"):
+            scheduler.is_action_allowed_now(now)
+            scheduler.is_action_allowed_now(now)
+        hits = [r for r in caplog.records if "jour off" in r.getMessage().lower()]
+        assert len(hits) == 1
 
 
 @pytest.mark.django_db

@@ -85,7 +85,9 @@ class Command(BaseCommand):
         dry_run = bool(opts["dry_run"])
         ignore_schedule = bool(opts["ignore_schedule"])
 
-        if not ignore_schedule and not is_action_allowed_now():
+        # channel="email" : les jours off aléatoires LinkedIn (LOT E) ne
+        # bloquent PAS le canal email — seules les plages horaires comptent.
+        if not ignore_schedule and not is_action_allowed_now(channel="email"):
             self.stdout.write(self.style.WARNING(
                 "Hors plage active EKOALU — 0 envoi. Utilise --ignore-schedule pour bypass.",
             ))

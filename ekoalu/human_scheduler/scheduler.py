@@ -7,11 +7,13 @@ distribution gaussienne intra-plage.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import random
 
 from django.utils import timezone
 
 from ekoalu import conf
+from ekoalu.human_scheduler.budget import is_day_off
 from ekoalu.human_scheduler.windows import (
     is_active_day,
     is_in_active_window,
@@ -19,16 +21,34 @@ from ekoalu.human_scheduler.windows import (
     next_active_window_start,
 )
 
+logger = logging.getLogger(__name__)
 
-def is_action_allowed_now(now: dt.datetime | None = None) -> bool:
+# Date du dernier log « jour off » — pour ne logger qu'au PREMIER refus du jour.
+_day_off_logged: dt.date | None = None
+
+
+def is_action_allowed_now(
+    now: dt.datetime | None = None, *, channel: str = "linkedin",
+) -> bool:
     """True si on peut exécuter une action MAINTENANT.
 
     Vérifie :
+    - jour off aléatoire (LOT E — canal LinkedIn uniquement : le canal email
+      et les commandes manuelles restent actifs, passer channel="email")
     - jour actif (poids > 0)
     - dans une fenêtre horaire active
     - pas en pause déjeuner
     """
+    global _day_off_logged
     now = now or timezone.localtime()
+    if channel == "linkedin" and is_day_off(now.date()):
+        if _day_off_logged != now.date():
+            _day_off_logged = now.date()
+            logger.info(
+                "Jour off aléatoire — aucune action LinkedIn aujourd'hui (%s)",
+                now.date().isoformat(),
+            )
+        return False
     if not is_active_day(now):
         return False
     if is_in_lunch_break(now):

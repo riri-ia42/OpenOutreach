@@ -31,12 +31,15 @@ def _neutralize_daily_humanisation(monkeypatch):
 
     Poids hebdo = 1.0 quel que soit le jour ou tourne la suite — sinon les
     tests de caps (read_guard, sender) donneraient des resultats differents
-    un samedi (x0.2) ou un dimanche (x0). Les tests dedies
-    (test_daily_budget.py) importent les fonctions reelles directement.
+    un samedi (x0.2) ou un dimanche (x0). Jours off aleatoires desactives
+    (kill-switch env) — sinon la suite echouerait les jours off tires pour le
+    mois courant. Les tests dedies (test_daily_budget.py) importent les
+    fonctions reelles directement et re-activent l'env explicitement.
     """
     from ekoalu.human_scheduler import budget
 
     monkeypatch.setattr(budget, "daily_weight_factor", lambda d=None: 1.0)
+    monkeypatch.setenv("EKOALU_RANDOM_DAYS_OFF", "0")
     yield
 
 

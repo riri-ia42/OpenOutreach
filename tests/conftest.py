@@ -29,6 +29,16 @@ def _mock_embeddings(request):
 
 
 @pytest.fixture(autouse=True)
+def _no_random_days_off(monkeypatch):
+    """Desactive les jours off aleatoires LinkedIn (LOT E) pendant les tests.
+
+    La creation de Task passe par compute_human_delay (patch human_scheduler) :
+    un jour off tire pour aujourd'hui decalerait scheduled_at d'un jour et
+    rendrait la suite non deterministe 1-2 jours par mois."""
+    monkeypatch.setenv("EKOALU_RANDOM_DAYS_OFF", "0")
+
+
+@pytest.fixture(autouse=True)
 def _ignore_qualifier_kill_switch():
     """Empeche le sentinel data/qualifier_disabled.flag (kill-switch ingestion
     pose en prod par Richard) de bloquer les tests qui exercent
