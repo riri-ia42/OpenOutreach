@@ -10,16 +10,31 @@ dans le quota ``max_profiles``. Les profils déjà connus ne coûtent rien :
 ils restent rattachés à la campagne (LeadDiscovery), et on continue de
 dérouler les requêtes-rôles suivantes tant que le quota de NOUVEAUX n'est
 pas atteint et qu'il reste du budget requêtes.
+
+Pagination (07/07) : quand une page pleine est majoritairement déjà connue,
+on va chercher la page suivante de Google (1 crédit/page), dans la limite
+de ``EKOALU_SERPER_MAX_PAGES`` pages par requête (défaut 3) et du budget
+requêtes du run.
 """
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
 # Une campagne est épuisée après N passages consécutifs sans aucun nouveau profil.
 EXHAUSTED_AFTER_EMPTY_RUNS = 2
+# Une page est « pleine » si elle contient au moins ce ratio de per_query résultats.
+FULL_PAGE_RATIO = 0.8
+
+
+def _max_pages_per_query() -> int:
+    try:
+        return max(1, int(os.environ.get("EKOALU_SERPER_MAX_PAGES", "3")))
+    except ValueError:
+        return 3
 
 
 @dataclass
@@ -65,7 +80,7 @@ def source_campaign(
     (inconnus de la base) sont trouvés — un profil déjà connu ne consomme
     pas le quota.
     """
-    from ekoalu.google_sourcing import client, queries
+    from ekoalu.google_sourcing import queries
 
     result = SourcingResult(campaign_name=campaign.name)
 
@@ -79,18 +94,53 @@ def source_campaign(
     for q in qlist:
         if len(harvest.new_urls) >= max_profiles or result.queries_used >= query_budget:
             break
-        result.queries_used += 1
-        try:
-            results = client.search_linkedin_results(q, max_results=per_query)
-        except Exception as e:  # réseau/quota : on n'arrête pas tout
-            logger.warning("Requête Serper échouée (%r) : %s", q, e)
-            result.errors += 1
-            continue
-        _classify_results(q, results, harvest, result, max_profiles)
+        _harvest_query(q, harvest, result, max_profiles=max_profiles,
+                       per_query=per_query, query_budget=query_budget)
 
     result.urls_found = len(harvest.new_urls)
     _persist_harvest(campaign, harvest, result, dry_run=dry_run)
     return result
+
+
+def _harvest_query(q: str, harvest: _Harvest, result: SourcingResult,
+                   *, max_profiles: int, per_query: int, query_budget: int) -> None:
+    """Déroule une requête-rôle, page Google par page Google (1 crédit/page)."""
+    from ekoalu.google_sourcing import client
+
+    page = 1
+    while True:
+        result.queries_used += 1
+        try:
+            results = client.search_linkedin_results(q, num=per_query, page=page)
+        except Exception as e:  # réseau/quota : on n'arrête pas tout
+            logger.warning("Requête Serper échouée (%r page %d) : %s", q, page, e)
+            result.errors += 1
+            return
+        known_on_page = _classify_results(q, results, harvest, result, max_profiles)
+        if not _next_page_wanted(page, results, known_on_page, harvest, result,
+                                 max_profiles=max_profiles, per_query=per_query,
+                                 query_budget=query_budget):
+            return
+        page += 1
+
+
+def _next_page_wanted(page: int, results: list[dict], known_on_page: int,
+                      harvest: _Harvest, result: SourcingResult,
+                      *, max_profiles: int, per_query: int, query_budget: int) -> bool:
+    """Page suivante seulement si la page est pleine ET majoritairement connue.
+
+    Bornée par ``EKOALU_SERPER_MAX_PAGES`` (défaut 3), le quota de nouveaux
+    profils et le budget requêtes du run (chaque page = 1 crédit).
+    """
+    if page >= _max_pages_per_query():
+        return False
+    if result.queries_used >= query_budget:
+        return False
+    if len(harvest.new_urls) >= max_profiles:
+        return False
+    if len(results) < per_query * FULL_PAGE_RATIO:
+        return False  # page creuse : Google n'a plus grand-chose derrière
+    return known_on_page * 2 > len(results)
 
 
 def _classify_results(q: str, results: list[dict], harvest: _Harvest,

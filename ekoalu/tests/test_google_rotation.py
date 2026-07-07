@@ -207,6 +207,96 @@ class TestSourceCampaign:
             campaign=camp, lead__public_identifier="deja-la-1").exists()
         assert LeadDiscovery.objects.filter(campaign=camp).count() == 3
 
+    def test_pagination_page2_quand_page1_majoritairement_connue(self, monkeypatch):
+        """Page 1 pleine et 100% connue -> on paye 1 credit pour la page 2 ;
+        page 2 creuse -> pas de page 3."""
+        from crm.models import Lead
+
+        monkeypatch.delenv("EKOALU_SERPER_MAX_PAGES", raising=False)
+        camp = self._campaign("EKOALU - ABM - Pagine")
+        known = [f"connu-{i}" for i in range(10)]
+        for pid in known:
+            Lead.objects.create(
+                public_identifier=pid,
+                linkedin_url=f"https://www.linkedin.com/in/{pid}/",
+            )
+        page1 = self._results(*[f"https://www.linkedin.com/in/{p}/" for p in known])
+        page2 = self._results("https://www.linkedin.com/in/nouveau-p2/")
+        pages_called: list[int] = []
+
+        def fake_search(q, num=10, page=1):
+            pages_called.append(page)
+            return page1 if page == 1 else page2
+
+        with (
+            patch("ekoalu.google_sourcing.client.search_linkedin_results",
+                  side_effect=fake_search),
+            patch("ekoalu.google_sourcing.queries.build_queries",
+                  return_value=["q-unique"]),
+        ):
+            res = source_campaign(camp, max_profiles=5, query_budget=9)
+
+        assert pages_called == [1, 2]
+        assert res.queries_used == 2      # 1 credit par page
+        assert res.new_leads == 1         # trouve en page 2
+        assert res.already_known == 10
+
+    def test_pagination_plafonnee_a_max_pages(self, monkeypatch):
+        """Toutes les pages pleines et connues -> on s'arrete au plafond (3 pages
+        par defaut, configurable via EKOALU_SERPER_MAX_PAGES)."""
+        from crm.models import Lead
+
+        monkeypatch.delenv("EKOALU_SERPER_MAX_PAGES", raising=False)
+        camp = self._campaign("EKOALU - ABM - Plafond")
+        for page in range(1, 5):
+            for i in range(10):
+                Lead.objects.create(
+                    public_identifier=f"connu-{page}-{i}",
+                    linkedin_url=f"https://www.linkedin.com/in/connu-{page}-{i}/",
+                )
+        pages_called: list[int] = []
+
+        def fake_search(q, num=10, page=1):
+            pages_called.append(page)
+            return self._results(
+                *[f"https://www.linkedin.com/in/connu-{page}-{i}/" for i in range(10)])
+
+        with (
+            patch("ekoalu.google_sourcing.client.search_linkedin_results",
+                  side_effect=fake_search),
+            patch("ekoalu.google_sourcing.queries.build_queries",
+                  return_value=["q-unique"]),
+        ):
+            res = source_campaign(camp, max_profiles=5, query_budget=9)
+        assert pages_called == [1, 2, 3]
+
+        # plafond configurable
+        monkeypatch.setenv("EKOALU_SERPER_MAX_PAGES", "1")
+        pages_called.clear()
+        with (
+            patch("ekoalu.google_sourcing.client.search_linkedin_results",
+                  side_effect=fake_search),
+            patch("ekoalu.google_sourcing.queries.build_queries",
+                  return_value=["q-unique"]),
+        ):
+            source_campaign(camp, max_profiles=5, query_budget=9)
+        assert pages_called == [1]
+
+    def test_pas_de_pagination_quand_page_majoritairement_nouvelle(self):
+        """Une page pleine de NOUVEAUX profils ne declenche pas la page 2."""
+        camp = self._campaign("EKOALU - ABM - Neuf")
+        page1 = self._results(
+            *[f"https://www.linkedin.com/in/neuf-{i}/" for i in range(10)])
+        with (
+            patch("ekoalu.google_sourcing.client.search_linkedin_results",
+                  return_value=page1) as mock_search,
+            patch("ekoalu.google_sourcing.queries.build_queries",
+                  return_value=["q-unique"]),
+        ):
+            res = source_campaign(camp, max_profiles=15, query_budget=9)
+        assert mock_search.call_count == 1
+        assert res.new_leads == 10
+
     def test_budget_requetes_respecte(self):
         camp = self._campaign("EKOALU - ABM - Bouygues")
         with patch(

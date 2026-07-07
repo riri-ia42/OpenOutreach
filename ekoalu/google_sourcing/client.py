@@ -18,7 +18,6 @@ import requests
 logger = logging.getLogger(__name__)
 
 ENDPOINT = "https://google.serper.dev/search"
-MAX_PAGE = 10  # ~100 resultats max par requete, comme l'ancienne API
 
 
 def _config() -> str:
@@ -53,9 +52,13 @@ def search_raw(query: str, num: int = 10, page: int = 1, timeout: int = 20) -> l
     return resp.json().get("organic", []) or []
 
 
-def search_linkedin_results(query: str, max_results: int = 10) -> list[dict]:
-    """Resultats profils LinkedIn ``/in/`` pour la requete : dicts
-    ``{link, title, snippet}``, dedupliques par public_id.
+def search_linkedin_results(query: str, num: int = 10, page: int = 1) -> list[dict]:
+    """UNE page de resultats profils LinkedIn ``/in/`` pour la requete : dicts
+    ``{link, title, snippet}``, dedupliques par public_id. 1 credit par page.
+
+    La pagination (page 2, 3, ...) est pilotee par l'appelant (service.py) qui
+    sait quels profils sont deja connus de la base — chaque page appelee
+    separement compte 1 credit dans le budget requetes.
 
     Garde title/snippet (contrairement a search_linkedin_profiles) pour
     permettre un pre-filtre AVANT la lecture LinkedIn (cf. prefilter.py).
@@ -64,30 +67,22 @@ def search_linkedin_results(query: str, max_results: int = 10) -> list[dict]:
 
     out: list[dict] = []
     seen: set[str] = set()
-    page = 1
-    while len(out) < max_results and page <= MAX_PAGE:
-        items = search_raw(query, num=10, page=page)
-        if not items:
-            break
-        for it in items:
-            link = (it.get("link") or "").strip()
-            if "/in/" not in link:
-                continue
-            pid = url_to_public_id(link)
-            if not pid or pid in seen:
-                continue
-            seen.add(pid)
-            out.append({
-                "link": link,
-                "title": (it.get("title") or "").strip(),
-                "snippet": (it.get("snippet") or "").strip(),
-            })
-            if len(out) >= max_results:
-                break
-        page += 1
+    for it in search_raw(query, num=num, page=page):
+        link = (it.get("link") or "").strip()
+        if "/in/" not in link:
+            continue
+        pid = url_to_public_id(link)
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append({
+            "link": link,
+            "title": (it.get("title") or "").strip(),
+            "snippet": (it.get("snippet") or "").strip(),
+        })
     return out
 
 
 def search_linkedin_profiles(query: str, max_results: int = 10) -> list[str]:
-    """URLs de profils LinkedIn ``/in/`` pour la requete, dedupliquees par public_id."""
-    return [r["link"] for r in search_linkedin_results(query, max_results=max_results)]
+    """URLs de profils LinkedIn ``/in/`` (page 1), dedupliquees par public_id."""
+    return [r["link"] for r in search_linkedin_results(query)[:max_results]]

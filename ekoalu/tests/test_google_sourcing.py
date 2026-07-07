@@ -130,9 +130,8 @@ def test_search_linkedin_profiles_extrait_dedup_et_filtre():
         {"link": "https://www.linkedin.com/company/leon-grosse/"},  # exclu (pas /in/)
         {"link": "https://www.linkedin.com/in/jean-dupont/"},        # doublon
     ]
-    with patch.object(client, "search_raw", side_effect=[page1, []]):
+    with patch.object(client, "search_raw", return_value=page1):
         urls = client.search_linkedin_profiles("q", max_results=10)
-    pids = [u for u in urls]
     assert len(urls) == 2
     assert any("jean-dupont" in u for u in urls)
     assert any("marie-martin" in u for u in urls)
@@ -141,9 +140,20 @@ def test_search_linkedin_profiles_extrait_dedup_et_filtre():
 
 def test_search_linkedin_profiles_respecte_max():
     page = [{"link": f"https://www.linkedin.com/in/p{i}/"} for i in range(10)]
-    with patch.object(client, "search_raw", side_effect=[page, []]):
+    with patch.object(client, "search_raw", return_value=page):
         urls = client.search_linkedin_profiles("q", max_results=3)
     assert len(urls) == 3
+
+
+def test_search_linkedin_results_une_page_un_credit():
+    """search_linkedin_results ne pagine PAS lui-meme : 1 appel = 1 page = 1 credit
+    (la pagination est pilotee par service.py qui connait les profils connus)."""
+    page = [{"link": f"https://www.linkedin.com/in/p{i}/"} for i in range(10)]
+    with patch.object(client, "search_raw", return_value=page) as mock_raw:
+        results = client.search_linkedin_results("q", num=10, page=2)
+    assert mock_raw.call_count == 1
+    assert mock_raw.call_args.kwargs.get("page") == 2
+    assert len(results) == 10
 
 
 # --------------------------------------------------------------------------
