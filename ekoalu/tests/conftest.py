@@ -46,6 +46,19 @@ def _neutralize_daily_humanisation(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_apify_env(monkeypatch):
+    """Purge l'env Apify : la suite doit etre deterministe que le token prod
+    soit present ou non dans le shell (sinon le chemin Apify-first de
+    _embed_urlonly_leads s'activerait dans les tests Voyager historiques).
+    Les tests Apify posent explicitement leur env."""
+    monkeypatch.delenv("EKOALU_APIFY_TOKEN", raising=False)
+    monkeypatch.delenv("EKOALU_APIFY_ACTOR", raising=False)
+    monkeypatch.delenv("EKOALU_APIFY_ENRICH", raising=False)
+    monkeypatch.delenv("EKOALU_APIFY_DAILY_CAP", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_shared_exclusions(tmp_path_factory, monkeypatch):
     """Pointe la liste d'exclusion partagee vers un fichier absent + purge le
     cache TTL — sinon les tests liraient le VRAI _partage/exclusions.json

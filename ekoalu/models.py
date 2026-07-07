@@ -2,6 +2,7 @@
 
 Re-exporte les modèles des sous-modules pour que Django les détecte.
 """
+from ekoalu.apify_enrich.models import ApifyUsageDay
 from ekoalu.company_validation.abm import AbmCampaignLink
 from ekoalu.company_validation.models import ApprovedCompany
 from ekoalu.doctor.models import DoctorAction, DoctorIncident
@@ -30,4 +31,5 @@ __all__ = [
     "LeadDiscovery",
     "ProfileReadDay",
     "GoogleSourcingState",
+    "ApifyUsageDay",
 ]
