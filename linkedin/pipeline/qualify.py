@@ -169,6 +169,7 @@ def _run_qualification_inner(session, qualifier: BayesianQualifier) -> str | Non
             profile_text,
             product_docs=campaign.product_docs,
             campaign_objective=campaign.campaign_objective,
+            campaign_id=campaign.id,
         )
     _save_qualification_result(session, qualifier, lead_id, public_id, embedding, label, reason)
     return public_id

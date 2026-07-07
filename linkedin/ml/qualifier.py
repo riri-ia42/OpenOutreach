@@ -103,7 +103,8 @@ EKOALU works regionally for standard products — Rhône-Alpes departments 69, 0
 Weigh: (a) does the role carry decision power or specification influence? (b) is the company type one of the relevant families above and NOT a competitor? (c) is the sector tertiary/non-residential building? (d) does geography fit (regional for standard, national only if niche/large)? When the profile is genuinely ambiguous and gives no signal of relevance, reject — it is cheaper to skip than to waste a touch on a non-fit. Be decisive and concise; the reason must cite the concrete signal (role + company type) that drove the decision, in one short sentence."""
 
 
-def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: str, model=None) -> tuple[int, str]:
+def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: str,
+                     model=None, campaign_id: int | None = None) -> tuple[int, str]:
     """Call LLM to qualify a profile. Returns (label, reason).
 
     label: 1 = accept, 0 = reject.
@@ -112,19 +113,23 @@ def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: s
     - system = _QUALIFY_SYSTEM_RUBRIC : gros (>4000 chars) et IDENTIQUE pour
       toutes les campagnes -> mis en cache (cache_control auto via ekoalu/
       llm_usage/patch.py) et relu a 10% du prix sur les rafales de qualif.
-    - user = product_docs + objective + profile : la partie variable par
-      campagne/prospect, hors cache. Mettre product_docs/objective dans le
-      system casserait le cache (prefixe different a chaque appel).
+    - user = feedbacks Richard + product_docs + objective + profile : la partie
+      variable par campagne/prospect, hors cache. Mettre product_docs/objective
+      dans le system casserait le cache (prefixe different a chaque appel).
 
     ``model`` : modele pydantic-ai explicite (defaut = get_llm_model() / SiteConfig).
     Permet a l'A/B qualifier de scorer le meme profil avec un challenger (Haiku).
+    ``campaign_id`` : selectionne les feedbacks de requalification Richard de la
+    campagne en priorite (fallback global) — injectes dans le message USER.
     """
     from pydantic_ai import Agent
 
     from linkedin.llm import get_llm_model
 
     system_prompt = _QUALIFY_SYSTEM_RUBRIC
+    feedback_block = _richard_feedback_block(campaign_id)
     user_prompt = (
+        f"{feedback_block}"
         f"## This campaign — product/service\n{product_docs}\n\n"
         f"## This campaign — objective\n{campaign_objective}\n\n"
         f"## LinkedIn profile to evaluate\n{profile_text}"
@@ -140,6 +145,20 @@ def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: s
 
     label = 1 if decision.qualified else 0
     return (label, decision.reason)
+
+
+def _richard_feedback_block(campaign_id: int | None) -> str:
+    """Feedbacks de requalification/confirmation Richard (EKOALU), "" si aucun.
+
+    Un echec d'injection ne doit jamais casser la qualification (apprentissage
+    best-effort, meme pattern que la capture des CorrectionExample).
+    """
+    try:
+        from ekoalu.qualification_feedback.injection import qualification_feedback_block
+        return qualification_feedback_block(campaign_id)
+    except Exception as exc:  # noqa: BLE001 — best-effort, on log + prompt sans bloc
+        logger.warning("Injection feedbacks qualifier impossible : %s", exc)
+        return ""
 
 
 # ---------------------------------------------------------------------------

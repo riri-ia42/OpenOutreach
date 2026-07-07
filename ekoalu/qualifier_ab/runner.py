@@ -71,6 +71,7 @@ def run_ab_qualification(profile_text: str, product_docs: str, campaign_objectiv
 
     champ_label, champ_reason = qualify_with_llm(
         profile_text, product_docs=product_docs, campaign_objective=campaign_objective,
+        campaign_id=campaign_id,
     )
 
     state = _read_sentinel() or {}
