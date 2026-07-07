@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import time
 
 import numpy as np
 from termcolor import colored
@@ -71,6 +73,7 @@ def _embed_urlonly_leads(session, lead_ids) -> None:
     """Embed up to N URL-only leads of the campaign (1 LinkedIn read each)."""
     from crm.models import Lead
     from ekoalu.read_guard.guard import ReadCapExceededError
+    from linkedin.conf import CAMPAIGN_CONFIG
 
     limit = _urlonly_embed_per_cycle()
     if limit <= 0:
@@ -79,7 +82,14 @@ def _embed_urlonly_leads(session, lead_ids) -> None:
         Lead.objects.filter(pk__in=lead_ids, embedding__isnull=True)
         .order_by("creation_date")[:limit]
     )
-    for lead in pending:
+    for i, lead in enumerate(pending):
+        if i:
+            # LOT C : même cadence que l'enrichissement search — jamais deux
+            # lectures Voyager back-to-back dans une même task.
+            time.sleep(random.uniform(
+                CAMPAIGN_CONFIG["enrich_min_delay_seconds"],
+                CAMPAIGN_CONFIG["enrich_max_delay_seconds"],
+            ))
         try:
             embedded = lead.get_embedding(session) is not None
         except ReadCapExceededError:

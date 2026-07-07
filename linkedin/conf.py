@@ -83,8 +83,11 @@ CAMPAIGN_CONFIG = {
     "embedding_model": "BAAI/bge-small-en-v1.5",
     "connect_delay_seconds": 10,
     "connect_no_candidate_delay_seconds": 300,
-    "enrich_min_delay_seconds": 6,
-    "enrich_max_delay_seconds": 10,
+    # Délai entre lectures Voyager CONSÉCUTIVES d'une même task (enrichissement
+    # search + embed URL-only). LOT C 07/07 : 6-10s = rafale détectable →
+    # 20-45s. Les délais ENTRE tasks restent gérés par le human_scheduler.
+    "enrich_min_delay_seconds": 20,
+    "enrich_max_delay_seconds": 45,
     "enrich_max_per_page": 10,
     "burst_min_seconds": 2700,   # 45 min
     "burst_max_seconds": 3900,   # 65 min

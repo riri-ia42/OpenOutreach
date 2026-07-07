@@ -23,6 +23,14 @@ def campaign(db):
     return Campaign.objects.create(name="EKOALU - ABM - PrioTest")
 
 
+@pytest.fixture(autouse=True)
+def _no_pacing_sleep():
+    """LOT C : une pause 20-45s sépare deux embeds consécutifs — neutralisée
+    dans les tests (le test dédié ci-dessous vérifie qu'elle est bien tirée)."""
+    with patch("linkedin.pipeline.qualify.time.sleep") as mock_sleep:
+        yield mock_sleep
+
+
 def _mk_lead(pid: str, embedded: bool):
     from crm.models import Lead
 
@@ -114,6 +122,31 @@ def test_urlonly_desactive_avec_n_zero(monkeypatch, campaign):
         candidates = fetch_qualification_candidates(session)
 
     assert [c.public_identifier for c in candidates] == ["embedde-a"]
+
+
+@pytest.mark.django_db
+def test_pause_20_45s_entre_deux_embeds_consecutifs(monkeypatch, campaign, _no_pacing_sleep):
+    """LOT C : deux lectures Voyager d'une même task ne partent jamais
+    back-to-back — pause tirée dans [enrich_min, enrich_max] (20-45s)."""
+    from crm.models import Lead
+    from linkedin.conf import CAMPAIGN_CONFIG
+
+    monkeypatch.delenv("EKOALU_URLONLY_EMBED_PER_CYCLE", raising=False)
+    urlonly = [_mk_lead(f"serper-{i}", False) for i in range(2)]
+    session = SimpleNamespace(campaign=campaign)
+
+    with (
+        patch("linkedin.db.leads.get_leads_for_qualification",
+              return_value=_payload(urlonly)),
+        patch.object(Lead, "get_embedding", _fake_get_embedding),
+    ):
+        fetch_qualification_candidates(session)
+
+    # 2 embeds => exactement 1 pause, entre les deux (pas avant le premier)
+    assert _no_pacing_sleep.call_count == 1
+    pause = _no_pacing_sleep.call_args[0][0]
+    assert CAMPAIGN_CONFIG["enrich_min_delay_seconds"] <= pause <= CAMPAIGN_CONFIG["enrich_max_delay_seconds"]
+    assert CAMPAIGN_CONFIG["enrich_min_delay_seconds"] >= 20
 
 
 @pytest.mark.django_db

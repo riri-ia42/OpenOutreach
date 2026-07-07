@@ -187,7 +187,10 @@ def discover_and_enrich(session, urls):
         if create_enriched_lead(session, url, profile) is not None:
             enriched += 1
 
-        time.sleep(random.uniform(min_delay, max_delay))
+        # Pause humanisée ENTRE deux scrapes seulement (pas après le dernier :
+        # avec 20-45s le sleep de queue mangeait le watchdog de la task).
+        if url != new_urls[-1]:
+            time.sleep(random.uniform(min_delay, max_delay))
 
     logger.info("Enriched %d/%d new profiles", enriched, len(new_urls))
 
