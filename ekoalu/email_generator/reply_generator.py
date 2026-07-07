@@ -101,23 +101,22 @@ def _render_reply_system_prompt(intent: Intent) -> str:
 def _build_few_shot_for_intent(intent: Intent, limit: int = 6) -> str:
     """Construit un bloc few-shot depuis les CorrectionExample passés.
 
-    Filtré sur persona_slug=`email_reply_{intent}` — Richard a édité un brouillon
-    pour ce type d'intent dans le passé, on apprend de sa version.
+    Sélection via ekoalu.learning : canal email_reply d'abord, slug
+    `email_reply_{intent}` privilégié s'il y a assez d'exemples ; dédup des
+    consignes quasi identiques ; used_in_prompt marqué.
     Renvoie une chaîne vide si pas d'exemples.
     """
     try:
+        from ekoalu import learning
         from ekoalu.inbox_assist.models import CorrectionExample
     except Exception:  # noqa: BLE001 — bootstrap (Django pas prêt)
         return ""
 
-    slug = f"email_reply_{intent.value}"
-    qs = (
-        CorrectionExample.objects
-        .filter(persona_slug=slug)
-        .select_related("pending_reply")
-        .order_by("-created_at")[:limit]
+    examples = learning.select_examples(
+        CorrectionExample.Channel.EMAIL_REPLY,
+        persona_slug=f"email_reply_{intent.value}",
+        limit=limit,
     )
-    examples = list(qs)
     if not examples:
         return ""
 
@@ -171,12 +170,20 @@ def generate_email_reply(
 
     Retourne `ColdEmailDraft(subject="", body="")` si la génération échoue.
     """
+    from ekoalu import learning
+    from ekoalu.inbox_assist.models import CorrectionExample
+    from ekoalu.message_validator.style_guard import enforce_style, find_style_violations
+
     client = _get_anthropic_client()
     if not client:
         logger.warning("Pas de client Anthropic, génération reply impossible")
         return ColdEmailDraft(subject="", body="")
 
-    system = _render_reply_system_prompt(intent) + _build_few_shot_for_intent(intent)
+    system = (
+        learning.learned_rules_block(CorrectionExample.Channel.EMAIL_REPLY)
+        + _render_reply_system_prompt(intent)
+        + _build_few_shot_for_intent(intent)
+    )
     user_msg = _build_user_message(
         inbound_subject=inbound_subject,
         inbound_message=inbound_message,
@@ -185,6 +192,27 @@ def generate_email_reply(
     )
     model_id = model or os.environ.get("ANTHROPIC_MODEL", _DEFAULT_MODEL)
 
+    draft = _reply_once(client, model_id, system, user_msg, max_tokens)
+    if not draft.is_valid():
+        return draft
+
+    # Garde-fou de style : 1 régénération max, jamais de blocage dur.
+    violations = find_style_violations(draft.body)
+    if violations:
+        def _regenerate(motif: str) -> str:
+            retry = _reply_once(client, model_id, system,
+                                f"{user_msg}\n\n{motif}", max_tokens)
+            if retry.is_valid():
+                draft.subject, draft.body = retry.subject, retry.body
+                return retry.body
+            return ""
+        enforce_style(draft.body, _regenerate, channel="email_reply")
+    return draft
+
+
+def _reply_once(client, model_id: str, system: str, user_msg: str,
+                max_tokens: int) -> ColdEmailDraft:
+    """Un appel Claude + parse + normalisation 'Re:'."""
     try:
         resp = client.messages.create(
             model=model_id,

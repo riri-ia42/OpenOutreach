@@ -186,6 +186,7 @@ class TestBuildFewShotForIntent:
         CorrectionExample.objects.create(
             pending_reply=pr,
             persona_slug="email_reply_rdv_request",
+            channel=CorrectionExample.Channel.EMAIL_REPLY,
             kind=CorrectionExample.Kind.TEXT_CORRECTION,
             similarity_ratio=0.4,
             diff_lines=[],
@@ -197,19 +198,36 @@ class TestBuildFewShotForIntent:
         assert "quand peut-on se voir" in out
         assert "simplifié" in out
 
-    def test_filtre_par_intent(self, db):
-        """Un CorrectionExample pour `objection` ne doit pas remonter pour `rdv_request`."""
+    def test_fallback_canal_quand_intent_insuffisant(self, db):
+        """< 3 exemples pour l'intent → fallback sur le canal email_reply entier
+        (le style Richard est commun aux intents), mais JAMAIS un autre canal."""
         pr = _make_pr(intent="objection",
                       ai_draft="x", final_sent="y",
                       inbound_message_id="g-fs2")
         CorrectionExample.objects.create(
             pending_reply=pr,
             persona_slug="email_reply_objection",
+            channel=CorrectionExample.Channel.EMAIL_REPLY,
             kind=CorrectionExample.Kind.TEXT_CORRECTION,
             similarity_ratio=0.5, diff_lines=[],
         )
         out = _build_few_shot_for_intent(Intent.RDV_REQUEST)
-        assert out == ""  # rien pour l'intent demandé
+        assert "Brouillon IA : x" in out  # fallback canal email_reply
+
+    def test_jamais_un_autre_canal(self, db):
+        """Un exemple DM LinkedIn ne contamine JAMAIS le few-shot email_reply."""
+        pr = _make_pr(intent="rdv_request",
+                      ai_draft="DM_LINKEDIN_TOKEN", final_sent="version dm",
+                      inbound_message_id="g-fs3")
+        CorrectionExample.objects.create(
+            pending_reply=pr,
+            persona_slug="dg_metallerie",
+            channel=CorrectionExample.Channel.LINKEDIN_DM,
+            kind=CorrectionExample.Kind.TEXT_CORRECTION,
+            similarity_ratio=0.5, diff_lines=[],
+        )
+        out = _build_few_shot_for_intent(Intent.RDV_REQUEST)
+        assert out == ""
 
     def test_limit_respect(self, db):
         for i in range(10):
@@ -221,6 +239,7 @@ class TestBuildFewShotForIntent:
             CorrectionExample.objects.create(
                 pending_reply=pr,
                 persona_slug="email_reply_rdv_request",
+                channel=CorrectionExample.Channel.EMAIL_REPLY,
                 kind=CorrectionExample.Kind.TEXT_CORRECTION,
                 similarity_ratio=0.5, diff_lines=[],
             )
@@ -239,6 +258,7 @@ class TestGenerateEmailReplyUsesFewShot:
         CorrectionExample.objects.create(
             pending_reply=pr,
             persona_slug="email_reply_rdv_request",
+            channel=CorrectionExample.Channel.EMAIL_REPLY,
             kind=CorrectionExample.Kind.TEXT_CORRECTION,
             similarity_ratio=0.4, diff_lines=[],
         )

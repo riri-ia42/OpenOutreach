@@ -5,6 +5,9 @@ Calque sur `ekoalu/follow_up/generator.py` :
 - appel `messages.create` avec system prompt + user message
 - parsing de la réponse balisée <sujet>/<corps>
 - fallback signature en post-traitement
+- apprentissage (audit 07/07) : règles apprises + few-shot CorrectionExample
+  (canal email_cold) injectés dans le system prompt, garde-fou de style
+  post-génération (1 régénération max).
 """
 from __future__ import annotations
 
@@ -134,6 +137,10 @@ def generate_cold_email(
     Retourne `ColdEmailDraft(subject="", body="")` si la génération a échoué.
     `variant_used` est rempli systématiquement (même en cas d'échec) pour audit.
     """
+    from ekoalu import learning
+    from ekoalu.inbox_assist.models import CorrectionExample
+    from ekoalu.message_validator.style_guard import enforce_style, find_style_violations
+
     chosen_variant = variant or pick_variant()
 
     client = _get_anthropic_client()
@@ -141,7 +148,13 @@ def generate_cold_email(
         logger.warning("Pas de client Anthropic, génération impossible")
         return ColdEmailDraft(subject="", body="", variant_used=chosen_variant)
 
-    system = render_system_prompt(chosen_variant)
+    # Apprentissage : règles récurrentes en tête + few-shot corrections Richard
+    # (canal email_cold — inclut les cold mails ET les emails de relance).
+    system = (
+        learning.learned_rules_block(CorrectionExample.Channel.EMAIL_COLD)
+        + render_system_prompt(chosen_variant)
+        + learning.build_few_shot(CorrectionExample.Channel.EMAIL_COLD)
+    )
     user_msg = build_user_message(
         entreprise=entreprise, dirigeant=dirigeant, code_naf=code_naf,
         activite=activite, ville=ville, dpt=dpt,
@@ -155,6 +168,29 @@ def generate_cold_email(
         )
     model_id = model or os.environ.get("ANTHROPIC_MODEL", _DEFAULT_MODEL)
 
+    draft = _generate_once(client, model_id, system, user_msg, max_tokens, chosen_variant)
+    if not draft.is_valid():
+        return draft
+
+    # Garde-fou de style : 1 régénération max, jamais de blocage dur.
+    violations = find_style_violations(f"{draft.subject}\n{draft.body}")
+    if violations:
+        def _regenerate(motif: str) -> str:
+            retry = _generate_once(
+                client, model_id, system, f"{user_msg}\n\n{motif}",
+                max_tokens, chosen_variant,
+            )
+            if retry.is_valid():
+                draft.subject, draft.body = retry.subject, retry.body
+                return f"{retry.subject}\n{retry.body}"
+            return ""
+        enforce_style(f"{draft.subject}\n{draft.body}", _regenerate, channel="email_cold")
+    return draft
+
+
+def _generate_once(client, model_id: str, system: str, user_msg: str,
+                   max_tokens: int, chosen_variant: str) -> ColdEmailDraft:
+    """Un appel Claude + parse + post-traitement (clôture, lien RDV)."""
     try:
         resp = client.messages.create(
             model=model_id,
