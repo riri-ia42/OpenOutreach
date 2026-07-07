@@ -224,8 +224,34 @@ class TaskQuerySet(models.QuerySet):
     def pending(self):
         return self.filter(status=Task.Status.PENDING).order_by("scheduled_at")
 
-    def claim_next(self) -> "Task | None":
-        return self.pending().filter(scheduled_at__lte=timezone.now()).first()
+    def claim_next(self, task_types=None) -> "Task | None":
+        """Prochaine task due, priorisée par TYPE puis par échéance (LOT C).
+
+        À échéance due égale : follow_up (relances de deals déjà CONNECTED)
+        puis check_pending (invitations en attente) passent AVANT connect
+        (nouvelles invitations). Avant : FIFO pur sur scheduled_at — un
+        backlog permanent de connect affamait les relances (12/15 deals
+        CONNECTED silencieux > 7j).
+
+        ``task_types`` restreint le claim aux types donnés — utilisé par le
+        daemon pour laisser passer les follow_up quand le pacing lectures gate.
+        """
+        from django.db.models import Case, IntegerField, Value, When
+
+        qs = self.pending().filter(scheduled_at__lte=timezone.now())
+        if task_types is not None:
+            qs = qs.filter(task_type__in=task_types)
+        priority = Case(
+            When(task_type=Task.TaskType.FOLLOW_UP, then=Value(0)),
+            When(task_type=Task.TaskType.CHECK_PENDING, then=Value(1)),
+            default=Value(2),
+            output_field=IntegerField(),
+        )
+        return (
+            qs.annotate(type_priority=priority)
+            .order_by("type_priority", "scheduled_at")
+            .first()
+        )
 
     def seconds_to_next(self) -> float | None:
         """Seconds until the next pending task, or None if queue is empty."""
