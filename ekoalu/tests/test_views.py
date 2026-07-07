@@ -656,6 +656,65 @@ class TestLeadDetailView:
         lead = Lead.objects.get(public_identifier="test-disq")
         assert lead.disqualified is True
 
+    def test_lead_detail_disqualify_cascade_deal_et_outbound(self, client_logged):
+        """LOT D : le bouton disqualify passe par la cascade — Deal actif clos
+        + PendingOutbound ouvert rejeté (plus de Deal actif fantôme)."""
+        from crm.models import Deal, Lead
+        from ekoalu.outbound_validation.models import (
+            OutboundKind, OutboundStatus, PendingOutbound,
+        )
+        from linkedin.enums import ProfileState
+        from linkedin.models import Campaign
+
+        lead = Lead.objects.create(
+            public_identifier="test-disq-cascade",
+            linkedin_url="https://www.linkedin.com/in/test-disq-cascade/",
+        )
+        camp = Campaign.objects.create(name="EKOALU - cascade")
+        deal = Deal.objects.create(lead=lead, campaign=camp,
+                                   state=ProfileState.CONNECTED.value)
+        po = PendingOutbound.objects.create(
+            prospect_public_id="test-disq-cascade", campaign_id=camp.pk,
+            kind=OutboundKind.FOLLOW_UP, ai_draft="msg",
+            status=OutboundStatus.PENDING,
+        )
+
+        r = client_logged.post(
+            reverse("ekoalu:lead_detail", args=["test-disq-cascade"]),
+            data={"action": "disqualify"},
+        )
+        assert r.status_code in (302, 303)
+        deal.refresh_from_db(); po.refresh_from_db()
+        assert deal.state == ProfileState.FAILED.value
+        assert po.status == OutboundStatus.REJECTED
+
+    def test_already_connected_cascade_deal_clos(self, client_logged):
+        """LOT D : l'action already_connected clôt le Deal actif (outcome
+        pre_existing_relation) en plus de disqualifier le lead."""
+        from crm.models import Deal, Lead
+        from crm.models.deal import Outcome
+        from linkedin.enums import ProfileState
+        from linkedin.models import Campaign
+
+        lead = Lead.objects.create(
+            public_identifier="test-already-conn",
+            linkedin_url="https://www.linkedin.com/in/test-already-conn/",
+        )
+        camp = Campaign.objects.create(name="EKOALU - deja relation")
+        deal = Deal.objects.create(lead=lead, campaign=camp,
+                                   state=ProfileState.QUALIFIED.value)
+
+        r = client_logged.post(
+            reverse("ekoalu:deals_filtered"),
+            data={"action": "already_connected", "deal_id": deal.pk,
+                  "explanation": "copain de promo"},
+        )
+        assert r.status_code in (302, 303)
+        lead.refresh_from_db(); deal.refresh_from_db()
+        assert lead.disqualified is True
+        assert deal.state == ProfileState.FAILED.value
+        assert deal.outcome == Outcome.PRE_EXISTING_RELATION.value
+
     def test_lead_detail_requalify(self, client_logged):
         from crm.models import Lead
         Lead.objects.create(

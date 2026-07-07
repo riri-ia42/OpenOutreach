@@ -131,16 +131,26 @@ def update_lead_slug(old_public_id: str, new_public_id: str):
     return updated
 
 
-def disqualify_lead(public_id: str):
-    """Set Lead.disqualified = True (account-level, permanent, cross-campaign)."""
-    from crm.models import Lead
+def disqualify_lead(public_id: str, reason: str = ""):
+    """Permanent, cross-campaign exclusion — routes through the ekoalu cascade.
 
-    lead = Lead.objects.filter(public_identifier=public_id).first()
-    if not lead:
+    LOT D 07/07: setting ``Lead.disqualified=True`` directly leaves active
+    Deals and phantom check_pending/follow_up tasks behind. The cascade
+    closes Deals, rejects open PendingOutbound and cancels open tasks.
+    """
+    from crm.models import Lead
+    from crm.models.deal import Outcome
+    from ekoalu.lead_exclusion import disqualify_leads
+
+    if not Lead.objects.filter(public_identifier=public_id).exists():
         logger.warning("disqualify_lead: no Lead for %s", public_id)
         return
-    lead.disqualified = True
-    lead.save(update_fields=["disqualified"])
+    disqualify_leads(
+        [public_id],
+        reason or "disqualify_lead",
+        outcome=Outcome.UNRESPONSIVE.value,
+        deal_reason=reason or None,
+    )
 
 
 def discover_and_enrich(session, urls):

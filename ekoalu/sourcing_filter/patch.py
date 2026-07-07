@@ -45,13 +45,20 @@ def apply_sourcing_filter_patch() -> None:
 
         try:
             from crm.models import Lead
+            from crm.models.deal import Outcome
+            from ekoalu.lead_exclusion import disqualify_leads
             from ekoalu.qualification_feedback.models import QualificationFeedback
 
             lead = Lead.objects.filter(pk=result).first()
             if not lead:
                 return result
-            lead.disqualified = True
-            lead.save(update_fields=["disqualified"])
+            # Cascade (LOT D) — lead tout juste créé donc 0 Deal/PO/task à
+            # clore, mais on garde LA source of truth unique de disqualification.
+            disqualify_leads(
+                [lead.public_identifier],
+                "Auto-exclu au sourcing : deja relation LinkedIn (degree=1)",
+                outcome=Outcome.PRE_EXISTING_RELATION.value,
+            )
 
             campaign = getattr(session, "campaign", None)
             QualificationFeedback.objects.create(

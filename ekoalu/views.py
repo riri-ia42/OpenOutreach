@@ -589,8 +589,12 @@ def lead_detail(request, slug: str):
     if request.method == "POST":
         action = request.POST.get("action", "")
         if action == "disqualify":
-            lead.disqualified = True
-            lead.save()
+            # LOT D : cascade complète (Deals clos + POs rejetés + tasks annulées),
+            # jamais de disqualified=True en direct (Deal actif fantôme sinon).
+            from ekoalu.lead_exclusion import disqualify_leads
+            disqualify_leads(
+                [lead.public_identifier], "Disqualification manuelle (fiche prospect)",
+            )
             django_messages.warning(request, "Prospect disqualifié (exclusion permanente).")
             return redirect("ekoalu:lead_detail", slug=slug)
         elif action == "requalify":
@@ -2088,9 +2092,16 @@ def deals_filtered(request):
                 richard_explanation=explanation or "Deja une relation de Richard",
                 kind=QualificationFeedback.Kind.ALREADY_CONNECTED,
             )
-            # Exclusion permanente : evite re-sourcing futur
-            deal.lead.disqualified = True
-            deal.lead.save(update_fields=["disqualified"])
+            # Exclusion permanente via la cascade (LOT D) : Deals clos avec
+            # outcome pre_existing_relation + POs rejetés + tasks annulées.
+            from crm.models.deal import Outcome
+            from ekoalu.lead_exclusion import disqualify_leads
+            disqualify_leads(
+                [deal.lead.public_identifier],
+                explanation or "Deja une relation de Richard",
+                outcome=Outcome.PRE_EXISTING_RELATION.value,
+                deal_reason=f"Deja relation LinkedIn: {explanation or 'relation existante'}",
+            )
             django_messages.success(
                 request,
                 f"{deal.lead.public_identifier} marque comme deja relation - exclu des sourcings futurs.",

@@ -46,6 +46,26 @@ def handle_check_pending(task, session, qualifiers):
         session.campaign, colored("\u25b6 check_pending", "magenta", attrs=["bold"]), public_id,
     )
 
+    # D\u00e9fense en profondeur (LOT D) : lead disqualifi\u00e9 = no-op \u2014 aucune lecture
+    # LinkedIn, cl\u00f4ture du Deal encore actif (miroir de handle_follow_up).
+    from crm.models import Lead
+
+    lead = Lead.objects.filter(public_identifier=public_id).first()
+    if lead is not None and lead.disqualified:
+        from crm.models import Deal
+        from crm.models.deal import Outcome
+
+        terminal = (ProfileState.COMPLETED.value, ProfileState.FAILED.value)
+        deal = Deal.objects.filter(lead=lead, campaign=session.campaign).first()
+        if deal and deal.state not in terminal:
+            set_profile_state(
+                session, public_id, ProfileState.FAILED.value,
+                outcome=Outcome.NOT_INTERESTED.value,
+                reason="Lead disqualifie \u2014 check_pending annule",
+            )
+        logger.info("[%s] check_pending %s skip: lead disqualifie", session.campaign, public_id)
+        return
+
     profile_dict = get_profile_dict_for_public_id(session, public_id)
     if profile_dict is None:
         logger.warning("check_pending: no Deal for %s — skipping", public_id)

@@ -330,12 +330,53 @@ class TestHandleCheckPending:
         handle_check_pending(task, fake_session, qualifiers)
         mock_status.assert_not_called()
 
+    @patch("linkedin.actions.status.get_connection_status")
+    def test_noop_when_lead_disqualified(self, mock_status, fake_session):
+        """LOT D : lead disqualifié = no-op — AUCUNE lecture LinkedIn, Deal
+        encore actif clôturé (FAILED), pas de nouvelle task."""
+        from crm.models import Lead
+
+        _make_pending(fake_session)
+        Lead.objects.filter(public_identifier="alice").update(disqualified=True)
+
+        task = _make_task(
+            Task.TaskType.CHECK_PENDING,
+            {"campaign_id": fake_session.campaign.pk, "public_id": "alice", "backoff_hours": 24},
+        )
+        handle_check_pending(task, fake_session, _build_context(fake_session))
+
+        mock_status.assert_not_called()
+        _assert_deal_state(fake_session, "alice", ProfileState.FAILED)
+        assert not Task.objects.filter(
+            status=Task.Status.PENDING, payload__public_id="alice",
+        ).exists()
+
 
 # ── handle_follow_up tests ─────────────────────────────────────
 
 
 @pytest.mark.django_db
 class TestHandleFollowUp:
+    @patch("linkedin.db.summaries.materialize_profile_summary_if_missing")
+    @patch("linkedin.agents.follow_up.run_follow_up_agent")
+    def test_noop_when_lead_disqualified(self, mock_agent, mock_materialize, fake_session):
+        """LOT D : lead disqualifié = no-op — zéro appel agent/Claude, Deal clos."""
+        from crm.models import Lead
+
+        _make_connected(fake_session)
+        Lead.objects.filter(public_identifier="alice").update(disqualified=True)
+
+        task = _make_task(
+            Task.TaskType.FOLLOW_UP,
+            {"campaign_id": fake_session.campaign.pk, "public_id": "alice"},
+        )
+        handle_follow_up(task, fake_session, _build_context(fake_session))
+
+        mock_agent.assert_not_called()
+        mock_materialize.assert_not_called()
+        deal = Deal.objects.get(lead__public_identifier="alice", campaign=fake_session.campaign)
+        assert deal.state == ProfileState.FAILED
+
     @patch("linkedin.db.summaries.materialize_profile_summary_if_missing")
     @patch("linkedin.actions.message.send_raw_message", return_value=True)
     @patch("linkedin.agents.follow_up.run_follow_up_agent")

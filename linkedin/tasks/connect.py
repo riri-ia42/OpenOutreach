@@ -140,7 +140,7 @@ def handle_connect(task, session, qualifiers):
             attempts = increment_connect_attempts(session, public_id)
             if attempts >= MAX_CONNECT_ATTEMPTS:
                 reason = f"Unreachable: no Connect button after {attempts} attempts"
-                disqualify_lead(public_id)
+                disqualify_lead(public_id, reason=reason)
                 set_profile_state(session, public_id, ProfileState.FAILED.value, reason=reason)
                 logger.warning("Disqualified %s — %s", public_id, reason)
             else:
