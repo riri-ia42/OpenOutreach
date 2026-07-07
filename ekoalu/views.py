@@ -1591,12 +1591,14 @@ def _capture_correction_example(
     explanation: str = "",
     instruction: str = "",
 ) -> None:
-    """Cree un PendingReply + CorrectionExample pour alimenter le few-shot."""
+    """Cree un PendingReply + CorrectionExample pour alimenter le few-shot.
+
+    Normalisation 2 axes (audit 07/07) : canal deduit du kind (plus de fallback
+    slug=kind qui contaminait les canaux entre eux), persona_slug = persona pur.
+    """
     try:
         from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
-        persona_slug = _persona_slug_for_outbound(outbound)
-        if not persona_slug:
-            persona_slug = outbound.kind  # fallback "invitation" / "follow_up" / "reply"
+        from ekoalu.learning import channel_for_outbound_kind
         pr = PendingReply.objects.create(
             prospect_public_id=outbound.prospect_public_id,
             campaign_id=outbound.campaign_id,
@@ -1608,13 +1610,63 @@ def _capture_correction_example(
         )
         CorrectionExample.from_pending(
             pr,
-            persona_slug=persona_slug,
+            persona_slug=_persona_slug_for_outbound(outbound),
             explanation=explanation,
             instruction=instruction,
+            channel=channel_for_outbound_kind(outbound.kind),
         )
     except Exception as e:
         import logging
         logging.exception("CorrectionExample creation failed: %s", e)
+
+
+# Motifs de refus techniques/automatiques : pas un enseignement sur le STYLE du
+# message, on ne cree pas d'apprentissage pour eux.
+_TECHNICAL_REJECT_REASONS = (
+    "deja en relation", "déjà en relation",
+    "deja contacte", "déjà contacté",
+    "deja client", "déjà client",
+    "doublon",
+    "sans raison",
+)
+
+
+def _rejection_reason_is_learnable(reason: str) -> bool:
+    """Motif exploitable = texte non vide et pas un motif technique connu."""
+    normalized = " ".join(reason.lower().split())
+    if not normalized:
+        return False
+    return not any(t in normalized for t in _TECHNICAL_REJECT_REASONS)
+
+
+def _capture_rejection_learning(outbound: PendingOutbound, reason: str) -> None:
+    """Un refus avec motif exploitable devient un CorrectionExample REJECTION."""
+    if not _rejection_reason_is_learnable(reason):
+        return
+    try:
+        from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+        from ekoalu.learning import channel_for_outbound_kind
+        pr = PendingReply.objects.create(
+            prospect_public_id=outbound.prospect_public_id,
+            campaign_id=outbound.campaign_id,
+            inbound_message=f"(reject {outbound.kind})",
+            ai_draft=outbound.ai_draft,
+            final_sent="",
+            status=PendingReply.Status.DISCARDED,
+        )
+        # OneToOne pending_reply : PendingReply fraiche => pas de collision,
+        # et le try/except protege de toute course residuelle.
+        CorrectionExample.objects.create(
+            pending_reply=pr,
+            persona_slug=_persona_slug_for_outbound(outbound),
+            channel=channel_for_outbound_kind(outbound.kind),
+            kind=CorrectionExample.Kind.REJECTION,
+            similarity_ratio=0.0,
+            instruction=reason.strip(),
+        )
+    except Exception as e:
+        import logging
+        logging.exception("CorrectionExample (reject) creation failed: %s", e)
 
 
 def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tuple[bool, str]:
@@ -1685,12 +1737,15 @@ def _regenerate_outbound_draft(outbound: PendingOutbound, instruction: str) -> t
     recent_text = _format_recent_messages(deal) if deal else ""
     persona_slug = _persona_slug_for_outbound(outbound)
 
+    # Mode relance : le deal a deja >= 1 message sortant (ou c'est une reponse)
+    # -> prompt allege sans pitch ni structure 4-blocs.
+    is_first = _is_first_outgoing_dm(deal) if deal else True
+    relance = (outbound.kind == OutboundKind.REPLY) or not is_first
+
     include_booking = False
     if deal and deal.campaign:
         dm_cfg = get_or_create_dm_config(deal.campaign)
-        include_booking = (
-            dm_cfg.include_booking_in_first_dm and _is_first_outgoing_dm(deal)
-        )
+        include_booking = dm_cfg.include_booking_in_first_dm and is_first
 
     new_text = generate_ekoalu_dm(
         public_id=outbound.prospect_public_id,
@@ -1700,6 +1755,7 @@ def _regenerate_outbound_draft(outbound: PendingOutbound, instruction: str) -> t
         persona_slug=persona_slug,
         include_booking=include_booking,
         instruction=instruction,
+        relance=relance,
     )
     if not new_text:
         return False, "Le générateur Claude a renvoyé un texte vide (clé API ? erreur réseau ?)."
@@ -1764,6 +1820,8 @@ def outbound_detail(request, pk: int):
             outbound.status = OutboundStatus.REJECTED
             outbound.rejection_reason = rejection_reason
             outbound.save()
+            # Apprentissage : un motif exploitable devient une consigne few-shot
+            _capture_rejection_learning(outbound, rejection_reason)
             n_leads, _ = _disqualify_leads_from_reject(
                 [outbound.prospect_public_id],
                 rejection_reason or "(sans raison)",
@@ -1798,7 +1856,7 @@ def outbound_detail(request, pk: int):
             # piloté par la consigne (peut etre vide).
             try:
                 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
-                persona_slug = _persona_slug_for_outbound(outbound) or outbound.kind
+                from ekoalu.learning import channel_for_outbound_kind
                 pr = PendingReply.objects.create(
                     prospect_public_id=outbound.prospect_public_id,
                     campaign_id=outbound.campaign_id,
@@ -1810,8 +1868,9 @@ def outbound_detail(request, pk: int):
                 )
                 CorrectionExample.from_pending(
                     pr,
-                    persona_slug=persona_slug,
+                    persona_slug=_persona_slug_for_outbound(outbound),
                     instruction=instruction,
+                    channel=channel_for_outbound_kind(outbound.kind),
                 )
             except Exception as e:
                 import logging
