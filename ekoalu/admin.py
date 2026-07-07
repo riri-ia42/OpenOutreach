@@ -117,12 +117,14 @@ class PendingReplyAdmin(admin.ModelAdmin):
 class CorrectionExampleAdmin(admin.ModelAdmin):
     list_display = (
         "id",
+        "channel",
         "persona_slug",
+        "kind",
         "similarity_display",
         "used_in_prompt",
         "created_at",
     )
-    list_filter = ("persona_slug", "used_in_prompt", "created_at")
+    list_filter = ("channel", "persona_slug", "kind", "used_in_prompt", "created_at")
     readonly_fields = (
         "pending_reply",
         "persona_slug",

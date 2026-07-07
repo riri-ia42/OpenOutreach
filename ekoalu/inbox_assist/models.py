@@ -106,12 +106,19 @@ class CorrectionExample(models.Model):
     Cree automatiquement par :
     - outbound_detail view a l approbation (TEXT_CORRECTION ou BOTH)
     - outbound_detail view a la regeneration (INSTRUCTION_ONLY)
+    - outbound_detail view au refus avec motif exploitable (REJECTION)
     """
 
     class Kind(models.TextChoices):
         TEXT_CORRECTION = "text_correction", "Correction texte"
         INSTRUCTION_ONLY = "instruction_only", "Consigne seule"
         BOTH = "both", "Correction + consigne"
+        REJECTION = "rejection", "Refus avec motif"
+
+    class Channel(models.TextChoices):
+        LINKEDIN_DM = "linkedin_dm", "DM LinkedIn"
+        EMAIL_COLD = "email_cold", "Cold email"
+        EMAIL_REPLY = "email_reply", "Réponse email"
 
     pending_reply = models.OneToOneField(
         PendingReply,
@@ -119,6 +126,13 @@ class CorrectionExample(models.Model):
         related_name="correction",
     )
     persona_slug = models.CharField(max_length=64, db_index=True)
+    channel = models.CharField(
+        max_length=16,
+        choices=Channel.choices,
+        default=Channel.LINKEDIN_DM,
+        db_index=True,
+        help_text="Canal du message corrigé — la génération filtre TOUJOURS par canal",
+    )
     kind = models.CharField(
         max_length=20,
         choices=Kind.choices,
@@ -163,12 +177,24 @@ class CorrectionExample(models.Model):
         return difflib.SequenceMatcher(None, draft, final).ratio()
 
     @classmethod
+    def derive_channel(cls, persona_slug: str = "", pending_channel: str = "") -> str:
+        """Deduit le canal d un exemple : slug explicite > canal du PendingReply."""
+        if persona_slug.startswith("email_reply"):
+            return cls.Channel.EMAIL_REPLY
+        if persona_slug.startswith("email"):
+            return cls.Channel.EMAIL_COLD
+        if pending_channel == PendingReply.CHANNEL_EMAIL:
+            return cls.Channel.EMAIL_REPLY
+        return cls.Channel.LINKEDIN_DM
+
+    @classmethod
     def from_pending(
         cls,
         pending: PendingReply,
         persona_slug: str = "",
         explanation: str = "",
         instruction: str = "",
+        channel: str = "",
     ) -> CorrectionExample:
         """Crée un CorrectionExample a partir d un PendingReply envoye.
 
@@ -176,6 +202,7 @@ class CorrectionExample(models.Model):
         - INSTRUCTION_ONLY si consigne presente et texte non modifie (ratio >= 0.99)
         - BOTH si consigne presente et texte modifie
         - TEXT_CORRECTION si pas de consigne
+        `channel` vide → deduit du slug puis du canal du PendingReply.
         """
         ratio = cls.compute_similarity_ratio(pending.ai_draft, pending.final_sent)
         diff = list(
@@ -193,6 +220,7 @@ class CorrectionExample(models.Model):
         return cls.objects.create(
             pending_reply=pending,
             persona_slug=persona_slug,
+            channel=channel or cls.derive_channel(persona_slug, pending.channel),
             kind=kind,
             similarity_ratio=ratio,
             diff_lines=diff,
