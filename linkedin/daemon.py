@@ -50,6 +50,12 @@ TASK_WATCHDOG_SECONDS = {
 HEARTBEAT_INTERVAL = 300  # 5 minutes
 HEARTBEAT_SLICE = 60      # wake every minute during long sleeps
 
+# LOT C : reconcile au démarrage + périodique. Avant, reconcile() ne tournait
+# que lorsque la file n'avait AUCUNE task prête — avec un backlog permanent il
+# ne tournait presque jamais (RUNNING stale de 3 jours, deals PENDING sans
+# task check_pending). Le comportement « file vide → reconcile » est conservé.
+RECONCILE_INTERVAL_SECONDS = 30 * 60
+
 
 # ── Cloud promo ──────────────────────────────────────────────────────
 
@@ -360,6 +366,13 @@ def run_daemon(session):
     heartbeat = Heartbeat()
     rhythm = _HumanRhythmBreak(heartbeat)
 
+    # LOT C : reconcile au démarrage — récupère les RUNNING stale (crash
+    # précédent) et recrée les tasks manquantes SANS attendre que la file se
+    # vide (ce qui n'arrive presque jamais avec un backlog permanent).
+    from linkedin.tasks.scheduler import reconcile
+    reconcile(session)
+    next_reconcile_at = time.monotonic() + RECONCILE_INTERVAL_SECONDS
+
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
@@ -438,18 +451,34 @@ def run_daemon(session):
             rhythm.reset()
             continue
 
+        # LOT C : reconcile périodique, même si la file n'est jamais vide
+        # (backlog permanent). Récupère les RUNNING stale et les deals actifs
+        # sans task au plus toutes les RECONCILE_INTERVAL_SECONDS.
+        if time.monotonic() >= next_reconcile_at:
+            reconcile(session)
+            next_reconcile_at = time.monotonic() + RECONCILE_INTERVAL_SECONDS
+
         # Cadencement intra-journee (anti-burst matinal, remarque Richard
         # 15/06) : le cap journalier se debloque progressivement sur la plage
         # active. Tant que le budget DEBLOQUE est atteint, on temporise ~10min
-        # (avec jitter) sans claim de task — les lectures s'etalent en filet au
-        # lieu de partir en rafale au reveil. Le drain des envois approuves
-        # ci-dessus continue (il ne lit pas de fiche). Plafond MOU : aucun raise.
-        if is_paced_cap_reached():
+        # (avec jitter) — les lectures s'etalent en filet au lieu de partir en
+        # rafale au reveil. Le drain des envois approuves ci-dessus continue.
+        # LOT C : les FOLLOW_UP passent quand meme (elles lisent la DB —
+        # snapshot + resume deja materialises — pas LinkedIn ; et si une
+        # lecture imprevue survient, le cap DUR read_guard la stoppe de toute
+        # facon). Seuls connect/check_pending, qui lisent une fiche a coup
+        # sur, attendent. Plafond MOU : aucun raise.
+        pacing_gated = is_paced_cap_reached()
+        task = Task.objects.claim_next(
+            task_types=(Task.TaskType.FOLLOW_UP,) if pacing_gated else None,
+        )
+        if pacing_gated and task is None:
             wait = random.uniform(540, 900)
             logger.info(
                 colored("READ_PACING", "yellow")
                 + " - budget lectures debloque atteint (%d/%d, cap jour %d) ;"
-                + " temporisation %dmin pour etaler sur la journee",
+                + " temporisation %dmin pour etaler sur la journee"
+                + " (aucune follow_up prete a laisser passer)",
                 reads_today(), reads_budget_now(), daily_reads_cap(),
                 int(wait // 60),
             )
@@ -458,14 +487,19 @@ def run_daemon(session):
             )
             rhythm.reset()
             continue
+        if pacing_gated:
+            logger.info(
+                colored("READ_PACING", "yellow")
+                + " - budget lectures debloque atteint mais follow_up laissee"
+                + " passer (lit la DB, pas LinkedIn)",
+            )
 
-        task = Task.objects.claim_next()
         if task is None:
             # Nothing ready — reconcile the queue from CRM state. Any deal
             # stuck without a pending task (e.g. because a prior handler
             # crashed) gets a fresh task here; this is the retry mechanism.
-            from linkedin.tasks.scheduler import reconcile
             reconcile(session)
+            next_reconcile_at = time.monotonic() + RECONCILE_INTERVAL_SECONDS
 
             wait = Task.objects.seconds_to_next()
             if wait is None:
