@@ -243,6 +243,16 @@ def process_approved_queue(
             ).count()
             return stats
 
+    # LOT E : les caps QUOTIDIENS d'envois sont modules par le poids hebdo
+    # (WEEKDAY_WEIGHTS) — avant, le samedi avait le meme cap que le lundi.
+    # Ex. samedi (0.2) : 8 invitations/j nominal -> 2 effectives. Dimanche
+    # (0.0) -> 0 (de toute facon hors jour actif). Les caps HEBDO restent
+    # inchanges (ils lissent deja la semaine).
+    from ekoalu.human_scheduler import budget
+    day_weight = budget.daily_weight_factor(now.date())
+    daily_invite_cap = max(0, round(conf.DAILY_INVITE_CAP * day_weight))
+    daily_message_cap = max(0, round(conf.DAILY_MESSAGE_CAP * day_weight))
+
     invites_24h = PendingOutbound.objects.filter(
         kind=OutboundKind.INVITATION,
         status=OutboundStatus.SENT,
@@ -253,10 +263,11 @@ def process_approved_queue(
         status=OutboundStatus.SENT,
         sent_at__gte=now - timedelta(days=7),
     ).count()
-    if invites_24h >= conf.DAILY_INVITE_CAP:
+    if invites_24h >= daily_invite_cap:
         logger.info(
-            "Cap journalier invitations atteint (%d/%d) - on attend demain",
-            invites_24h, conf.DAILY_INVITE_CAP,
+            "Cap journalier invitations atteint (%d/%d, poids jour %.1f) "
+            "- on attend demain",
+            invites_24h, daily_invite_cap, day_weight,
         )
         stats["skipped"] = PendingOutbound.objects.filter(
             status=OutboundStatus.APPROVED,
@@ -294,11 +305,12 @@ def process_approved_queue(
         status=OutboundStatus.SENT,
         sent_at__gte=now - timedelta(days=1),
     ).count()
-    messages_blocked = messages_24h >= conf.DAILY_MESSAGE_CAP
+    messages_blocked = messages_24h >= daily_message_cap
     if messages_blocked:
         logger.info(
-            "Cap journalier messages atteint (%d/%d) - on attend demain",
-            messages_24h, conf.DAILY_MESSAGE_CAP,
+            "Cap journalier messages atteint (%d/%d, poids jour %.1f) "
+            "- on attend demain",
+            messages_24h, daily_message_cap, day_weight,
         )
         stats["skipped"] += PendingOutbound.objects.filter(
             status=OutboundStatus.APPROVED,

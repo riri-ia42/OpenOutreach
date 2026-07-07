@@ -26,6 +26,21 @@ def _isolate_emergency_sentinel(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _neutralize_daily_humanisation(monkeypatch):
+    """Neutralise les facteurs d'humanisation quotidiens (LOT E) par defaut.
+
+    Poids hebdo = 1.0 quel que soit le jour ou tourne la suite — sinon les
+    tests de caps (read_guard, sender) donneraient des resultats differents
+    un samedi (x0.2) ou un dimanche (x0). Les tests dedies
+    (test_daily_budget.py) importent les fonctions reelles directement.
+    """
+    from ekoalu.human_scheduler import budget
+
+    monkeypatch.setattr(budget, "daily_weight_factor", lambda d=None: 1.0)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_shared_exclusions(tmp_path_factory, monkeypatch):
     """Pointe la liste d'exclusion partagee vers un fichier absent + purge le
     cache TTL — sinon les tests liraient le VRAI _partage/exclusions.json

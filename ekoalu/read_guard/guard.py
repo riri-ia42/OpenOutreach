@@ -80,8 +80,8 @@ def _ramp_cap(today: date) -> int | None:
     return best[1] if best else None
 
 
-def daily_reads_cap() -> int:
-    """Cap du jour : ramp programme si une date est atteinte, sinon env/defaut."""
+def _nominal_reads_cap() -> int:
+    """Cap NOMINAL : ramp programme si une date est atteinte, sinon env/defaut."""
     ramped = _ramp_cap(_today_local())
     if ramped is not None:
         return ramped
@@ -91,6 +91,21 @@ def daily_reads_cap() -> int:
         ))
     except (ValueError, TypeError):
         return DEFAULT_DAILY_READS_CAP
+
+
+def daily_reads_cap() -> int:
+    """Cap EFFECTIF du jour = nominal (env/ramp) x poids hebdo.
+
+    LOT E (anti-signature « pile au cap ») : saturer le meme cap tous les
+    jours — samedi compris — etait une signature reguliere. Le poids hebdo
+    (WEEKDAY_WEIGHTS : Me 0.9, Ve 0.7, Sa 0.2, Di 0) module le nominal. Le
+    plancher PACING_MIN_FLOOR du pacing intra-journee reste applique dans
+    reads_budget_now.
+    """
+    from ekoalu.human_scheduler import budget
+
+    factor = budget.daily_weight_factor()
+    return max(0, round(_nominal_reads_cap() * factor))
 
 
 def _today_local() -> date:
