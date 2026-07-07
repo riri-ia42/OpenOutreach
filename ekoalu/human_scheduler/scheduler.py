@@ -1,8 +1,12 @@
 """Scheduler EKOALU — décide délais et autorisation d'actions.
 
 L'idée centrale : OpenOutreach voit `compute_human_delay(base_delay)`
-et reçoit un délai ajusté qui respecte les fenêtres horaires et la
-distribution gaussienne intra-plage.
+et reçoit un délai ajusté qui respecte les fenêtres horaires (plages
+actives, pause déjeuner, jours actifs, jours off aléatoires).
+
+NB LOT E : les « pics gaussiens 10h/16h » historiques ont été SUPPRIMÉS
+(code mort, jamais branché) — le pacing linéaire du read_guard + les jitters
+de délais suffisent, décision CTO KISS 07/07.
 """
 from __future__ import annotations
 
@@ -105,42 +109,3 @@ def compute_human_delay(
     delta = (final_dt - now).total_seconds()
     # Garantit qu'on respecte au moins le base_delay demandé
     return max(delta, base_delay_seconds)
-
-
-def gaussian_intra_window_delay(
-    now: dt.datetime | None = None,
-    rng: random.Random | None = None,
-) -> float:
-    """Retourne un délai en secondes qui amène vers un pic gaussien.
-
-    Si on est avant le pic, le délai cible le pic.
-    Si on est après le pic, le délai cible le pic du jour suivant.
-
-    Utilisé pour augmenter la densité d'actions autour de 10h et 16h.
-    """
-    rng = rng or random
-    now = now or timezone.localtime()
-    hour_now = now.hour + now.minute / 60.0
-
-    # Choisir le pic le plus proche dans le futur
-    candidates = []
-    if hour_now < conf.GAUSSIAN_MORNING_MU:
-        candidates.append(conf.GAUSSIAN_MORNING_MU)
-    if hour_now < conf.GAUSSIAN_AFTERNOON_MU:
-        candidates.append(conf.GAUSSIAN_AFTERNOON_MU)
-    if not candidates:
-        # Demain matin
-        candidates.append(24.0 + conf.GAUSSIAN_MORNING_MU)
-
-    target_h = candidates[0]
-    # Variation gaussienne autour du pic
-    actual_h = rng.gauss(target_h, conf.GAUSSIAN_SIGMA)
-
-    # Clamp dans la journée
-    actual_h = max(0.0, min(actual_h, 23.99))
-
-    target_dt = now.replace(hour=int(actual_h), minute=int((actual_h - int(actual_h)) * 60), second=0)
-    if target_dt < now:
-        target_dt += dt.timedelta(days=1)
-
-    return (target_dt - now).total_seconds()

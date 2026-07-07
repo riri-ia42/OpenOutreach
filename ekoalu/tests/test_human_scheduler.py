@@ -5,7 +5,6 @@ Garantit que les contraintes business non-négociables sont respectées.
 from __future__ import annotations
 
 import datetime as dt
-import random
 
 import pytest
 
@@ -196,19 +195,3 @@ class TestConfDefaults:
         families = ["coupe-feu", "désenfumage", "pare-balles", "grandes", "acoustique"]
         for fam in families:
             assert any(fam in p for p in conf.NICHE_PRODUCTS), f"Famille manquante: {fam}"
-
-
-class TestGaussianDistribution:
-    """Test statistique léger — pas trop strict pour éviter flakiness."""
-
-    def test_distribution_genere_delais_positifs_et_dans_24h(self):
-        """Test léger : la gaussienne produit des délais raisonnables."""
-        from ekoalu.human_scheduler.scheduler import gaussian_intra_window_delay
-
-        rng = random.Random(42)
-        now = _dt(year=2026, month=5, day=11, hour=8, minute=30)
-
-        for _ in range(100):
-            d = gaussian_intra_window_delay(now=now, rng=rng)
-            assert d > 0, "Delay doit etre positif"
-            assert d < 48 * 3600, f"Delay trop long: {d}s (> 48h)"

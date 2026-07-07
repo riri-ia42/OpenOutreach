@@ -17,7 +17,8 @@ class EkoaluConfig(AppConfig):
 
         Active les patchs EKOALU sur OpenOutreach :
         - human_scheduler : intercepte la création de Tasks pour ajouter
-          la logique gaussienne / pondération hebdo / pause déjeuner.
+          la logique plages horaires / pondération hebdo / pause déjeuner
+          / jours off aléatoires.
         """
         # Import tardif pour éviter les imports circulaires Django startup
         from ekoalu.follow_up.patch import apply_ekoalu_follow_up_patch

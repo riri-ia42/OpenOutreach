@@ -27,11 +27,6 @@ WEEKDAY_WEIGHTS: dict[int, float] = {
     6: 0.0,  # Dimanche (off)
 }
 
-# Distribution gaussienne intra-plage (concentration autour de mu)
-GAUSSIAN_MORNING_MU = 10.0    # heure pic matin
-GAUSSIAN_AFTERNOON_MU = 16.0  # heure pic après-midi
-GAUSSIAN_SIGMA = 1.5          # écart-type (en heures)
-
 # Délais entre actions (en secondes)
 MIN_DELAY_SECONDS = 90       # 1.5 min minimum (jamais < 60s = pattern bot)
 MAX_DELAY_SECONDS = 1800     # 30 min maximum
