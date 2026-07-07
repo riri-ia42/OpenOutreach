@@ -116,9 +116,10 @@ def apply_ekoalu_follow_up_patch() -> None:
         from ekoalu.follow_up.models import get_or_create_dm_config
 
         dm_cfg = get_or_create_dm_config(campaign)
-        include_booking = (
-            dm_cfg.include_booking_in_first_dm and _is_first_outgoing_dm(deal)
-        )
+        # 1er message sortant = structure 4-blocs + pitch ; sinon mode relance
+        # (prompt allege, pas de repetition de l'offre — consigne Richard).
+        is_first = _is_first_outgoing_dm(deal)
+        include_booking = dm_cfg.include_booking_in_first_dm and is_first
         persona_slug = _persona_slug_for_campaign(campaign)
         recent_text = _format_recent_messages(deal)
         ekoalu_msg = generate_ekoalu_dm(
@@ -128,6 +129,7 @@ def apply_ekoalu_follow_up_patch() -> None:
             recent_messages_text=recent_text,
             persona_slug=persona_slug,
             include_booking=include_booking,
+            relance=not is_first,
         )
         if ekoalu_msg:
             decision.message = ekoalu_msg
