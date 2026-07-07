@@ -171,6 +171,42 @@ class TestSourceCampaign:
         assert r2.new_leads == 0
         assert r2.already_known == 1
 
+    def test_profil_connu_ne_consomme_pas_le_quota(self):
+        """P0 07/07 : un profil deja en base ne compte plus dans max_profiles ;
+        les requetes-roles suivantes sont deroulees pour trouver du NOUVEAU."""
+        from crm.models import Lead
+        from ekoalu.lead_routing.models import LeadDiscovery
+
+        camp = self._campaign("EKOALU - ABM - Vinci")
+        for pid in ("deja-la-1", "deja-la-2"):
+            Lead.objects.create(
+                public_identifier=pid,
+                linkedin_url=f"https://www.linkedin.com/in/{pid}/",
+            )
+        pages = [
+            # requete-role 1 : Google ressert les memes profils connus
+            self._results(
+                "https://www.linkedin.com/in/deja-la-1/",
+                "https://www.linkedin.com/in/deja-la-2/",
+            ),
+            # requete-role 2 : un vrai nouveau
+            self._results("https://www.linkedin.com/in/tout-neuf/"),
+        ]
+        with patch(
+            "ekoalu.google_sourcing.client.search_linkedin_results",
+            side_effect=pages,
+        ) as mock_search:
+            res = source_campaign(camp, max_profiles=1, query_budget=9)
+
+        assert mock_search.call_count == 2   # la requete 2 a bien tourne
+        assert res.urls_found == 1
+        assert res.new_leads == 1
+        assert res.already_known == 2        # rattaches, hors quota
+        # les connus restent rattaches a la campagne (LeadDiscovery)
+        assert LeadDiscovery.objects.filter(
+            campaign=camp, lead__public_identifier="deja-la-1").exists()
+        assert LeadDiscovery.objects.filter(campaign=camp).count() == 3
+
     def test_budget_requetes_respecte(self):
         camp = self._campaign("EKOALU - ABM - Bouygues")
         with patch(

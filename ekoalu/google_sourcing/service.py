@@ -3,6 +3,13 @@
 
 Retourne le détail (nouveaux profils vs déjà connus) pour que la rotation
 puisse détecter l'épuisement d'une campagne (plus AUCUN nouveau profil).
+
+Dédup contre la BASE (07/07) : Google ressert les mêmes top-10 chaque jour,
+donc seuls les profils inconnus de la base (aucun Lead existant) comptent
+dans le quota ``max_profiles``. Les profils déjà connus ne coûtent rien :
+ils restent rattachés à la campagne (LeadDiscovery), et on continue de
+dérouler les requêtes-rôles suivantes tant que le quota de NOUVEAUX n'est
+pas atteint et qu'il reste du budget requêtes.
 """
 from __future__ import annotations
 
@@ -18,13 +25,29 @@ EXHAUSTED_AFTER_EMPTY_RUNS = 2
 @dataclass
 class SourcingResult:
     campaign_name: str = ""
-    queries_used: int = 0
-    urls_found: int = 0
-    new_leads: int = 0        # leads nouvellement rattachés à la campagne
-    already_known: int = 0    # profils déjà découverts pour cette campagne
+    queries_used: int = 0     # crédits Serper consommés
+    urls_found: int = 0       # profils NOUVEAUX retenus (quota max_profiles)
+    new_leads: int = 0        # leads créés (inconnus de la base avant ce run)
+    already_known: int = 0    # profils déjà en base (rattachés, hors quota)
     prefiltered: int = 0      # résultats écartés AVANT lecture (hors-domaine)
     errors: int = 0
     dry_run_urls: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _Harvest:
+    """Accumulateur d'un run : URLs nouvelles (quota) vs déjà connues (rattachement)."""
+    new_urls: list[str] = field(default_factory=list)
+    known_urls: list[str] = field(default_factory=list)
+    seen: set[str] = field(default_factory=set)
+    query_by_url: dict[str, str] = field(default_factory=dict)  # traçabilité
+
+
+def _lead_known(pid: str) -> bool:
+    """Le profil existe-t-il déjà en base (Lead), toutes campagnes confondues ?"""
+    from crm.models import Lead
+
+    return Lead.objects.filter(public_identifier=pid).exists()
 
 
 def source_campaign(
@@ -35,15 +58,14 @@ def source_campaign(
     query_budget: int = 9,
     dry_run: bool = False,
 ) -> SourcingResult:
-    """Lance les requêtes Serper d'une campagne ABM et crée/rattache les leads.
+    """Lance les requêtes Serper d'une campagne ABM/SECTEUR et crée/rattache les leads.
 
     ``query_budget`` borne le nombre de requêtes consommées ICI (1 crédit
-    chacune) ; on s'arrête aussi dès que ``max_profiles`` URLs sont trouvées.
+    chacune) ; on s'arrête aussi dès que ``max_profiles`` profils NOUVEAUX
+    (inconnus de la base) sont trouvés — un profil déjà connu ne consomme
+    pas le quota.
     """
-    from crm.models import Lead
-    from linkedin.url_utils import public_id_to_url, url_to_public_id
-    from ekoalu.google_sourcing import client, prefilter, queries
-    from ekoalu.lead_routing.models import LeadDiscovery
+    from ekoalu.google_sourcing import client, queries
 
     result = SourcingResult(campaign_name=campaign.name)
 
@@ -53,11 +75,9 @@ def source_campaign(
                        "secteur introuvable).", campaign.name)
         return result
 
-    found: list[str] = []
-    seen: set[str] = set()
-    query_by_url: dict[str, str] = {}  # tracabilite : quelle requete a trouve quoi
+    harvest = _Harvest()
     for q in qlist:
-        if len(found) >= max_profiles or result.queries_used >= query_budget:
+        if len(harvest.new_urls) >= max_profiles or result.queries_used >= query_budget:
             break
         result.queries_used += 1
         try:
@@ -66,45 +86,75 @@ def source_campaign(
             logger.warning("Requête Serper échouée (%r) : %s", q, e)
             result.errors += 1
             continue
-        for r in results:
-            u = r["link"]
+        _classify_results(q, results, harvest, result, max_profiles)
+
+    result.urls_found = len(harvest.new_urls)
+    _persist_harvest(campaign, harvest, result, dry_run=dry_run)
+    return result
+
+
+def _classify_results(q: str, results: list[dict], harvest: _Harvest,
+                      result: SourcingResult, max_profiles: int) -> int:
+    """Classe les résultats d'une page : nouveaux (quota) vs déjà connus.
+
+    Renvoie le nombre de profils de la page déjà connus de la base.
+    """
+    from linkedin.url_utils import url_to_public_id
+    from ekoalu.google_sourcing import prefilter
+
+    known_on_page = 0
+    for r in results:
+        u = r["link"]
+        pid = url_to_public_id(u)
+        if not pid or pid in harvest.seen:
+            continue
+        # Pre-filtre AVANT lecture : on n'enregistre pas un profil dont le
+        # titre/snippet montre un metier hors-domaine (economise 1 lecture).
+        if not prefilter.passes_prefilter(r):
+            result.prefiltered += 1
+            logger.debug("Pre-filtre Serper : %s ecarte (%r)", pid, r.get("title", ""))
+            continue
+        harvest.seen.add(pid)
+        harvest.query_by_url[u] = q
+        if _lead_known(pid):
+            known_on_page += 1
+            harvest.known_urls.append(u)
+        elif len(harvest.new_urls) < max_profiles:
+            harvest.new_urls.append(u)
+    return known_on_page
+
+
+def _persist_harvest(campaign, harvest: _Harvest, result: SourcingResult,
+                     *, dry_run: bool) -> None:
+    """Crée les leads nouveaux et rattache TOUTES les URLs (nouvelles + connues)."""
+    from crm.models import Lead
+    from linkedin.url_utils import public_id_to_url, url_to_public_id
+    from ekoalu.lead_routing.models import LeadDiscovery
+
+    if dry_run:
+        result.already_known = len(harvest.known_urls)
+        for u in harvest.new_urls:
             pid = url_to_public_id(u)
-            if not pid or pid in seen:
-                continue
-            # Pre-filtre AVANT lecture : on n'enregistre pas un profil dont le
-            # titre/snippet montre un metier hors-domaine (economise 1 lecture).
-            if not prefilter.passes_prefilter(r):
-                result.prefiltered += 1
-                logger.debug("Pre-filtre Serper : %s ecarte (%r)", pid, r.get("title", ""))
-                continue
-            seen.add(pid)
-            found.append(u)
-            query_by_url[u] = q
+            if pid:
+                result.dry_run_urls.append(public_id_to_url(pid))
+        return
 
-    found = found[:max_profiles]
-    result.urls_found = len(found)
-
-    for u in found:
+    for u in harvest.new_urls + harvest.known_urls:
         pid = url_to_public_id(u)
         if not pid:
             continue
-        if dry_run:
-            result.dry_run_urls.append(public_id_to_url(pid))
-            continue
-        lead, _ = Lead.objects.get_or_create(
+        lead, lead_created = Lead.objects.get_or_create(
             public_identifier=pid,
             defaults={"linkedin_url": public_id_to_url(pid)},
         )
-        _, created = LeadDiscovery.objects.get_or_create(
+        LeadDiscovery.objects.get_or_create(
             lead_id=lead.pk, campaign=campaign,
-            defaults={"query": query_by_url.get(u, "")},
+            defaults={"query": harvest.query_by_url.get(u, "")},
         )
-        if created:
+        if lead_created:
             result.new_leads += 1
         else:
             result.already_known += 1
-
-    return result
 
 
 def update_rotation_state(campaign, result: SourcingResult) -> "GoogleSourcingState":
