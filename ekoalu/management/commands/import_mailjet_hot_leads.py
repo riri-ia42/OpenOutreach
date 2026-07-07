@@ -52,7 +52,8 @@ def _synthetic_identity(row: dict) -> tuple[str, str]:
     siren = (row.get("siren") or "").strip()
     if siren:
         return make_synthetic_linkedin_url(siren), make_synthetic_public_identifier(siren)
-    slug = (row.get("email") or "").replace("@", "-at-").replace(".", "-")
+    # lowercase : sinon deux casses du même email produisent 2 identités (LOT D)
+    slug = (row.get("email") or "").strip().lower().replace("@", "-at-").replace(".", "-")
     return f"https://mailjet-hot.local/{slug}", f"mailjet-hot-{slug}"
 
 
@@ -100,28 +101,46 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Aucun candidat à importer."))
             return
 
+        from django.db.models.functions import Lower
+
         from crm.models import Lead
         from ekoalu.email_canal.models import EmailLeadData
+        from ekoalu.shared_exclusions import excluded_emails
 
-        emails = [r["email"] for r in rows]
-        existing = set(Lead.objects.filter(contact_email__in=emails)
-                       .values_list("contact_email", flat=True))
+        # Dédup insensible à la casse (LOT D) : emails candidats ET emails DB
+        # normalisés lowercase des DEUX côtés (avant : set en casse brute vs
+        # comparaison lowercase = doublon possible).
+        emails = [(r.get("email") or "").strip().lower() for r in rows]
+        existing = set(
+            Lead.objects.annotate(email_lc=Lower("contact_email"))
+            .filter(email_lc__in=emails)
+            .values_list("email_lc", flat=True)
+        )
+        shared_excluded = excluded_emails()
+        n_excluded = sum(1 for e in emails if e in shared_excluded)
         if opts["dry_run"]:
             self.stdout.write(self.style.SUCCESS(
                 f"\n--- Dry-run ---\n"
                 f"  candidats   : {len(rows)}\n"
                 f"  déjà en DB  : {sum(1 for e in emails if e in existing)}\n"
-                f"  insertables : {sum(1 for e in emails if e not in existing)}",
+                f"  exclus (partagé) : {n_excluded}\n"
+                f"  insertables : {sum(1 for e in emails if e not in existing and e not in shared_excluded)}",
             ))
             return
 
         created = 0
         skipped_dup = 0
+        skipped_excluded = 0
         errors = 0
         with transaction.atomic():
             for row in rows:
                 email = row["email"].strip().lower()
                 url, public_id = _synthetic_identity(row)
+                if email in shared_excluded:
+                    # Bounce/unsubscribe connu du canal Mailjet — on n'importe
+                    # pas un contact qu'on n'a pas le droit de recontacter.
+                    skipped_excluded += 1
+                    continue
                 if (email in existing
                         or Lead.objects.filter(public_identifier=public_id).exists()):
                     skipped_dup += 1
@@ -157,9 +176,12 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(
             f"\n--- Import terminé ---\n"
-            f"  créés          : {created}\n"
-            f"  skippés (dup)  : {skipped_dup}\n"
-            f"  erreurs        : {errors}",
+            f"  créés            : {created}\n"
+            f"  skippés (dup)    : {skipped_dup}\n"
+            f"  skippés (exclus) : {skipped_excluded}\n"
+            f"  erreurs          : {errors}",
         ))
-        logger.info("import_mailjet_hot_leads: created=%d skipped=%d errors=%d",
-                    created, skipped_dup, errors)
+        logger.info(
+            "import_mailjet_hot_leads: created=%d skipped=%d excluded=%d errors=%d",
+            created, skipped_dup, skipped_excluded, errors,
+        )

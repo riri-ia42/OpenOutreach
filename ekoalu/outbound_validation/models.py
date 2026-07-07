@@ -15,6 +15,7 @@ class OutboundKind(models.TextChoices):
 class OutboundStatus(models.TextChoices):
     PENDING = "pending", "En attente validation"
     APPROVED = "approved", "Approuvé (à envoyer)"
+    SENDING = "sending", "Envoi en cours (claim)"
     SENT = "sent", "Envoyé"
     REJECTED = "rejected", "Refusé"
     EXPIRED = "expired", "Expiré"
@@ -63,6 +64,10 @@ class PendingOutbound(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     approved_at = models.DateTimeField(null=True, blank=True)
+    claimed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Claim atomique APPROVED→SENDING (anti double envoi, LOT D)",
+    )
     sent_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True)
 

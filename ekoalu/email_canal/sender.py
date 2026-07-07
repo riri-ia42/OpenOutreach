@@ -157,19 +157,32 @@ def build_html_email(body: str) -> str:
 def _resolve_recipient(po: PendingOutbound) -> str | None:
     """Récupère l'adresse email du destinataire depuis le Lead correspondant.
 
-    Renvoie None si le Lead n'a pas de contact_email, s'il est unsubscribed,
-    ou si l'adresse a hard-bouncé (NDR détecté par le poller).
+    Renvoie None si le Lead n'a pas de contact_email, s'il est disqualifié
+    (refus Richard survenu APRÈS l'approbation — symétrie avec le canal
+    LinkedIn, LOT D), unsubscribed, hard-bouncé (NDR détecté par le poller),
+    ou présent dans la liste d'exclusion partagée mailing-mailjet.
     """
     from crm.models import Lead
+    from ekoalu.shared_exclusions import is_excluded
 
     lead = Lead.objects.filter(public_identifier=po.prospect_public_id).first()
     if not lead:
         return None
     if not lead.contact_email:
         return None
+    if lead.disqualified:
+        logger.info("Envoi bloqué PO #%s : lead %s disqualifié",
+                    po.pk, po.prospect_public_id)
+        return None
     if lead.unsubscribed_at is not None:
         return None
     if lead.email_bounced_at is not None:
+        return None
+    if is_excluded(lead.contact_email):
+        logger.warning(
+            "Envoi bloqué PO #%s : %s dans la liste d'exclusion partagée "
+            "(_partage/exclusions.json)", po.pk, lead.contact_email,
+        )
         return None
     return lead.contact_email
 
@@ -187,7 +200,8 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
 
     recipient = _resolve_recipient(po)
     if not recipient:
-        return False, "destinataire introuvable (lead absent, sans email, ou unsubscribed)"
+        return False, ("destinataire bloqué (lead absent, sans email, disqualifié, "
+                       "unsubscribed, bounced, ou liste d'exclusion partagée)")
 
     body_text = po.content_to_send
     if not body_text.strip():

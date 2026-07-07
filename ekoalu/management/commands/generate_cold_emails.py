@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 _BLOCKING_STATUSES = (
     OutboundStatus.PENDING,
     OutboundStatus.APPROVED,
+    OutboundStatus.SENDING,  # claim en cours d'envoi (LOT D)
     OutboundStatus.SENT,
     OutboundStatus.BLOCKED_COMPANY,
     OutboundStatus.REJECTED,
@@ -102,10 +103,25 @@ class Command(BaseCommand):
             .filter(kind=OutboundKind.EMAIL_COLD, status__in=_BLOCKING_STATUSES)
             .values_list("prospect_public_id", flat=True)
         )
-        candidates = [
-            lead for lead in leads_qs.select_related("email_data")
-            if lead.public_identifier not in blocked_public_ids
-        ]
+        # 3. Liste d'exclusion partagée mailing-mailjet (bounces/unsubscribes,
+        # LOT D) : inutile de générer un mail qui sera bloqué à l'envoi.
+        from ekoalu.shared_exclusions import excluded_emails
+        shared_excluded = excluded_emails()
+
+        skipped_excluded = 0
+        candidates = []
+        for lead in leads_qs.select_related("email_data"):
+            if lead.public_identifier in blocked_public_ids:
+                continue
+            if (lead.contact_email or "").strip().lower() in shared_excluded:
+                skipped_excluded += 1
+                continue
+            candidates.append(lead)
+        if skipped_excluded:
+            self.stdout.write(self.style.WARNING(
+                f"Skip {skipped_excluded} lead(s) : liste d'exclusion partagée "
+                "(_partage/exclusions.json)",
+            ))
 
         self.stdout.write(self.style.NOTICE(
             f"Candidats avant cap : {len(candidates)} | dpt={dpt or 'tous'} | "

@@ -29,6 +29,7 @@ class PendingReply(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "En attente validation"
         APPROVED = "approved", "Approuvé (à envoyer)"
+        SENDING = "sending", "Envoi en cours (claim)"
         SENT = "sent", "Envoyé"
         FAILED = "failed", "Échec envoi"
         DISCARDED = "discarded", "Abandonné"
@@ -81,6 +82,10 @@ class PendingReply(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+    claimed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Claim atomique APPROVED→SENDING (anti double envoi, LOT D)",
+    )
     sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

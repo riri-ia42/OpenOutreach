@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -28,6 +29,30 @@ from ekoalu.human_scheduler import is_action_allowed_now
 from ekoalu.inbox_assist.models import PendingReply
 
 logger = logging.getLogger(__name__)
+
+# Même patron anti double envoi que send_approved_emails (LOT D).
+STALE_SENDING_HOURS = 2
+
+
+def recover_stale_sending() -> int:
+    """Repasse APPROVED les PendingReply email bloquées en SENDING > 2h."""
+    cutoff = timezone.now() - timedelta(hours=STALE_SENDING_HOURS)
+    stale = list(
+        PendingReply.objects
+        .filter(channel=PendingReply.CHANNEL_EMAIL,
+                status=PendingReply.Status.SENDING,
+                claimed_at__lt=cutoff)
+    )
+    for pr in stale:
+        pr.status = PendingReply.Status.APPROVED
+        pr.save(update_fields=["status"])
+        logger.warning(
+            "PendingReply #%s bloquée en SENDING depuis %s (crash pendant "
+            "l'envoi ?) — repassée APPROVED : elle sera RENVOYÉE à la prochaine "
+            "passe. VÉRIFIER qu'un doublon n'est pas déjà parti vers %s.",
+            pr.pk, pr.claimed_at, pr.sender_email,
+        )
+    return len(stale)
 
 
 class Command(BaseCommand):
@@ -66,6 +91,14 @@ class Command(BaseCommand):
             ))
             return
 
+        if not dry_run:
+            recovered = recover_stale_sending()
+            if recovered:
+                self.stdout.write(self.style.WARNING(
+                    f"{recovered} PendingReply SENDING périmée(s) repassée(s) "
+                    "APPROVED (voir warnings log : renvoi possible en doublon).",
+                ))
+
         approved = list(
             PendingReply.objects
             .filter(channel=PendingReply.CHANNEL_EMAIL,
@@ -90,6 +123,17 @@ class Command(BaseCommand):
 
             if dry_run:
                 self.stdout.write(self.style.NOTICE("  [DRY-RUN] non envoyé"))
+                continue
+
+            # Claim atomique (LOT D) : APPROVED→SENDING, rowcount 0 = déjà pris.
+            claimed = PendingReply.objects.filter(
+                pk=pr.pk, status=PendingReply.Status.APPROVED,
+            ).update(status=PendingReply.Status.SENDING, claimed_at=timezone.now())
+            if not claimed:
+                self.stdout.write(self.style.WARNING(
+                    "  ↷ déjà prise par un autre process (claim raté), skip",
+                ))
+                logger.info("send_approved_email_replies: PR #%s déjà claimée, skip", pr.pk)
                 continue
 
             success, error = send_email_reply(pr)

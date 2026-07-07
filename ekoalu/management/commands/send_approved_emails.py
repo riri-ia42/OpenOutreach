@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -27,6 +28,31 @@ from ekoalu.human_scheduler import is_action_allowed_now
 from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
 
 logger = logging.getLogger(__name__)
+
+# Un SENDING plus vieux que ça au début d'un run = crash pendant l'envoi
+# précédent → issue incertaine. On repasse APPROVED avec un warning EXPLICITE
+# (pas de renvoi silencieux : Richard peut vérifier si le mail est parti).
+STALE_SENDING_HOURS = 2
+
+
+def recover_stale_sending() -> int:
+    """Repasse APPROVED les PendingOutbound email bloqués en SENDING > 2h."""
+    cutoff = timezone.now() - timedelta(hours=STALE_SENDING_HOURS)
+    stale = list(
+        PendingOutbound.objects
+        .filter(kind__in=EMAIL_KINDS, status=OutboundStatus.SENDING,
+                claimed_at__lt=cutoff)
+    )
+    for po in stale:
+        po.status = OutboundStatus.APPROVED
+        po.save(update_fields=["status"])
+        logger.warning(
+            "PO #%s bloqué en SENDING depuis %s (crash pendant l'envoi ?) — "
+            "repassé APPROVED : il sera RENVOYÉ à la prochaine passe. "
+            "VÉRIFIER manuellement qu'un doublon n'est pas déjà parti vers %s.",
+            po.pk, po.claimed_at, po.prospect_public_id,
+        )
+    return len(stale)
 
 
 class Command(BaseCommand):
@@ -65,6 +91,14 @@ class Command(BaseCommand):
             ))
             return
 
+        if not dry_run:
+            recovered = recover_stale_sending()
+            if recovered:
+                self.stdout.write(self.style.WARNING(
+                    f"{recovered} PO SENDING périmé(s) repassé(s) APPROVED "
+                    "(voir warnings log : renvoi possible en doublon).",
+                ))
+
         approved = list(
             PendingOutbound.objects
             .filter(kind__in=EMAIL_KINDS, status=OutboundStatus.APPROVED)
@@ -88,6 +122,19 @@ class Command(BaseCommand):
 
             if dry_run:
                 self.stdout.write(self.style.NOTICE("  [DRY-RUN] non envoyé"))
+                continue
+
+            # Claim atomique (LOT D) : APPROVED→SENDING via UPDATE conditionnel.
+            # rowcount 0 = un autre run (chevauchement Task Scheduler, jitter
+            # 75 min) l'a déjà pris → skip, PAS de double envoi.
+            claimed = PendingOutbound.objects.filter(
+                pk=po.pk, status=OutboundStatus.APPROVED,
+            ).update(status=OutboundStatus.SENDING, claimed_at=timezone.now())
+            if not claimed:
+                self.stdout.write(self.style.WARNING(
+                    "  ↷ déjà pris par un autre process (claim raté), skip",
+                ))
+                logger.info("send_approved_emails: PO #%s déjà claimé ailleurs, skip", po.pk)
                 continue
 
             success, error = send_cold_email(po)
