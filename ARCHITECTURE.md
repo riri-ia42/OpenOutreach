@@ -46,7 +46,7 @@ Single write path: `apply(config)` — idempotent, creates missing Campaign, Lin
 
 ## Task Queue
 
-Persistent queue backed by `Task` model. Worker loop in `daemon.py`: `seconds_until_active()` guard pauses outside active hours/rest days → pop oldest due task → set campaign on session → RUNNING → dispatch via `_HANDLERS` dict → COMPLETED/FAILED. Failures captured by `failure_diagnostics()` context manager.
+Persistent queue backed by `Task` model. Worker loop in `daemon.py`: `seconds_until_active()` guard pauses outside active hours/rest days (EKOALU: fenêtres + pause déjeuner + jours off aléatoires LinkedIn, cf. `ekoalu/human_scheduler/`) → pop oldest due task → set campaign on session → RUNNING → dispatch via `_HANDLERS` dict → COMPLETED/FAILED. Failures captured by `failure_diagnostics()` context manager.
 
 Task creation is centralized in `linkedin/tasks/scheduler.py`. No other module inserts Task rows. The module exposes three layers: (1) low-level `enqueue_connect`/`enqueue_check_pending`/`enqueue_follow_up` with per-call dedup against existing PENDING rows, (2) a state-transition hook `on_deal_state_entered(deal)` fired by `set_profile_state()` that picks the right task for the new state, and (3) `reconcile(session)` which walks CRM state and recreates missing tasks.
 
