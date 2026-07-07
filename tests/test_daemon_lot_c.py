@@ -100,6 +100,28 @@ def test_reconcile_periodique_meme_file_non_vide(fake_session):
 
 
 @pytest.mark.django_db
+def test_task_campagne_supprimee_marquee_failed_sans_crash(fake_session):
+    """LOT D (tâche orpheline structurelle, cf. task 18293/campagne 38) : une
+    task dont la campagne n'existe plus est marquée FAILED (avec completed_at,
+    pour le cap retry) et la boucle continue sans crash."""
+    orpheline = Task.objects.create(
+        task_type=Task.TaskType.CHECK_PENDING,
+        scheduled_at=timezone.now() - timedelta(minutes=1),
+        payload={"campaign_id": 424242, "public_id": "fantome", "backoff_hours": 24},
+    )
+
+    with ExitStack() as stack:
+        _daemon_stack(stack)
+        stack.enter_context(patch("linkedin.tasks.scheduler.reconcile"))
+        with pytest.raises(_Stop):
+            run_daemon(fake_session)
+
+    orpheline.refresh_from_db()
+    assert orpheline.status == Task.Status.FAILED
+    assert orpheline.completed_at is not None
+
+
+@pytest.mark.django_db
 def test_pacing_gate_laisse_passer_follow_up(fake_session):
     """Quand le pacing lectures gate, les follow_up passent quand même ;
     les connect restent bloqués jusqu'au déblocage du budget."""

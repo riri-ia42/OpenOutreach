@@ -303,5 +303,9 @@ class Task(models.Model):
         self.save(update_fields=["status", "completed_at"])
 
     def mark_failed(self):
+        # completed_at REQUIS : le cap retry du scheduler (_insert_task) compte
+        # les FAILED récents via completed_at__gte — sans timestamp ils étaient
+        # invisibles et le cap ne déclenchait jamais (LOT D 07/07).
         self.status = self.Status.FAILED
-        self.save(update_fields=["status"])
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at"])

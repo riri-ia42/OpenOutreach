@@ -149,3 +149,38 @@ class TestReconcile:
             status=Task.Status.PENDING,
             payload__public_id="alice",
         ).exists()
+
+    def test_mark_failed_date_completed_at(self, fake_session):
+        """LOT D : mark_failed doit dater completed_at — le cap retry de
+        _insert_task compte les FAILED via completed_at__gte ; sans timestamp
+        ils étaient invisibles et le cap ne déclenchait jamais."""
+        task = Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            scheduled_at=timezone.now(),
+            payload={"campaign_id": fake_session.campaign.pk},
+        )
+        task.mark_failed()
+        task.refresh_from_db()
+        assert task.status == Task.Status.FAILED
+        assert task.completed_at is not None
+
+    def test_retry_cap_effectif_apres_mark_failed(self, fake_session):
+        """2 échecs récents (via mark_failed) sur le même payload = le
+        reconcile n'en recrée PAS un 3e (bornage anti-boucle zombie)."""
+        _make_pending(fake_session, "alice")
+        for _ in range(2):
+            t = Task.objects.create(
+                task_type=Task.TaskType.CHECK_PENDING,
+                scheduled_at=timezone.now(),
+                payload={"campaign_id": fake_session.campaign.pk,
+                         "public_id": "alice", "backoff_hours": 24},
+            )
+            t.mark_failed()
+
+        reconcile(fake_session)
+
+        assert not Task.objects.filter(
+            task_type=Task.TaskType.CHECK_PENDING,
+            status=Task.Status.PENDING,
+            payload__public_id="alice",
+        ).exists()
