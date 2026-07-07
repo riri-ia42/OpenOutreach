@@ -70,8 +70,18 @@ def _urlonly_embed_per_cycle() -> int:
 
 
 def _embed_urlonly_leads(session, lead_ids) -> None:
-    """Embed up to N URL-only leads of the campaign (1 LinkedIn read each)."""
+    """Embed up to N URL-only leads of the campaign.
+
+    Apify-first (câblage 07/07) : quand Apify est prêt (token configuré,
+    kill-switch EKOALU_APIFY_ENRICH non posé, plafond quotidien non atteint),
+    le snapshot + l'embedding viennent d'un fetch cookieless — ZÉRO lecture
+    Voyager, le cap read_guard n'est pas consommé (on ne passe pas par
+    get_profile/get_embedding patchés). Repli Voyager (chemin historique,
+    1 lecture compte) sur échec Apify ; comportement d'origine inchangé si
+    Apify non configuré.
+    """
     from crm.models import Lead
+    from ekoalu.apify_enrich import service as apify_service
     from ekoalu.read_guard.guard import ReadCapExceededError
     from linkedin.conf import CAMPAIGN_CONFIG
 
@@ -82,8 +92,12 @@ def _embed_urlonly_leads(session, lead_ids) -> None:
         Lead.objects.filter(pk__in=lead_ids, embedding__isnull=True)
         .order_by("creation_date")[:limit]
     )
-    for i, lead in enumerate(pending):
-        if i:
+    apify_first = apify_service.apify_ready()
+    voyager_reads = 0
+    for lead in pending:
+        if apify_first and apify_service.enrich_lead(lead):
+            continue  # snapshot + embedding posés sans toucher au compte
+        if voyager_reads:
             # LOT C : même cadence que l'enrichissement search — jamais deux
             # lectures Voyager back-to-back dans une même task.
             time.sleep(random.uniform(
@@ -95,6 +109,7 @@ def _embed_urlonly_leads(session, lead_ids) -> None:
         except ReadCapExceededError:
             logger.info("URL-only embed stopped: daily read cap reached")
             return
+        voyager_reads += 1
         if not embedded:
             logger.warning(
                 "URL-only embed failed for %s (no profile)", lead.public_identifier,
