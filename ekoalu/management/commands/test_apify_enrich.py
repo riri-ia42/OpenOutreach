@@ -48,7 +48,7 @@ class Command(BaseCommand):
 
         if opts["dry_run"]:
             self.stdout.write("[dry-run] Payload qui serait envoye (AUCUN cookie, URLs publiques) :")
-            for url in payload["profileUrls"]:
+            for url in payload.get("profileUrls") or payload.get("queries") or []:
                 self.stdout.write(f"  [dry] {url}")
             self.stdout.write(self.style.SUCCESS("[dry-run] Aucun appel API, aucune ecriture DB."))
             return

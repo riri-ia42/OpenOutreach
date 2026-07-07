@@ -79,7 +79,37 @@ class TestClient:
         sent = json.dumps(post.call_args.kwargs["json"]).lower()
         for banned in ("cookie", "li_at", "session"):
             assert banned not in sent
-        assert post.call_args.kwargs["json"] == {"profileUrls": [URL]}
+        # HarvestAPI (defaut) : queries + mode de facturation, rien d'autre
+        assert post.call_args.kwargs["json"] == {
+            "profileScraperMode": client.HARVESTAPI_MODE,
+            "queries": [URL],
+        }
+
+    def test_build_input_format_generique_hors_harvestapi(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_APIFY_ACTOR", "dev_fusion/linkedin-profile-scraper")
+        assert client.build_input([URL]) == {"profileUrls": [URL]}
+
+    def test_build_input_decode_urls_percent_encodees(self):
+        encoded = "https://www.linkedin.com/in/fran%C3%A7ois-test/"
+        payload = client.build_input([encoded])
+        assert payload["queries"] == ["https://www.linkedin.com/in/françois-test/"]
+
+    def test_lots_de_batch_size_et_items_erreur_ecartes(self, monkeypatch):
+        """15 URLs -> 3 appels run-sync ; item {'error': ...} isole ecarte."""
+        monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
+        urls = [f"https://www.linkedin.com/in/lead-{i}/" for i in range(15)]
+        with patch("ekoalu.apify_enrich.client.requests.post",
+                   return_value=_resp([ACTOR_ITEM, {"error": "profil prive"}])) as post:
+            items = client.run_profile_scraper(urls)
+        assert post.call_count == 3
+        assert items == [ACTOR_ITEM] * 3
+
+    def test_que_des_erreurs_acteur_leve(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
+        with patch("ekoalu.apify_enrich.client.requests.post",
+                   return_value=_resp([{"error": "free plan: UI only"}])):
+            with pytest.raises(RuntimeError, match="que des erreurs acteur"):
+                client.run_profile_scraper([URL])
 
     def test_http_erreur_message_actionnable(self, monkeypatch):
         monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")

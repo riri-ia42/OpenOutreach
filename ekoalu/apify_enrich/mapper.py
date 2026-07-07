@@ -29,18 +29,27 @@ def _first(item: dict, *keys: str):
     return None
 
 
+def _location_text(value):
+    """Localisation acteur -> texte. HarvestAPI renvoie un dict
+    ``{"linkedinText": "France", "parsed": {"text": ...}}`` (confirme au
+    test reel 07/07) ; d'autres acteurs renvoient une chaine."""
+    if isinstance(value, dict):
+        return value.get("linkedinText") or (value.get("parsed") or {}).get("text")
+    return value
+
+
 def _map_position(raw: dict) -> dict:
     """Une experience acteur -> dict Position du snapshot Voyager."""
     return {
-        # a confirmer au test reel : cle du titre de poste
-        "title": _first(raw, "title", "position", "jobTitle"),
-        # a confirmer au test reel : cle du nom d'entreprise
+        # HarvestAPI : "position" (confirme au test reel 07/07)
+        "title": _first(raw, "position", "title", "jobTitle"),
+        # HarvestAPI : "companyName" (confirme au test reel 07/07)
         "company_name": _first(raw, "companyName", "company", "subtitle"),
         "company_urn": None,  # jamais fourni par un scraper public
-        # a confirmer au test reel : cle de la localisation du poste
-        "location": _first(raw, "location", "jobLocation", "locationName"),
-        # a confirmer au test reel : les dates acteur sont souvent du texte
-        # libre ("Jan 2020 - Present") — pas mappe vers DateRange en V1
+        "location": _location_text(
+            _first(raw, "location", "jobLocation", "locationName"),
+        ),
+        # dates acteur = texte libre ("Nov 2023 - Present") — pas de DateRange en V1
         "date_range": None,
         "description": _first(raw, "description", "descriptionHtml"),
         "urn": None,
@@ -50,13 +59,24 @@ def _map_position(raw: dict) -> dict:
 def _map_education(raw: dict) -> dict:
     """Une formation acteur -> dict Education du snapshot Voyager."""
     return {
-        # a confirmer au test reel : cle du nom d'ecole
+        # HarvestAPI : "schoolName" / "degree" / "fieldOfStudy" (confirme 07/07)
         "school_name": _first(raw, "schoolName", "school", "title"),
-        "degree_name": _first(raw, "degreeName", "degree", "subtitle"),
+        "degree_name": _first(raw, "degree", "degreeName", "subtitle"),
         "field_of_study": _first(raw, "fieldOfStudy", "field"),
-        "date_range": None,  # a confirmer au test reel (texte libre)
+        "date_range": None,  # texte libre ("2008 - 2009")
         "urn": None,
     }
+
+
+def _country_code(item: dict):
+    """HarvestAPI : countryCode vit dans le dict location (confirme 07/07)."""
+    direct = _first(item, "countryCode", "country_code")
+    if direct:
+        return direct
+    location = item.get("location")
+    if isinstance(location, dict):
+        return location.get("countryCode")
+    return None
 
 
 def _as_dict_list(value) -> list[dict]:
@@ -88,13 +108,18 @@ def map_actor_item(item: dict) -> dict:
 
     positions = [
         _map_position(p)
-        # a confirmer au test reel : cle de la liste d'experiences
-        for p in _as_dict_list(_first(item, "experiences", "positions", "experience"))
+        # HarvestAPI : "experience" = parcours complet, "currentPosition" =
+        # poste(s) en cours (confirme 07/07) — on prefere le parcours complet
+        for p in _as_dict_list(_first(
+            item, "experience", "experiences", "positions", "currentPosition",
+        ))
     ]
     educations = [
         _map_education(e)
-        # a confirmer au test reel : cle de la liste de formations
-        for e in _as_dict_list(_first(item, "educations", "education", "schools"))
+        # HarvestAPI : "profileTopEducation" (confirme 07/07)
+        for e in _as_dict_list(_first(
+            item, "education", "educations", "profileTopEducation", "schools",
+        ))
     ]
 
     return {
@@ -103,18 +128,18 @@ def map_actor_item(item: dict) -> dict:
         "full_name": full_name,
         "first_name": first_name,
         "last_name": last_name,
-        # a confirmer au test reel : cle du headline
+        # HarvestAPI : "headline" (confirme 07/07)
         "headline": _first(item, "headline", "title"),
-        # a confirmer au test reel : cle du resume/about
+        # HarvestAPI : "about" (confirme 07/07)
         "summary": _first(item, "about", "summary", "description"),
         "public_identifier": public_identifier,
-        # a confirmer au test reel : cle de la localisation profil
-        "location_name": _first(
-            item, "addressWithCountry", "location", "geoLocationName", "city",
-        ),
+        # HarvestAPI : location est un dict {"linkedinText": ...} (confirme 07/07)
+        "location_name": _location_text(_first(
+            item, "location", "addressWithCountry", "geoLocationName", "city",
+        )),
         "geo": None,
-        "industry": None,  # a confirmer au test reel : parfois "industry" (str)
-        "country_code": _first(item, "countryCode", "country_code"),
+        "industry": None,
+        "country_code": _country_code(item),
         "supported_locales": [],
         "positions": positions,
         "educations": educations,

@@ -22,19 +22,29 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.apify.com/v2"
 
-# Acteur cookieless pressenti (~8 $/1000 profils, pas de cookie demande).
-# A CONFIRMER AU TEST REEL : l'id exact et son schema d'input/output seront
-# valides au premier run paye (cf. docs/APIFY_ENRICH.md). Surchargeable via
+# Acteur cookieless par defaut (4 $/1000 profils, "No cookies or account
+# required"). Choisi au test reel du 07/07 : dev_fusion~linkedin-profile-scraper
+# refuse les runs API sur le plan Apify Free ("run through the UI only") ;
+# HarvestAPI accepte l'API et coute 2,5x moins cher. Surchargeable via
 # EKOALU_APIFY_ACTOR sans toucher au code.
-DEFAULT_ACTOR = "dev_fusion~linkedin-profile-scraper"
+DEFAULT_ACTOR = "harvestapi~linkedin-profile-scraper"
 
-# Ordre de grandeur annonce par les acteurs cookieless du store Apify.
-# A confirmer au test reel (facture Apify apres le run 10-20 profils).
-ESTIMATED_COST_PER_PROFILE_USD = 0.008
+# Mode facture 4 $/1000 (sans decouverte d'email — inutile ici, on a deja
+# l'URL LinkedIn et le canal email a sa propre source BDD PROSPECT).
+HARVESTAPI_MODE = "Profile details no email ($4 per 1k)"
+
+# 4 $/1000 profils (mode "no email" HarvestAPI). Confirme sur la fiche store ;
+# la facture reelle du run de test fait foi (cf. docs/APIFY_ENRICH.md).
+ESTIMATED_COST_PER_PROFILE_USD = 0.004
 
 # Timeout du run acteur cote Apify (secondes). Le timeout HTTP local est
 # legerement superieur pour laisser l'API repondre proprement.
 DEFAULT_RUN_TIMEOUT_S = 300
+
+# L'endpoint run-sync est plafonne a ~300s cote Apify : 15 profils d'un coup
+# depassent la fenetre et rendent un dataset tronque (constate au test reel
+# 07/07 : 1 item au lieu de 15). On decoupe donc en lots.
+BATCH_SIZE = 5
 
 
 def _token() -> str:
@@ -56,27 +66,36 @@ def build_input(urls: list[str]) -> dict:
 
     COOKIELESS PAR CONSTRUCTION : aucune cle cookie/li_at/session ici, et il
     ne doit JAMAIS y en avoir — on n'envoie que des URLs publiques.
-    Cle ``profileUrls`` : a confirmer au test reel (schema d'input de
-    l'acteur retenu) ; c'est la convention des profile-scrapers du store.
+    Schema selon l'acteur : HarvestAPI attend ``queries`` + le mode de
+    facturation ; les autres profile-scrapers du store utilisent
+    ``profileUrls`` (convention dev_fusion et similaires).
     """
+    from urllib.parse import unquote
+
     clean: list[str] = []
     for url in urls:
-        url = (url or "").strip()
+        # Les URLs Serper arrivent percent-encodees (fran%C3%A7ois...) —
+        # decodees avant envoi pour matcher le public_identifier LinkedIn.
+        url = unquote((url or "").strip())
         if "linkedin.com/in/" not in url:
             raise ValueError(f"URL non-profil LinkedIn refusee : {url!r}")
         clean.append(url)
     if not clean:
         raise ValueError("Aucune URL de profil fournie")
+    if "harvestapi" in actor_id():
+        return {"profileScraperMode": HARVESTAPI_MODE, "queries": clean}
     return {"profileUrls": clean}
 
 
 def run_profile_scraper(
     urls: list[str], timeout_s: int = DEFAULT_RUN_TIMEOUT_S,
 ) -> list[dict]:
-    """Run synchrone de l'acteur sur ``urls`` -> liste d'items JSON bruts.
+    """Run de l'acteur sur ``urls`` (par lots de ``BATCH_SIZE``) -> items JSON.
 
-    Leve ``RuntimeError`` avec un message actionnable si le token manque ou
-    si l'API repond en erreur (token invalide, credit epuise, acteur inconnu).
+    Leve ``RuntimeError`` avec un message actionnable si le token manque, si
+    l'API repond en erreur (token invalide, credit epuise, acteur inconnu) ou
+    si l'acteur ne renvoie QUE des items d'erreur (ex. plan Free refuse).
+    Les items d'erreur isoles sont ecartes avec un warning.
     """
     token = _token()
     if not token:
@@ -86,9 +105,27 @@ def run_profile_scraper(
             "Utiliser --dry-run pour tester sans token.",
         )
 
+    items: list[dict] = []
+    errors: list[str] = []
+    for start in range(0, len(urls), BATCH_SIZE):
+        batch = urls[start:start + BATCH_SIZE]
+        for item in _run_batch(batch, token, timeout_s):
+            if isinstance(item, dict) and set(item) == {"error"}:
+                errors.append(str(item["error"]))
+                logger.warning("Item d'erreur acteur Apify : %s", item["error"])
+            else:
+                items.append(item)
+    if errors and not items:
+        raise RuntimeError(f"Apify : que des erreurs acteur — {errors[0][:200]}")
+    logger.info("Apify run OK : %d items (%d erreurs acteur)", len(items), len(errors))
+    return items
+
+
+def _run_batch(batch: list[str], token: str, timeout_s: int) -> list[dict]:
+    """Un appel run-sync sur un lot (<= BATCH_SIZE, tient dans les ~300s)."""
     endpoint = f"{API_BASE}/acts/{actor_id()}/run-sync-get-dataset-items"
-    payload = build_input(urls)
-    logger.info("Apify run: acteur=%s profils=%d", actor_id(), len(urls))
+    payload = build_input(batch)
+    logger.info("Apify run: acteur=%s profils=%d", actor_id(), len(batch))
     resp = requests.post(
         endpoint,
         json=payload,
@@ -105,5 +142,4 @@ def run_profile_scraper(
     items = resp.json()
     if not isinstance(items, list):
         raise RuntimeError(f"Reponse Apify inattendue (pas une liste) : {str(items)[:200]}")
-    logger.info("Apify run OK : %d items", len(items))
     return items
