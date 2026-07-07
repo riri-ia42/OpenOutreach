@@ -316,12 +316,40 @@ class TestRotationState:
 
     def test_epuisement_apres_2_runs_vides(self):
         camp = self._campaign("EKOALU - ABM - Epuisee")
-        empty = SourcingResult(queries_used=2, new_leads=0)
+        empty = SourcingResult(queries_used=2, new_leads=0, all_queries_run=True)
         s1 = update_rotation_state(camp, empty)
         assert s1.exhausted is False
         s2 = update_rotation_state(camp, empty)
         assert s2.exhausted is True
         assert s2.consecutive_empty_runs == 2
+
+    def test_run_partiel_ne_compte_pas_pour_l_epuisement(self):
+        """P2 07/07 : un run qui n'a pas deroule TOUTES ses requetes-roles
+        (budget epuise avant la fin) ne pousse pas vers l'epuisement."""
+        camp = self._campaign("EKOALU - ABM - Partielle")
+        partial = SourcingResult(queries_used=1, new_leads=0, all_queries_run=False)
+        for _ in range(4):
+            s = update_rotation_state(camp, partial)
+        assert s.exhausted is False
+        assert s.consecutive_empty_runs == 0
+        # un run COMPLET vide, lui, incremente (sans effacer l'historique)
+        s = update_rotation_state(
+            camp, SourcingResult(queries_used=9, new_leads=0, all_queries_run=True))
+        assert s.consecutive_empty_runs == 1
+        assert s.exhausted is False
+
+    def test_source_campaign_flag_all_queries_run(self):
+        """all_queries_run vrai quand toutes les requetes-roles ont tourne,
+        faux quand le budget coupe le run avant la fin."""
+        camp = self._campaign("EKOALU - ABM - Flag")
+        with patch(
+            "ekoalu.google_sourcing.client.search_linkedin_results",
+            return_value=[],
+        ):
+            complete = source_campaign(camp, max_profiles=10, query_budget=20)
+            partial = source_campaign(camp, max_profiles=10, query_budget=3)
+        assert complete.all_queries_run is True    # 9 requetes-roles <= 20
+        assert partial.all_queries_run is False    # budget 3 < 9 requetes-roles
 
     def test_nouveau_lead_reset_le_compteur(self):
         camp = self._campaign("EKOALU - ABM - Vivante")

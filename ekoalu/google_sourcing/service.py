@@ -46,6 +46,9 @@ class SourcingResult:
     already_known: int = 0    # profils déjà en base (rattachés, hors quota)
     prefiltered: int = 0      # résultats écartés AVANT lecture (hors-domaine)
     errors: int = 0
+    # Run COMPLET : toutes les requêtes-rôles déroulées. Un run partiel (budget
+    # épuisé avant la fin) ne compte pas pour l'épuisement de la campagne.
+    all_queries_run: bool = False
     dry_run_urls: list[str] = field(default_factory=list)
 
 
@@ -91,8 +94,10 @@ def source_campaign(
         return result
 
     harvest = _Harvest()
+    result.all_queries_run = True
     for q in qlist:
         if len(harvest.new_urls) >= max_profiles or result.queries_used >= query_budget:
+            result.all_queries_run = False
             break
         _harvest_query(q, harvest, result, max_profiles=max_profiles,
                        per_query=per_query, query_budget=query_budget)
@@ -208,7 +213,14 @@ def _persist_harvest(campaign, harvest: _Harvest, result: SourcingResult,
 
 
 def update_rotation_state(campaign, result: SourcingResult) -> "GoogleSourcingState":
-    """Met à jour l'état de rotation après un passage (épuisement compris)."""
+    """Met à jour l'état de rotation après un passage (épuisement compris).
+
+    Un run ne compte comme « vide » que s'il a réellement déroulé TOUTES ses
+    requêtes-rôles (``all_queries_run``) : un run partiel (budget requêtes
+    épuisé avant la fin) sans nouveau profil ne pousse pas vers l'épuisement.
+    Le ré-armement mensuel (``--reset-exhausted``) est déclenché par
+    ``scripts/serper_rotation.ps1`` le premier jour ouvré du mois.
+    """
     from django.utils import timezone
 
     from ekoalu.google_sourcing.models import GoogleSourcingState
@@ -217,16 +229,21 @@ def update_rotation_state(campaign, result: SourcingResult) -> "GoogleSourcingSt
     state.last_run_at = timezone.now()
     state.total_queries += result.queries_used
     state.total_new_leads += result.new_leads
-    if result.new_leads == 0:
+    if result.new_leads > 0:
+        state.consecutive_empty_runs = 0
+        state.exhausted = False
+    elif result.all_queries_run:
         state.consecutive_empty_runs += 1
         if state.consecutive_empty_runs >= EXHAUSTED_AFTER_EMPTY_RUNS:
             state.exhausted = True
             logger.info(
-                "Campagne %r marquée ÉPUISÉE (%d passages sans nouveau profil)",
+                "Campagne %r marquée ÉPUISÉE (%d passages complets sans nouveau profil)",
                 campaign.name, state.consecutive_empty_runs,
             )
     else:
-        state.consecutive_empty_runs = 0
-        state.exhausted = False
+        logger.debug(
+            "Campagne %r : run partiel sans nouveau profil — ignoré pour l'épuisement",
+            campaign.name,
+        )
     state.save()
     return state
