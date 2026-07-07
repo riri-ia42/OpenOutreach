@@ -18,6 +18,9 @@ import pytest
 # Imports directs = fonctions reelles (le conftest ne patche que l'attribut
 # de module, pas ces references locales).
 from ekoalu.human_scheduler.budget import (
+    JITTER_MAX,
+    JITTER_MIN,
+    daily_jitter_factor,
     daily_weight_factor,
     days_off_for_month,
     is_day_off,
@@ -122,6 +125,25 @@ class TestJourOffBloqueLinkedInPasEmail:
         assert len(hits) == 1
 
 
+class TestJitterJournalier:
+    """Point 3 audit : casser la signature « volume pile au cap chaque jour »."""
+
+    def test_borne_085_a_100_sur_60_jours(self):
+        d = dt.date(2026, 7, 1)
+        for i in range(60):
+            f = daily_jitter_factor(d + dt.timedelta(days=i))
+            assert JITTER_MIN <= f <= JITTER_MAX
+
+    def test_deterministe_par_date(self):
+        d = dt.date(2026, 7, 8)
+        assert daily_jitter_factor(d) == daily_jitter_factor(d)
+
+    def test_varie_d_un_jour_a_l_autre(self):
+        d = dt.date(2026, 7, 1)
+        values = {daily_jitter_factor(d + dt.timedelta(days=i)) for i in range(30)}
+        assert len(values) > 10  # pas un facteur fige
+
+
 @pytest.mark.django_db
 class TestCapLecturesPondere:
     """Le cap lectures effectif = nominal x poids jour (point 1 audit)."""
@@ -151,6 +173,16 @@ class TestCapLecturesPondere:
         self._force_weight(monkeypatch, 1.0)
         from ekoalu.read_guard.guard import daily_reads_cap
         assert daily_reads_cap() == 80
+
+    def test_empilement_poids_x_jitter(self, monkeypatch):
+        """Cap effectif = nominal x poids hebdo x jitter (points 1+3 audit)."""
+        monkeypatch.delenv("EKOALU_PROFILE_READS_CAP_RAMP", raising=False)
+        monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "80")
+        from ekoalu.human_scheduler import budget
+        monkeypatch.setattr(budget, "daily_weight_factor", lambda d=None: 0.2)
+        monkeypatch.setattr(budget, "daily_jitter_factor", lambda d=None: 0.9)
+        from ekoalu.read_guard.guard import daily_reads_cap
+        assert daily_reads_cap() == round(80 * 0.2 * 0.9)  # = 14
 
 
 @pytest.mark.django_db

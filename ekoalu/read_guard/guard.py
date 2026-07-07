@@ -94,17 +94,18 @@ def _nominal_reads_cap() -> int:
 
 
 def daily_reads_cap() -> int:
-    """Cap EFFECTIF du jour = nominal (env/ramp) x poids hebdo.
+    """Cap EFFECTIF du jour = nominal (env/ramp) x poids hebdo x jitter.
 
-    LOT E (anti-signature « pile au cap ») : saturer le meme cap tous les
-    jours — samedi compris — etait une signature reguliere. Le poids hebdo
-    (WEEKDAY_WEIGHTS : Me 0.9, Ve 0.7, Sa 0.2, Di 0) module le nominal. Le
+    Empilement LOT E (anti-signature « pile au cap ») : saturer le meme cap
+    tous les jours — samedi compris — etait une signature reguliere. Le poids
+    hebdo (WEEKDAY_WEIGHTS : Me 0.9, Ve 0.7, Sa 0.2, Di 0) puis un jitter
+    journalier deterministe par date (0.85-1.0) modulent le nominal. Le
     plancher PACING_MIN_FLOOR du pacing intra-journee reste applique dans
     reads_budget_now.
     """
     from ekoalu.human_scheduler import budget
 
-    factor = budget.daily_weight_factor()
+    factor = budget.daily_weight_factor() * budget.daily_jitter_factor()
     return max(0, round(_nominal_reads_cap() * factor))
 
 

@@ -5,9 +5,14 @@ jour actif/inactif : le compte saturait donc son cap de lectures TOUS les
 jours au même niveau, y compris le samedi à 100 % — signature régulière,
 exactement ce que le checkpoint du 06/06 a sanctionné.
 
-Empilement du cap effectif d'un jour :
+Empilement du cap LECTURES effectif d'un jour :
 
     cap effectif = cap nominal (env/ramp) x poids hebdo (WEEKDAY_WEIGHTS)
+                   x jitter journalier (0.85-1.0, déterministe par date)
+
+Le jitter casse la signature « volume pile au cap chaque jour » ; il ne
+s'applique qu'aux LECTURES — les caps d'envois quotidiens n'appliquent que
+le poids hebdo (volumes déjà petits, l'arrondi mangerait le jitter).
 
 S'y ajoutent les JOURS OFF aléatoires (conf.RANDOM_DAYS_OFF_PER_MONTH) :
 1-2 jours ouvrés par mois SANS AUCUNE action LinkedIn (lectures, envois,
@@ -40,6 +45,22 @@ def _seeded_rng(label: str) -> random.Random:
     salt = os.environ.get("EKOALU_HUMANIZE_SALT", "")
     digest = hashlib.sha256(f"{salt}:{label}".encode("utf-8")).hexdigest()
     return random.Random(int(digest[:16], 16))
+
+
+# Bornes du jitter journalier sur le cap lectures (P3 audit : volume pile au
+# cap chaque jour = signature régulière).
+JITTER_MIN = 0.85
+JITTER_MAX = 1.0
+
+
+def daily_jitter_factor(d: dt.date | None = None) -> float:
+    """Facteur aléatoire journalier dans [JITTER_MIN, JITTER_MAX].
+
+    Déterministe par date (seed = hash date + sel env) : stable au restart
+    du daemon, pas de flapping du cap en cours de journée.
+    """
+    d = d or _today()
+    return _seeded_rng(f"jitter:{d.isoformat()}").uniform(JITTER_MIN, JITTER_MAX)
 
 
 def daily_weight_factor(d: dt.date | None = None) -> float:
