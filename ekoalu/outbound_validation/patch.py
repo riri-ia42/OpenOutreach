@@ -4,9 +4,14 @@ Quand approval_mode = require_approval :
 - send_connection_request → crée PendingOutbound(INVITATION) au lieu d'envoyer
 - send_raw_message → crée PendingOutbound(FOLLOW_UP) au lieu d'envoyer
 
-Le daemon retourne un état "neutre" (QUALIFIED inchangé pour invit, False pour message)
-de sorte qu'OpenOutreach pense que l'action a échoué/n'a pas progressé : la queue
-de validation devient le seul chemin pour envoyer.
+Les fonctions patchées retournent la sentinelle ``linkedin.enums.INTERCEPTED``
+(LOT C 07/07) quand l'envoi est capturé en file de validation : les handlers
+(connect, follow_up) distinguent ainsi « intercepté pour validation Richard »
+(résultat normal — le Deal ne bouge pas, aucune tentative comptée) d'un vrai
+échec d'envoi. Avant, le retour "neutre" (QUALIFIED / False) était interprété
+comme un échec : chaque relance générée rétrogradait son Deal CONNECTED →
+QUALIFIED, et chaque invitation en attente comptait une tentative connect
+(disqualification « Unreachable » au bout de 3).
 
 Le sender (outbound_validation.sender) utilise les fonctions originales exposées
 ci-dessous pour envoyer les messages approuvés sans repasser par l'interception.
@@ -47,7 +52,7 @@ def apply_outbound_validation_patch() -> None:
     try:
         from linkedin.actions import connect as connect_module
         from linkedin.actions import message as message_module
-        from linkedin.enums import ProfileState
+        from linkedin.enums import INTERCEPTED, ProfileState
     except ImportError as e:
         logger.warning("Cannot patch outbound_validation (linkedin not importable): %s", e)
         return
@@ -151,7 +156,7 @@ def apply_outbound_validation_patch() -> None:
                 "(toutes campagnes confondues) - skip dedup ABM",
                 public_id,
             )
-            return ProfileState.QUALIFIED
+            return INTERCEPTED
 
         # Enrichissement company depuis Lead/Deal si pas dans profile dict
         if not company:
@@ -205,9 +210,9 @@ def apply_outbound_validation_patch() -> None:
             "EKOALU: invitation pour %s capturee en file de validation (pas envoyee)",
             public_id,
         )
-        # Retourne QUALIFIED pour qu'OpenOutreach ne marque pas comme PENDING
-        # (le vrai changement d'état arrivera quand Richard valide via UI)
-        return ProfileState.QUALIFIED
+        # LOT C : sentinelle INTERCEPTED — le handler connect ne compte PAS de
+        # tentative (le vrai passage PENDING arrivera quand Richard valide).
+        return INTERCEPTED
 
     def patched_send_raw_message(session, profile, message):
         from ekoalu.company_validation.config import is_company_validation_enabled
@@ -232,7 +237,7 @@ def apply_outbound_validation_patch() -> None:
                 "(toutes campagnes confondues) - skip dedup ABM",
                 public_id,
             )
-            return False
+            return INTERCEPTED
 
         # Vérif entreprise
         initial_status = OutboundStatus.PENDING
@@ -261,9 +266,10 @@ def apply_outbound_validation_patch() -> None:
             "EKOALU: message pour %s capture en file de validation (pas envoye)",
             public_id,
         )
-        # Retourne False pour qu'OpenOutreach pense que l'envoi a échoué
-        # (retry pas idéal mais évite que l'état avance prématurément)
-        return False
+        # LOT C : sentinelle INTERCEPTED — le handler follow_up laisse le Deal
+        # CONNECTED (avant : False = « échec » → démotion QUALIFIED qui cassait
+        # la chaîne de relance, 6 deals constatés).
+        return INTERCEPTED
 
     connect_module.send_connection_request = patched_send_connection_request
     message_module.send_raw_message = patched_send_raw_message

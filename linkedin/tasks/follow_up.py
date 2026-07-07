@@ -81,7 +81,7 @@ def handle_follow_up(task, session, qualifiers):
     from linkedin.agents.follow_up import run_follow_up_agent
     from linkedin.db.deals import set_profile_state
     from linkedin.db.summaries import materialize_profile_summary_if_missing
-    from linkedin.enums import ProfileState
+    from linkedin.enums import INTERCEPTED, ProfileState
     from linkedin.tasks.scheduler import enqueue_follow_up
 
     payload = task.payload
@@ -145,6 +145,18 @@ def handle_follow_up(task, session, qualifiers):
     if decision.action == "send_message":
         logger.info("[%s] follow_up message for %s: %s", session.campaign, public_id, decision.message)
         sent = send_raw_message(session, profile, decision.message)
+        if sent is INTERCEPTED:
+            # LOT C : message capturé en file de validation (PendingOutbound) —
+            # résultat NORMAL en mode require_approval, PAS un échec d'envoi.
+            # Le Deal RESTE CONNECTED ; on repasse dans 4h, où le garde
+            # _has_pending_validation court-circuitera l'agent tant que
+            # Richard n'a pas statué.
+            logger.info(
+                "[%s] follow_up %s: message en file de validation — deal inchangé",
+                session.campaign, public_id,
+            )
+            enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600)
+            return
         if not sent:
             set_profile_state(session, public_id, ProfileState.QUALIFIED.value)
             logger.warning("follow_up for %s: send failed — moving to QUALIFIED for re-connection", public_id)

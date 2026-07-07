@@ -16,7 +16,7 @@ from linkedin.conf import CAMPAIGN_CONFIG
 from linkedin.db.deals import increment_connect_attempts, set_profile_state
 from linkedin.db.leads import disqualify_lead
 from linkedin.models import ActionLog
-from linkedin.enums import ProfileState
+from linkedin.enums import INTERCEPTED, ProfileState
 from linkedin.exceptions import ProfileInaccessibleError, ReachedConnectionLimit, SkipProfile
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,19 @@ def handle_connect(task, session, qualifiers):
         # get_connection_status already navigated to the profile page
         new_state = send_connection_request(session=session, profile=profile)
 
-        if new_state == ProfileState.QUALIFIED:
+        if new_state is INTERCEPTED:
+            # LOT C : invitation capturée en file de validation (PendingOutbound)
+            # — résultat NORMAL du mode require_approval, PAS un « bouton Connect
+            # introuvable ». Aucune tentative comptée (avant : 3 cycles d'attente
+            # Richard = disqualification « Unreachable » à tort). QUALIFIED sort
+            # le Deal du pool ready jusqu'à validation ; le sender le passera
+            # PENDING après envoi réel.
+            set_profile_state(session, public_id, ProfileState.QUALIFIED.value)
+            logger.info(
+                "[%s] %s: invitation en file de validation — attente Richard",
+                campaign, public_id,
+            )
+        elif new_state == ProfileState.QUALIFIED:
             # No Connect button found — track attempt, disqualify after MAX_CONNECT_ATTEMPTS
             attempts = increment_connect_attempts(session, public_id)
             if attempts >= MAX_CONNECT_ATTEMPTS:

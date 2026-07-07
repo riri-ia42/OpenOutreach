@@ -95,7 +95,7 @@ class TestOutboundPatchInvitation:
         apply_outbound_validation_patch()
 
         from linkedin.actions import connect as connect_module
-        from linkedin.enums import ProfileState
+        from linkedin.enums import INTERCEPTED
 
         # Fake session + profile
         session = MagicMock()
@@ -106,8 +106,9 @@ class TestOutboundPatchInvitation:
 
         result = connect_module.send_connection_request(session, profile)
 
-        # Doit retourner QUALIFIED (pas PENDING — l'invitation n'est pas envoyée)
-        assert result == ProfileState.QUALIFIED
+        # LOT C : doit retourner la sentinelle INTERCEPTED (pas PENDING —
+        # l'invitation n'est pas envoyée ; pas un échec non plus)
+        assert result is INTERCEPTED
 
         # Et créer une PendingOutbound
         po = PendingOutbound.objects.filter(prospect_public_id="test-prospect").first()
@@ -161,6 +162,7 @@ class TestOutboundPatchMessage:
         apply_outbound_validation_patch()
 
         from linkedin.actions import message as message_module
+        from linkedin.enums import INTERCEPTED
 
         session = MagicMock()
         session.campaign = None
@@ -169,8 +171,10 @@ class TestOutboundPatchMessage:
 
         result = message_module.send_raw_message(session, profile, msg)
 
-        # Retourne False pour qu'OpenOutreach pense que l'envoi a échoué
-        assert result is False
+        # LOT C : sentinelle INTERCEPTED (falsy, mais distincte d'un échec —
+        # le handler follow_up ne rétrograde pas le Deal)
+        assert result is INTERCEPTED
+        assert not result  # falsy : un appelant naïf ne record_action pas
 
         po = PendingOutbound.objects.filter(prospect_public_id="msg-target").first()
         assert po is not None

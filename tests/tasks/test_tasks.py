@@ -11,7 +11,7 @@ from linkedin.db.deals import set_profile_state
 from linkedin.db.leads import create_enriched_lead, promote_lead_to_deal
 from linkedin.models import ActionLog, Task
 from linkedin.ml.qualifier import BayesianQualifier
-from linkedin.enums import ProfileState
+from linkedin.enums import INTERCEPTED, ProfileState
 from linkedin.exceptions import SkipProfile, ReachedConnectionLimit
 from linkedin.tasks.connect import ConnectStrategy, handle_connect
 from linkedin.tasks.check_pending import handle_check_pending
@@ -191,6 +191,39 @@ class TestHandleConnect:
         _assert_deal_state(fake_session, "alice", ProfileState.FAILED)
 
     @patch("linkedin.tasks.connect.strategy_for")
+    @patch("linkedin.actions.search.visit_profile")
+    @patch("linkedin.actions.connect.send_connection_request")
+    @patch("linkedin.actions.status.get_connection_status")
+    def test_interception_validation_ne_compte_pas_de_tentative(
+        self, mock_status, mock_send, mock_visit, mock_strategy, fake_session,
+    ):
+        """LOT C : invitation capturée en file de validation (INTERCEPTED) =
+        résultat normal — pas d'increment connect_attempts, pas de
+        disqualification « Unreachable », deal QUALIFIED, pas d'ActionLog."""
+        from crm.models import Lead
+
+        _make_qualified(fake_session)
+        mock_strategy.return_value = _mock_strategy(self._candidate())
+        mock_status.return_value = ProfileState.QUALIFIED
+        mock_send.return_value = INTERCEPTED
+
+        qualifiers = _build_context(fake_session)
+        # 3+ cycles d'attente Richard : avant le fix, le 3e disqualifiait le lead
+        for _ in range(4):
+            task = _make_task(Task.TaskType.CONNECT, {"campaign_id": fake_session.campaign.pk})
+            handle_connect(task, fake_session, qualifiers)
+
+        _assert_deal_state(fake_session, "alice", ProfileState.QUALIFIED)
+        deal = Deal.objects.get(lead__public_identifier="alice", campaign=fake_session.campaign)
+        assert deal.connect_attempts == 0
+        assert Lead.objects.get(public_identifier="alice").disqualified is False
+        assert ActionLog.objects.filter(action_type=ActionLog.ActionType.CONNECT).count() == 0
+        # Le connect suivant est bien re-planifié
+        assert Task.objects.filter(
+            task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING,
+        ).exists()
+
+    @patch("linkedin.tasks.connect.strategy_for")
     def test_reschedules_when_no_candidate(self, mock_strategy, fake_session):
         mock_strategy.return_value = _mock_strategy(None)
 
@@ -353,6 +386,38 @@ class TestHandleFollowUp:
         assert ActionLog.objects.filter(action_type=ActionLog.ActionType.FOLLOW_UP).count() == 0
         deal = Deal.objects.get(lead__public_identifier="alice", campaign=fake_session.campaign)
         assert deal.state == ProfileState.QUALIFIED
+
+    @patch("linkedin.db.summaries.materialize_profile_summary_if_missing")
+    @patch("linkedin.actions.message.send_raw_message", return_value=INTERCEPTED)
+    @patch("linkedin.agents.follow_up.run_follow_up_agent")
+    def test_interception_validation_ne_retrograde_pas_le_deal(
+        self, mock_agent, mock_send, mock_materialize, fake_session,
+    ):
+        """LOT C : message capturé en file de validation (INTERCEPTED) = le
+        Deal RESTE CONNECTED (avant : démotion QUALIFIED qui cassait la chaîne
+        de relance — 6 deals constatés), pas d'ActionLog, re-planifié en 4h."""
+        mock_agent.return_value = FollowUpDecision(
+            action="send_message", message="Hi!", follow_up_hours=24,
+        )
+        _make_connected(fake_session)
+
+        task = _make_task(
+            Task.TaskType.FOLLOW_UP,
+            {"campaign_id": fake_session.campaign.pk, "public_id": "alice"},
+        )
+        qualifiers = _build_context(fake_session)
+        handle_follow_up(task, fake_session, qualifiers)
+
+        deal = Deal.objects.get(lead__public_identifier="alice", campaign=fake_session.campaign)
+        assert deal.state == ProfileState.CONNECTED
+        # Pas d'action comptée (rien n'est parti sur LinkedIn)
+        assert ActionLog.objects.filter(action_type=ActionLog.ActionType.FOLLOW_UP).count() == 0
+        # Un follow_up de contrôle est re-planifié
+        assert Task.objects.filter(
+            task_type=Task.TaskType.FOLLOW_UP,
+            status=Task.Status.PENDING,
+            payload__public_id="alice",
+        ).exists()
 
     @patch("linkedin.db.summaries.materialize_profile_summary_if_missing")
     @patch("linkedin.agents.follow_up.run_follow_up_agent")
