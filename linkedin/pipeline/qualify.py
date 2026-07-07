@@ -34,7 +34,16 @@ def _qualifier_disabled() -> bool:
 
 
 def fetch_qualification_candidates(session):
-    """Return Lead rows (with embeddings) for leads awaiting qualification."""
+    """Return Lead rows (with embeddings) for leads awaiting qualification.
+
+    EKOALU (07/07): URL-only leads (Serper/Google sourcing, no embedding yet)
+    are embedded FIRST — up to N per cycle (env EKOALU_URLONLY_EMBED_PER_CYCLE,
+    default 2) — BEFORE the already-embedded pool is served. Each embed costs
+    one LinkedIn profile read; that is deliberate: the read budget must go to
+    the sourced leads, not sit unused while the embedded pool is refilled.
+    Previously a URL-only lead was only embedded when the pool was empty,
+    which never happened — Serper leads were never read.
+    """
     from crm.models import Lead
     from linkedin.db.leads import get_leads_for_qualification
 
@@ -43,23 +52,43 @@ def fetch_qualification_candidates(session):
         return []
 
     lead_ids = {ld["lead_id"] for ld in leads}
+    _embed_urlonly_leads(session, lead_ids)
 
-    candidates = list(
+    return list(
         Lead.objects.filter(pk__in=lead_ids, embedding__isnull=False)
         .order_by("creation_date")
     )
-    if candidates:
-        return candidates
 
-    # Robustness fallback: embed any lead that was missed at discovery time
-    for ld in leads:
-        lead = Lead.objects.filter(pk=ld["lead_id"]).first()
-        if not lead or lead.embedding is not None:
-            continue
-        if lead.get_embedding(session) is not None:
-            return [lead]
 
-    return []
+def _urlonly_embed_per_cycle() -> int:
+    try:
+        return int(os.environ.get("EKOALU_URLONLY_EMBED_PER_CYCLE", "2"))
+    except ValueError:
+        return 2
+
+
+def _embed_urlonly_leads(session, lead_ids) -> None:
+    """Embed up to N URL-only leads of the campaign (1 LinkedIn read each)."""
+    from crm.models import Lead
+    from ekoalu.read_guard.guard import ReadCapExceededError
+
+    limit = _urlonly_embed_per_cycle()
+    if limit <= 0:
+        return
+    pending = list(
+        Lead.objects.filter(pk__in=lead_ids, embedding__isnull=True)
+        .order_by("creation_date")[:limit]
+    )
+    for lead in pending:
+        try:
+            embedded = lead.get_embedding(session) is not None
+        except ReadCapExceededError:
+            logger.info("URL-only embed stopped: daily read cap reached")
+            return
+        if not embedded:
+            logger.warning(
+                "URL-only embed failed for %s (no profile)", lead.public_identifier,
+            )
 
 
 def run_qualification(session, qualifier: BayesianQualifier) -> str | None:
