@@ -1,4 +1,4 @@
-# Enrichissement Apify cookieless (LOT F — squelette, PAS câblé)
+# Enrichissement Apify cookieless (câblé dans le pipeline le 07/07)
 
 ## Pourquoi
 
@@ -99,3 +99,48 @@ qualification par Apify, le compte Richard ne servant plus qu'à engager).
   remplacer la lecture Voyager de l'embed/qualification par Apify pour les
   leads sourcés ; le compte LinkedIn de Richard ne servirait plus qu'à
   engager (invitations/messages) et vérifier les degrés.
+
+## ✅ Câblé le 07/07 : comment ça marche
+
+**GO Richard** : les lectures de fiche pour l'**embed/qualification** des
+leads sourcés passent par Apify (cookieless, zéro empreinte sur le compte).
+Le compte LinkedIn ne sert plus qu'à **engager** : visites pré-invitation,
+invitations, messages, degrés de connexion, sondes check_pending — ces
+chemins n'ont pas changé.
+
+### Les deux chemins câblés
+
+| Chemin | Fichier | Comportement |
+|---|---|---|
+| **Backlog (tâche planifiée)** | `manage.py apify_enrich_backlog [--max N] [--dry-run]` via `scripts/apify_enrich.ps1` (repo parent, log `data/apify_enrich.log`) | Enrichit les leads URL-only en attente (snapshot + embedding), plus anciens d'abord |
+| **Daemon (Apify-first)** | `linkedin/pipeline/qualify.py:_embed_urlonly_leads` | À chaque cycle de qualification, les N leads URL-only sont enrichis via Apify au lieu de `Lead.get_embedding` (lecture Voyager) |
+
+Service commun : `ekoalu/apify_enrich/service.py` —
+`enrich_urlonly_leads(max_leads)` (lot) et `enrich_lead(lead)` (unitaire).
+Candidats : pas de snapshot, pas d'embedding, non disqualifié, URL
+`linkedin.com/in/` réelle (mail-only `bdd-prospect.local` exclus), découvert
+(`LeadDiscovery`) par une campagne **active**. Le snapshot stocké porte
+`source: "apify"` + `fetched_at` (isoformat).
+
+### Plafond quotidien
+
+- Env `EKOALU_APIFY_DAILY_CAP` (défaut **40** profils/jour ≈ 0,16 $/j).
+- Compteur DB `ApifyUsageDay` (migration ekoalu 0025), une ligne par jour,
+  on compte les **tentatives** avant l'appel réseau (patron `ProfileReadDay`).
+- Plafond atteint → le service s'arrête proprement, le daemon replie sur
+  Voyager. Reset naturel à minuit.
+- **Étanche au read_guard** : un fetch Apify n'incrémente JAMAIS le cap
+  lectures LinkedIn (il ne passe pas par `get_profile` patché).
+
+### Kill-switch
+
+`EKOALU_APIFY_ENRICH=0` → service inactif (log info) : la commande ne fait
+rien, le daemon reprend le chemin Voyager historique. Token absent
+(`EKOALU_APIFY_TOKEN`) = même effet (comportement d'origine inchangé).
+
+### Repli Voyager
+
+Tout échec Apify (réseau, erreur acteur, profil privé/introuvable, item sans
+`publicIdentifier`) laisse le lead **intact** (compté en échec, log warning) :
+le chemin Voyager du daemon le rattrape au cycle suivant (1 lecture compte,
+cadence LOT C 20-45 s conservée entre deux lectures Voyager).
