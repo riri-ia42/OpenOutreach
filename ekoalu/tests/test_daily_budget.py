@@ -118,11 +118,25 @@ class TestJourOffBloqueLinkedInPasEmail:
         from ekoalu.human_scheduler import scheduler
         monkeypatch.setattr(scheduler, "_day_off_logged", None)
         now = self._day_off_at_10h(monkeypatch)
+        # Le log n'est emis que si le jour off est AUJOURD'HUI (les scans de
+        # fenetre passent des dates futures) -> on simule "aujourd'hui" = now.
+        monkeypatch.setattr(scheduler.timezone, "localtime", lambda *a, **k: now)
         with caplog.at_level(logging.INFO, logger="ekoalu.human_scheduler.scheduler"):
             scheduler.is_action_allowed_now(now)
             scheduler.is_action_allowed_now(now)
         hits = [r for r in caplog.records if "jour off" in r.getMessage().lower()]
         assert len(hits) == 1
+
+    def test_pas_de_log_pour_une_date_future_scannee(self, monkeypatch, caplog):
+        import logging
+
+        from ekoalu.human_scheduler import scheduler
+        monkeypatch.setattr(scheduler, "_day_off_logged", None)
+        now = self._day_off_at_10h(monkeypatch)  # jour off futur, pas aujourd'hui
+        with caplog.at_level(logging.INFO, logger="ekoalu.human_scheduler.scheduler"):
+            assert not scheduler.is_action_allowed_now(now)
+        hits = [r for r in caplog.records if "jour off" in r.getMessage().lower()]
+        assert hits == []
 
 
 class TestJitterJournalier:

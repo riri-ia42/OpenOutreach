@@ -46,11 +46,14 @@ def is_action_allowed_now(
     global _day_off_logged
     now = now or timezone.localtime()
     if channel == "linkedin" and is_day_off(now.date()):
-        if _day_off_logged != now.date():
-            _day_off_logged = now.date()
+        # Ne logger que pour AUJOURD'HUI : la fonction est aussi appelée avec
+        # des dates futures par le scan de fenêtre (next_active_window_start).
+        today = timezone.localtime().date()
+        if now.date() == today and _day_off_logged != today:
+            _day_off_logged = today
             logger.info(
                 "Jour off aléatoire — aucune action LinkedIn aujourd'hui (%s)",
-                now.date().isoformat(),
+                today.isoformat(),
             )
         return False
     if not is_active_day(now):
