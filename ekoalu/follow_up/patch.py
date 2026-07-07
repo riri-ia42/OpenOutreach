@@ -34,9 +34,11 @@ def _is_ekoalu_campaign(campaign) -> bool:
 
 def _persona_slug_for_campaign(campaign) -> str:
     """Recupere le slug du persona depuis le nom de la campagne EKOALU."""
+    # Seule exception attendue : module personas absent (install partielle) ;
+    # toute autre erreur doit remonter (LOT D — plus d'except Exception muet).
     try:
         from ekoalu.personas import PERSONAS
-    except Exception:
+    except ImportError:
         return ""
     name = getattr(campaign, "name", "") or ""
     for p in PERSONAS.values():
@@ -46,33 +48,36 @@ def _persona_slug_for_campaign(campaign) -> str:
 
 
 def _is_first_outgoing_dm(deal) -> bool:
-    """Vrai si aucun message sortant n a deja ete envoye dans cette conversation."""
-    try:
-        from chat.models import ChatMessage
-        from django.contrib.contenttypes.models import ContentType
-        ct = ContentType.objects.get_for_model(deal.lead.__class__)
-        return not ChatMessage.objects.filter(
-            content_type=ct,
-            object_id=deal.lead_id,
-            is_outgoing=True,
-        ).exists()
-    except Exception:
-        return True
+    """Vrai si aucun message sortant n a deja ete envoye dans cette conversation.
+
+    Pas de try/except : une erreur DB ici est inattendue et doit crasher (LOT D
+    — l'ancien fallback silencieux True faisait repartir un pitch complet en
+    pleine conversation).
+    """
+    from chat.models import ChatMessage
+    from django.contrib.contenttypes.models import ContentType
+    ct = ContentType.objects.get_for_model(deal.lead.__class__)
+    return not ChatMessage.objects.filter(
+        content_type=ct,
+        object_id=deal.lead_id,
+        is_outgoing=True,
+    ).exists()
 
 
 def _format_recent_messages(deal, limit: int = 6) -> str:
-    """Charge les derniers messages pour les passer au generateur EKOALU."""
-    try:
-        from chat.models import ChatMessage
-        from django.contrib.contenttypes.models import ContentType
-        ct = ContentType.objects.get_for_model(deal.lead.__class__)
-        msgs = list(
-            ChatMessage.objects
-            .filter(content_type=ct, object_id=deal.lead_id)
-            .order_by("-creation_date", "-pk")[:limit]
-        )
-    except Exception:
-        return ""
+    """Charge les derniers messages pour les passer au generateur EKOALU.
+
+    Pas de try/except : une erreur DB est inattendue et doit crasher (LOT D —
+    l'ancien fallback "" generait une relance aveugle au contexte).
+    """
+    from chat.models import ChatMessage
+    from django.contrib.contenttypes.models import ContentType
+    ct = ContentType.objects.get_for_model(deal.lead.__class__)
+    msgs = list(
+        ChatMessage.objects
+        .filter(content_type=ct, object_id=deal.lead_id)
+        .order_by("-creation_date", "-pk")[:limit]
+    )
     lines = []
     for m in reversed(msgs):
         content = (m.content or "").strip()
