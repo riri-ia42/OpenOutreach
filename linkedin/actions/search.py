@@ -1,6 +1,7 @@
 # linkedin/actions/search.py
 
 import logging
+import os
 from typing import Dict, Any
 from urllib.parse import urlparse, parse_qs, urlencode
 
@@ -58,6 +59,19 @@ def _detect_profile_redirect(session, old_public_id: str) -> str | None:
     return None
 
 
+def _sidebar_harvest_enabled() -> bool:
+    """Moissonnage des profils visibles sur une fiche ("people also viewed").
+
+    COUPÉ par défaut (décision Richard 07/07) : jusqu'à 10 lectures Voyager
+    par visite (~70 % du cap lectures/jour) pour des leads hors-cible attribués
+    à la campagne courante avec query vide. Le budget lectures doit aller aux
+    leads sourcés (Serper). Réactivable via EKOALU_SIDEBAR_HARVEST=1.
+    Le moissonnage des pages de RÉSULTATS de recherche (search_people) reste
+    actif : c'est le sourcing délibéré des campagnes persona.
+    """
+    return os.environ.get("EKOALU_SIDEBAR_HARVEST", "").strip().lower() in ("1", "true", "yes")
+
+
 def visit_profile(session: "AccountSession", profile: Dict[str, Any]):
     public_identifier = profile.get("public_identifier")
 
@@ -72,9 +86,10 @@ def visit_profile(session: "AccountSession", profile: Dict[str, Any]):
     url = profile.get("url")
     _go_to_profile(session, url, public_identifier)
 
-    # Discover and enrich new profiles visible on the page
-    urls = extract_in_urls(session.page)
-    discover_and_enrich(session, urls)
+    # Discover and enrich new profiles visible on the page (off by default)
+    if _sidebar_harvest_enabled():
+        urls = extract_in_urls(session.page)
+        discover_and_enrich(session, urls)
 
 
 def _initiate_search(session: "AccountSession", keyword: str):
