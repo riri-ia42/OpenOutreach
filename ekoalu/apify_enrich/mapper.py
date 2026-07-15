@@ -85,13 +85,91 @@ def _as_dict_list(value) -> list[dict]:
     return [v for v in value if isinstance(v, dict)]
 
 
+def _map_apimaestro_position(raw: dict) -> dict:
+    """Une experience apimaestro -> dict Position du snapshot Voyager.
+
+    Format confirme au test reel 15/07 : ``{"title", "company", "is_current",
+    "company_linkedin_url"}`` (+ champs dates/description selon profils).
+    """
+    return {
+        "title": _first(raw, "title", "position"),
+        "company_name": _first(raw, "company", "companyName"),
+        "company_urn": None,
+        "location": _location_text(_first(raw, "location", "locationName")),
+        "date_range": None,
+        "description": _first(raw, "description"),
+        "urn": None,
+    }
+
+
+def _map_apimaestro_item(item: dict) -> dict:
+    """Item apimaestro (``basic_info`` + ``experience``) -> profile_snapshot.
+
+    Format confirme au test reel 15/07 : ``basic_info`` porte fullname/
+    first_name/last_name/headline/about/public_identifier/profile_url/
+    location{full,city,country,country_code} ; ``experience`` la liste des
+    postes (is_current). Les postes courants sont places en tete (le snapshot
+    Voyager met le poste actuel en positions[0], convention lue par
+    analyse_semaine et les resumes).
+    """
+    basic = item.get("basic_info") or {}
+    url = _first(basic, "profile_url") or _first(item, "profileUrl", "profile_input")
+    public_identifier = _first(basic, "public_identifier")
+    if not public_identifier and url:
+        from linkedin.url_utils import url_to_public_id
+        public_identifier = url_to_public_id(url)
+
+    location = basic.get("location") if isinstance(basic.get("location"), dict) else {}
+    experience = _as_dict_list(item.get("experience"))
+    experience = sorted(experience, key=lambda e: not e.get("is_current"))
+
+    return {
+        "url": url,
+        "urn": None,
+        "full_name": _first(basic, "fullname", "full_name"),
+        "first_name": _first(basic, "first_name"),
+        "last_name": _first(basic, "last_name"),
+        "headline": _first(basic, "headline"),
+        "summary": _first(basic, "about", "summary"),
+        "public_identifier": public_identifier,
+        "location_name": _first(location, "full", "city", "country"),
+        "geo": None,
+        "industry": None,
+        "country_code": _first(location, "country_code"),
+        "supported_locales": [],
+        "positions": [_map_apimaestro_position(p) for p in experience],
+        "educations": [_map_education(e) for e in _as_dict_list(item.get("education"))],
+        "connection_distance": None,
+        "connection_degree": None,
+        "source": SNAPSHOT_SOURCE,
+    }
+
+
 def map_actor_item(item: dict) -> dict:
     """Item JSON brut de l'acteur -> dict au format ``profile_snapshot``.
+
+    Dispatch par forme : un item apimaestro porte ``basic_info`` (acteur par
+    defaut depuis le 15/07) ; sinon mapping defensif historique (HarvestAPI
+    et scrapers plats similaires).
 
     Champs jamais fournis par un scraper cookieless (urn Voyager, degre de
     connexion) : ``None`` — les consommateurs du snapshot les tolerent deja.
     Cle supplementaire ``source: "apify"`` pour tracer la provenance.
     """
+    if isinstance(item.get("basic_info"), dict):
+        return _map_apimaestro_item(item)
+    if "message" in item and ("profile_input" in item or "profileUrl" in item):
+        # apimaestro : profil introuvable ("No profile found or wrong input",
+        # constate en reel 15/07) — marqueur consomme par le service, qui
+        # disqualifie le lead au lieu de stocker un snapshot vide.
+        url = _first(item, "profile_input", "profileUrl")
+        from linkedin.url_utils import url_to_public_id
+        return {
+            "not_found": True,
+            "url": url,
+            "public_identifier": url_to_public_id(url) if url else None,
+            "source": SNAPSHOT_SOURCE,
+        }
     # a confirmer au test reel : cle de l'URL du profil
     url = _first(item, "linkedinUrl", "url", "profileUrl", "inputUrl")
     # a confirmer au test reel : publicIdentifier direct ou derive de l'URL

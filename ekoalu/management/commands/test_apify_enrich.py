@@ -40,7 +40,7 @@ class Command(BaseCommand):
 
         urls = self._collect_urls(opts)
         payload = client.build_input(urls)
-        cost = len(urls) * client.ESTIMATED_COST_PER_PROFILE_USD
+        cost = len(urls) * client.estimated_cost_per_profile_usd()
         self.stdout.write(
             f"Acteur : {client.actor_id()} — {len(urls)} profils, "
             f"cout estime ~{cost:.3f} $ (a confirmer au test reel).",
@@ -48,7 +48,8 @@ class Command(BaseCommand):
 
         if opts["dry_run"]:
             self.stdout.write("[dry-run] Payload qui serait envoye (AUCUN cookie, URLs publiques) :")
-            for url in payload.get("profileUrls") or payload.get("queries") or []:
+            for url in (payload.get("usernames") or payload.get("profileUrls")
+                        or payload.get("queries") or []):
                 self.stdout.write(f"  [dry] {url}")
             self.stdout.write(self.style.SUCCESS("[dry-run] Aucun appel API, aucune ecriture DB."))
             return

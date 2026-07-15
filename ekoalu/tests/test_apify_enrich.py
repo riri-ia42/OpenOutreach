@@ -35,6 +35,27 @@ ACTOR_ITEM = {
     "educations": [{"schoolName": "INSA Lyon", "degreeName": "Ingenieur"}],
 }
 
+# Forme apimaestro (acteur par defaut depuis le 15/07), copiee du test reel :
+# basic_info + experience[] (is_current) + profileUrl.
+APIMAESTRO_ITEM = {
+    "profileUrl": URL,
+    "basic_info": {
+        "fullname": "jean test",
+        "first_name": "jean",
+        "last_name": "test",
+        "headline": "Conducteur de travaux chez SOTEB",
+        "public_identifier": "jean-test",
+        "profile_url": "https://linkedin.com/in/jean-test",
+        "about": "20 ans de chantiers tertiaires.",
+        "location": {"country": "France", "city": "Greater Lyon Area",
+                     "full": "Greater Lyon Area", "country_code": "FR"},
+    },
+    "experience": [
+        {"title": "Chef de chantier", "company": "Eiffage", "is_current": False},
+        {"title": "Conducteur de travaux", "company": "SOTEB", "is_current": True},
+    ],
+}
+
 
 @pytest.fixture(autouse=True)
 def _apify_env(monkeypatch):
@@ -79,30 +100,86 @@ class TestClient:
         sent = json.dumps(post.call_args.kwargs["json"]).lower()
         for banned in ("cookie", "li_at", "session"):
             assert banned not in sent
-        # HarvestAPI (defaut) : queries + mode de facturation, rien d'autre
+        # apimaestro (defaut 15/07) : usernames + includeEmail False (pas
+        # d'email enrichi = point RGPD evite), rien d'autre
         assert post.call_args.kwargs["json"] == {
+            "usernames": [URL],
+            "includeEmail": False,
+        }
+
+    def test_build_input_harvestapi(self, monkeypatch):
+        """Repli harvestapi (via env) : queries + mode de facturation."""
+        monkeypatch.setenv("EKOALU_APIFY_ACTOR", "harvestapi/linkedin-profile-scraper")
+        assert client.build_input([URL]) == {
             "profileScraperMode": client.HARVESTAPI_MODE,
             "queries": [URL],
         }
+        assert client.batch_size() == 5
+        assert client.estimated_cost_per_profile_usd() == 0.004
 
-    def test_build_input_format_generique_hors_harvestapi(self, monkeypatch):
+    def test_build_input_format_generique_hors_acteurs_connus(self, monkeypatch):
         monkeypatch.setenv("EKOALU_APIFY_ACTOR", "dev_fusion/linkedin-profile-scraper")
         assert client.build_input([URL]) == {"profileUrls": [URL]}
 
     def test_build_input_decode_urls_percent_encodees(self):
         encoded = "https://www.linkedin.com/in/fran%C3%A7ois-test/"
         payload = client.build_input([encoded])
-        assert payload["queries"] == ["https://www.linkedin.com/in/françois-test/"]
+        assert payload["usernames"] == ["https://www.linkedin.com/in/françois-test/"]
 
     def test_lots_de_batch_size_et_items_erreur_ecartes(self, monkeypatch):
-        """15 URLs -> 3 appels run-sync ; item {'error': ...} isole ecarte."""
+        """15 URLs -> 2 appels run-sync (lots de 10, apimaestro) ; item
+        {'error': ...} isole ecarte."""
         monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
         urls = [f"https://www.linkedin.com/in/lead-{i}/" for i in range(15)]
         with patch("ekoalu.apify_enrich.client.requests.post",
                    return_value=_resp([ACTOR_ITEM, {"error": "profil prive"}])) as post:
             items = client.run_profile_scraper(urls)
-        assert post.call_count == 3
-        assert items == [ACTOR_ITEM] * 3
+        assert post.call_count == 2
+        assert items == [ACTOR_ITEM] * 2
+
+    def test_not_found_apimaestro_traverse_vers_le_service(self, monkeypatch):
+        """Un not-found CIBLE (avec URL) n'est PAS ecarte : le service doit
+        disqualifier le lead (sinon re-facture quotidienne, smoke 15/07)."""
+        monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
+        ko = {"message": "No profile found or wrong input",
+              "profileUrl": URL, "profile_input": URL}
+        with patch("ekoalu.apify_enrich.client.requests.post",
+                   return_value=_resp([APIMAESTRO_ITEM, ko])):
+            items = client.run_profile_scraper([URL])
+        assert items == [APIMAESTRO_ITEM, ko]
+
+    def test_message_generique_sans_url_ecarte(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
+        with patch("ekoalu.apify_enrich.client.requests.post",
+                   return_value=_resp([APIMAESTRO_ITEM,
+                                       {"message": "rate limited"}])):
+            items = client.run_profile_scraper([URL])
+        assert items == [APIMAESTRO_ITEM]
+
+    def test_limite_free_tier_leve_erreur_dediee(self, monkeypatch):
+        """Messages reels : apimaestro « Daily free-tier limit of 10 profiles
+        reached » ; harvestapi « Free users are limited to 20 runs »."""
+        monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
+        ko = {"message": "Daily free-tier limit of 10 profiles reached. "
+                         "Upgrade your Apify plan or wait until tomorrow.",
+              "profileUrl": "", "profile_input": ""}
+        with patch("ekoalu.apify_enrich.client.requests.post",
+                   return_value=_resp([ko])):
+            with pytest.raises(client.ApifyDailyLimitError):
+                client.run_profile_scraper([URL])
+
+    def test_limite_free_tier_arrete_les_lots_suivants(self, monkeypatch):
+        """Des items OK avant la limite : on les garde, on STOPPE les lots
+        suivants (payants pour rien), pas d'exception."""
+        monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
+        urls = [f"https://www.linkedin.com/in/lead-{i}/" for i in range(25)]
+        ko = {"message": "Daily free-tier limit of 10 profiles reached",
+              "profileUrl": "", "profile_input": ""}
+        with patch("ekoalu.apify_enrich.client.requests.post",
+                   return_value=_resp([APIMAESTRO_ITEM, ko])) as post:
+            items = client.run_profile_scraper(urls)
+        assert post.call_count == 1     # lots 2 et 3 jamais envoyes
+        assert items == [APIMAESTRO_ITEM]
 
     def test_que_des_erreurs_acteur_leve(self, monkeypatch):
         monkeypatch.setenv("EKOALU_APIFY_TOKEN", "tok-123")
@@ -170,6 +247,35 @@ class TestMapper:
         assert (filled, total, missing) == (6, 6, [])
         filled, total, missing = snapshot_completeness(map_actor_item({}))
         assert filled == 0 and "headline" in missing
+
+    def test_item_apimaestro_mappe_vers_snapshot(self):
+        """Forme apimaestro (acteur par defaut 15/07, copie du test reel)."""
+        snap = map_actor_item(APIMAESTRO_ITEM)
+        assert snap["full_name"] == "jean test"
+        assert snap["headline"] == "Conducteur de travaux chez SOTEB"
+        assert snap["summary"] == "20 ans de chantiers tertiaires."
+        assert snap["public_identifier"] == "jean-test"
+        assert snap["location_name"] == "Greater Lyon Area"
+        assert snap["country_code"] == "FR"
+        # le poste is_current passe en positions[0] (convention Voyager)
+        assert snap["positions"][0]["title"] == "Conducteur de travaux"
+        assert snap["positions"][0]["company_name"] == "SOTEB"
+        assert snap["positions"][1]["company_name"] == "Eiffage"
+        assert snap["source"] == "apify"
+
+    def test_item_apimaestro_completude(self):
+        filled, total, missing = snapshot_completeness(map_actor_item(APIMAESTRO_ITEM))
+        assert (filled, total, missing) == (6, 6, [])
+
+    def test_item_apimaestro_public_identifier_derive_de_l_url(self):
+        snap = map_actor_item({"basic_info": {"headline": "x"}, "profileUrl": URL})
+        assert snap["public_identifier"] == "jean-test"
+
+    def test_item_not_found_marque(self):
+        snap = map_actor_item({"message": "No profile found or wrong input",
+                               "profileUrl": URL, "profile_input": URL})
+        assert snap["not_found"] is True
+        assert snap["public_identifier"] == "jean-test"
 
 
 # --------------------------------------------------------------------------

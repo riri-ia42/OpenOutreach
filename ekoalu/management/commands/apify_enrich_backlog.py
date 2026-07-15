@@ -72,7 +72,7 @@ class Command(BaseCommand):
         leads = service.candidate_leads(max_leads)
         for lead in leads:
             self.stdout.write(f"  [dry] {lead.linkedin_url} (cree {lead.creation_date:%Y-%m-%d})")
-        cost = len(leads) * client.ESTIMATED_COST_PER_PROFILE_USD
+        cost = len(leads) * client.estimated_cost_per_profile_usd()
         self.stdout.write(
             f"[dry-run] {len(leads)} leads candidats (--max {max_leads}), "
             f"cout estime ~{cost:.3f} $ — budget restant aujourd'hui : "

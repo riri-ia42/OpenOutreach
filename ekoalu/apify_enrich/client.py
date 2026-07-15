@@ -22,29 +22,51 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.apify.com/v2"
 
-# Acteur cookieless par defaut (4 $/1000 profils, "No cookies or account
-# required"). Choisi au test reel du 07/07 : dev_fusion~linkedin-profile-scraper
-# refuse les runs API sur le plan Apify Free ("run through the UI only") ;
-# HarvestAPI accepte l'API et coute 2,5x moins cher. Surchargeable via
-# EKOALU_APIFY_ACTOR sans toucher au code.
-DEFAULT_ACTOR = "harvestapi~linkedin-profile-scraper"
+# Acteur cookieless par defaut. Bascule 15/07 (GO Richard) : apimaestro accepte
+# les comptes Apify FREE (teste en reel, 2 runs + echantillon 8/9), 0,005 $/
+# profil pris sur le credit gratuit 5 $/mois = ZERO abonnement. HarvestAPI
+# (4 $/1000) ecarte : essai limite a 20 runs cumules pour les comptes Free
+# (panne totale constatee du 10 au 15/07) ; dev_fusion refuse l'API sur plan
+# Free. Surchargeable via EKOALU_APIFY_ACTOR sans toucher au code.
+DEFAULT_ACTOR = "apimaestro~linkedin-profile-batch-scraper-no-cookies-required"
 
-# Mode facture 4 $/1000 (sans decouverte d'email — inutile ici, on a deja
-# l'URL LinkedIn et le canal email a sa propre source BDD PROSPECT).
+# Mode facture HarvestAPI 4 $/1000 (sans email), utilise si EKOALU_APIFY_ACTOR
+# repasse sur harvestapi (ex. limite 20 runs rearmee au cycle mensuel).
 HARVESTAPI_MODE = "Profile details no email ($4 per 1k)"
-
-# 4 $/1000 profils (mode "no email" HarvestAPI). Confirme sur la fiche store ;
-# la facture reelle du run de test fait foi (cf. docs/APIFY_ENRICH.md).
-ESTIMATED_COST_PER_PROFILE_USD = 0.004
 
 # Timeout du run acteur cote Apify (secondes). Le timeout HTTP local est
 # legerement superieur pour laisser l'API repondre proprement.
 DEFAULT_RUN_TIMEOUT_S = 300
 
-# L'endpoint run-sync est plafonne a ~300s cote Apify : 15 profils d'un coup
-# depassent la fenetre et rendent un dataset tronque (constate au test reel
-# 07/07 : 1 item au lieu de 15). On decoupe donc en lots.
-BATCH_SIZE = 5
+
+def estimated_cost_per_profile_usd() -> float:
+    """Cout facture par profil selon l'acteur (fiche store, factures reelles)."""
+    return 0.004 if "harvestapi" in actor_id() else 0.005
+
+
+def batch_size() -> int:
+    """Taille de lot par run-sync (endpoint plafonne ~300s cote Apify).
+
+    HarvestAPI depassait la fenetre au-dela de 5 profils (dataset tronque,
+    constate 07/07). apimaestro (batch natif) traite 10 profils bien sous les
+    300s (teste en reel 15/07).
+    """
+    return 5 if "harvestapi" in actor_id() else 10
+
+
+class ApifyDailyLimitError(RuntimeError):
+    """L'acteur refuse : limite du free-tier atteinte (se rearme demain).
+
+    Constate en reel 15/07 : apimaestro plafonne les comptes Apify FREE a
+    10 profils/JOUR (« wait until tomorrow ») ; harvestapi a 20 runs cumules.
+    Chaque tentative apres la limite est FACTUREE (~0,005 $/item d'erreur) —
+    l'appelant doit saturer le plafond du jour pour arreter les frais.
+    """
+
+
+def _is_free_tier_limit(msg: str) -> bool:
+    low = (msg or "").lower()
+    return "free" in low and "limit" in low
 
 
 def _token() -> str:
@@ -66,9 +88,10 @@ def build_input(urls: list[str]) -> dict:
 
     COOKIELESS PAR CONSTRUCTION : aucune cle cookie/li_at/session ici, et il
     ne doit JAMAIS y en avoir — on n'envoie que des URLs publiques.
-    Schema selon l'acteur : HarvestAPI attend ``queries`` + le mode de
-    facturation ; les autres profile-scrapers du store utilisent
-    ``profileUrls`` (convention dev_fusion et similaires).
+    Schema selon l'acteur : apimaestro attend ``usernames`` (+ ``includeEmail``
+    False — pas d'email enrichi, le point RGPD sensible est evite) ;
+    HarvestAPI attend ``queries`` + le mode de facturation ; les autres
+    profile-scrapers du store utilisent ``profileUrls`` (convention dev_fusion).
     """
     from urllib.parse import unquote
 
@@ -82,6 +105,8 @@ def build_input(urls: list[str]) -> dict:
         clean.append(url)
     if not clean:
         raise ValueError("Aucune URL de profil fournie")
+    if "apimaestro" in actor_id():
+        return {"usernames": clean, "includeEmail": False}
     if "harvestapi" in actor_id():
         return {"profileScraperMode": HARVESTAPI_MODE, "queries": clean}
     return {"profileUrls": clean}
@@ -90,7 +115,7 @@ def build_input(urls: list[str]) -> dict:
 def run_profile_scraper(
     urls: list[str], timeout_s: int = DEFAULT_RUN_TIMEOUT_S,
 ) -> list[dict]:
-    """Run de l'acteur sur ``urls`` (par lots de ``BATCH_SIZE``) -> items JSON.
+    """Run de l'acteur sur ``urls`` (par lots de ``batch_size()``) -> items JSON.
 
     Leve ``RuntimeError`` avec un message actionnable si le token manque, si
     l'API repond en erreur (token invalide, credit epuise, acteur inconnu) ou
@@ -107,22 +132,53 @@ def run_profile_scraper(
 
     items: list[dict] = []
     errors: list[str] = []
-    for start in range(0, len(urls), BATCH_SIZE):
-        batch = urls[start:start + BATCH_SIZE]
+    limit_hit = False
+    size = batch_size()
+    for start in range(0, len(urls), size):
+        batch = urls[start:start + size]
         for item in _run_batch(batch, token, timeout_s):
-            if isinstance(item, dict) and set(item) == {"error"}:
-                errors.append(str(item["error"]))
-                logger.warning("Item d'erreur acteur Apify : %s", item["error"])
+            error = _actor_error(item)
+            if error:
+                errors.append(error)
+                logger.warning("Item d'erreur acteur Apify : %s", error)
+                limit_hit = limit_hit or _is_free_tier_limit(error)
             else:
                 items.append(item)
+        if limit_hit:
+            break  # inutile (et payant) d'envoyer les lots suivants aujourd'hui
+    if limit_hit and not items:
+        raise ApifyDailyLimitError(f"Apify : limite free-tier — {errors[0][:200]}")
     if errors and not items:
         raise RuntimeError(f"Apify : que des erreurs acteur — {errors[0][:200]}")
     logger.info("Apify run OK : %d items (%d erreurs acteur)", len(items), len(errors))
     return items
 
 
+def _actor_error(item) -> str | None:
+    """Message d'erreur si ``item`` est un item d'erreur acteur A ECARTER.
+
+    Formes observees en reel : HarvestAPI ``{"error": "..."}`` (seule cle) ;
+    apimaestro ``{"message": "No profile found or wrong input", "profileUrl",
+    "profile_input"}`` (pas de ``basic_info``).
+
+    Un not-found apimaestro AVEC URL n'est PAS ecarte : il traverse jusqu'au
+    service, qui disqualifie le lead (profil LinkedIn supprime/renomme =
+    inutilisable ; sinon il reste en tete du backlog et est re-facture
+    chaque jour — constate au smoke du 15/07).
+    """
+    if not isinstance(item, dict):
+        return f"item non-dict : {str(item)[:100]}"
+    if set(item) == {"error"}:
+        return str(item["error"])
+    if "message" in item and "basic_info" not in item and "headline" not in item:
+        if item.get("profile_input") or item.get("profileUrl"):
+            return None  # not-found cible : laisse passer vers le service
+        return str(item.get("message"))
+    return None
+
+
 def _run_batch(batch: list[str], token: str, timeout_s: int) -> list[dict]:
-    """Un appel run-sync sur un lot (<= BATCH_SIZE, tient dans les ~300s)."""
+    """Un appel run-sync sur un lot (<= batch_size(), tient dans les ~300s)."""
     endpoint = f"{API_BASE}/acts/{actor_id()}/run-sync-get-dataset-items"
     payload = build_input(batch)
     logger.info("Apify run: acteur=%s profils=%d", actor_id(), len(batch))

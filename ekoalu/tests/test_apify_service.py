@@ -152,6 +152,28 @@ class TestEnrichUrlonlyLeads:
 
         assert [ld.pk for ld in service.candidate_leads(10)] == [good.pk]
 
+    def test_profil_introuvable_lead_disqualifie(self, campaign):
+        """Not-found explicite de l'acteur = lead disqualifie (sort du
+        backlog, fin de la re-facturation quotidienne — smoke 15/07)."""
+        gone = _mk_lead("profil-supprime", campaign)
+        ok = _mk_lead("present", campaign)
+        items = [
+            _actor_item("present"),
+            {"message": "No profile found or wrong input",
+             "profileUrl": gone.linkedin_url, "profile_input": gone.linkedin_url},
+        ]
+        with patch.object(client, "run_profile_scraper", return_value=items):
+            stats = service.enrich_urlonly_leads(max_leads=10)
+
+        assert stats["enriched"] == 1
+        assert stats["failed"] == 1
+        gone.refresh_from_db()
+        assert gone.disqualified is True
+        assert gone.profile_snapshot is None
+        assert service.candidate_leads(10) == []   # sorti du backlog
+        ok.refresh_from_db()
+        assert ok.profile_snapshot["source"] == "apify"
+
     def test_echec_profil_lead_intact(self, campaign):
         ok = _mk_lead("present", campaign)
         absent = _mk_lead("absent", campaign)
@@ -189,6 +211,31 @@ class TestEnrichUrlonlyLeads:
             lead.refresh_from_db()
             assert lead.profile_snapshot is None
             assert lead.embedding is None
+
+    def test_limite_free_tier_sature_le_plafond_du_jour(self, campaign, monkeypatch):
+        """Disjoncteur 15/07 : apres la limite quotidienne de l'acteur, chaque
+        tentative est facturee pour un item d'erreur — on sature le plafond
+        pour couper les frais jusqu'a demain (repli Voyager)."""
+        monkeypatch.setenv("EKOALU_APIFY_DAILY_CAP", "40")
+        _mk_lead("lead-a", campaign)
+        _mk_lead("lead-b", campaign)
+
+        with patch.object(client, "run_profile_scraper",
+                          side_effect=client.ApifyDailyLimitError(
+                              "Daily free-tier limit of 10 profiles reached")):
+            stats = service.enrich_urlonly_leads(max_leads=10)
+
+        assert stats["enriched"] == 0
+        assert service.remaining_today() == 0      # plafond sature -> stop
+        assert service.apify_ready() is False      # le daemon replie Voyager
+        assert service.failed_today() == 2
+
+    def test_limite_free_tier_chemin_daemon_sature_aussi(self, campaign):
+        lead = _mk_lead("solo", campaign)
+        with patch.object(client, "run_profile_scraper",
+                          side_effect=client.ApifyDailyLimitError("free-tier limit")):
+            assert service.enrich_lead(lead) is False
+        assert service.apify_ready() is False
 
     def test_echecs_rembourses_ne_bloquent_pas_le_lendemain_meme_jour(
         self, campaign, monkeypatch,

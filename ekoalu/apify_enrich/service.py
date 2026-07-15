@@ -161,7 +161,7 @@ def enrich_urlonly_leads(max_leads: int) -> dict:
 
     record_usage(len(leads))
     stats["cost_estimated_usd"] = round(
-        len(leads) * client.ESTIMATED_COST_PER_PROFILE_USD, 4,
+        len(leads) * client.estimated_cost_per_profile_usd(), 4,
     )
     _run_and_apply(leads, stats)
     stats["used_today"] = used_today()
@@ -173,10 +173,33 @@ def enrich_urlonly_leads(max_leads: int) -> dict:
     return stats
 
 
+def _saturate_today(reason: str) -> None:
+    """Sature le plafond du jour : plus AUCUNE tentative Apify avant demain.
+
+    Disjoncteur free-tier (15/07) : apres la limite quotidienne de l'acteur,
+    chaque nouvelle tentative est FACTUREE pour un item d'erreur (~0,005 $) —
+    le daemon retenterait a chaque cycle (~0,2 $/j de pertes pures). Saturer
+    ``ApifyUsageDay`` fait repondre False a ``apify_ready()`` jusqu'a minuit ;
+    le repli Voyager prend le relais, remise a zero automatique demain.
+    """
+    left = remaining_today()
+    if left > 0:
+        record_usage(left)
+    logger.warning(
+        "Apify : plafond du jour SATURE volontairement (%s) — repli Voyager "
+        "jusqu'a demain.", reason,
+    )
+
+
 def _run_and_apply(leads: list, stats: dict) -> None:
     """Run acteur sur le lot + application des snapshots (stats en place)."""
     try:
         items = client.run_profile_scraper([ld.linkedin_url for ld in leads])
+    except client.ApifyDailyLimitError as exc:
+        stats["failed"] = len(leads)
+        record_failures(stats["failed"])
+        _saturate_today(str(exc))
+        return
     except RuntimeError as exc:
         logger.warning(
             "Apify enrich : run en echec, %d leads laisses intacts "
@@ -208,6 +231,10 @@ def enrich_lead(lead) -> bool:
     record_usage(1)
     try:
         items = client.run_profile_scraper([url])
+    except client.ApifyDailyLimitError as exc:
+        record_failures(1)
+        _saturate_today(str(exc))
+        return False
     except RuntimeError as exc:
         logger.warning(
             "Apify enrich %s en echec (%s) — repli Voyager",
@@ -236,7 +263,25 @@ def _snapshots_by_public_id(items: list[dict]) -> dict[str, dict]:
 
 
 def _apply_snapshot(lead, snap: dict | None) -> bool:
-    """Stocke le snapshot + calcule l'embedding. False = lead laisse INTACT."""
+    """Stocke le snapshot + calcule l'embedding. False = lead laisse INTACT
+    (sauf profil INTROUVABLE : lead disqualifie, il sort du backlog)."""
+    if snap and snap.get("not_found"):
+        # Profil LinkedIn supprime/renomme (reponse explicite de l'acteur,
+        # reproductible) : inutilisable pour l'enrichissement COMME pour
+        # l'engagement. Sans disqualification, il reste en tete du backlog
+        # FIFO et est re-facture chaque jour (constate au smoke 15/07).
+        from ekoalu.lead_exclusion import disqualify_leads
+
+        disqualify_leads(
+            [lead.public_identifier],
+            reason="Profil LinkedIn introuvable (Apify not-found)",
+            outcome="unresponsive",
+        )
+        logger.warning(
+            "Apify : profil INTROUVABLE pour %s — lead disqualifie "
+            "(sort du backlog d'enrichissement)", lead.public_identifier,
+        )
+        return False
     if not snap:
         logger.warning(
             "Apify : aucun snapshot exploitable pour %s — lead intact "
