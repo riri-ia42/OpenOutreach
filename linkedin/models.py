@@ -220,27 +220,72 @@ class ActionLog(models.Model):
         return f"{self.action_type} by {self.linkedin_profile} at {self.created_at}"
 
 
+DEFAULT_DAILY_CONNECT_QUOTA = 12
+
+
+def daily_connect_quota() -> int:
+    """Nombre de tasks connect GARANTIES par jour (env EKOALU_DAILY_CONNECT_QUOTA).
+
+    15/07 : la priorité LOT C (follow_up > check_pending > connect) SANS quota
+    a affamé les connect du 08 au 13/07 (0 exécutée, or la qualification tourne
+    DANS handle_connect → 0 deal créé, 0 invitation). Le quota garantit que les
+    N premiers connects dus de la journée passent en tête ; au-delà, la
+    priorité LOT C reprend. 0 = désactivé (priorité LOT C pure).
+    """
+    import os
+
+    try:
+        return int(os.environ.get("EKOALU_DAILY_CONNECT_QUOTA", DEFAULT_DAILY_CONNECT_QUOTA))
+    except (ValueError, TypeError):
+        return DEFAULT_DAILY_CONNECT_QUOTA
+
+
 class TaskQuerySet(models.QuerySet):
     def pending(self):
         return self.filter(status=Task.Status.PENDING).order_by("scheduled_at")
 
-    def claim_next(self, task_types=None) -> "Task | None":
-        """Prochaine task due, priorisée par TYPE puis par échéance (LOT C).
+    def _connects_served_today(self) -> int:
+        """Tasks connect terminées (completed OU failed) depuis minuit local."""
+        today_start = timezone.localtime().replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        return self.model.objects.filter(
+            task_type=Task.TaskType.CONNECT,
+            completed_at__gte=today_start,
+        ).count()
 
-        À échéance due égale : follow_up (relances de deals déjà CONNECTED)
-        puis check_pending (invitations en attente) passent AVANT connect
-        (nouvelles invitations). Avant : FIFO pur sur scheduled_at — un
-        backlog permanent de connect affamait les relances (12/15 deals
-        CONNECTED silencieux > 7j).
+    def claim_next(self, task_types=None) -> "Task | None":
+        """Prochaine task due : quota connect d'abord, puis priorité par TYPE.
+
+        Quota (15/07) : tant que moins de ``daily_connect_quota()`` connects
+        ont été servies aujourd'hui, une connect due passe EN PREMIER — sans
+        ce plancher, la priorité par type ci-dessous affamait totalement les
+        connect dès que la file de relances restait garnie (0 connect servie
+        du 08 au 13/07 → 0 qualification → 0 invitation).
+
+        Priorité LOT C ensuite : à échéance due égale, follow_up (relances de
+        deals déjà CONNECTED) puis check_pending (invitations en attente)
+        passent AVANT connect (nouvelles invitations). Avant : FIFO pur sur
+        scheduled_at — un backlog permanent de connect affamait les relances
+        (12/15 deals CONNECTED silencieux > 7j).
 
         ``task_types`` restreint le claim aux types donnés — utilisé par le
-        daemon pour laisser passer les follow_up quand le pacing lectures gate.
+        daemon pour laisser passer les follow_up quand le pacing lectures
+        gate ; le quota connect ne s'applique JAMAIS à un claim restreint.
         """
         from django.db.models import Case, IntegerField, Value, When
 
         qs = self.pending().filter(scheduled_at__lte=timezone.now())
         if task_types is not None:
             qs = qs.filter(task_type__in=task_types)
+        elif (quota := daily_connect_quota()) > 0 and self._connects_served_today() < quota:
+            connect_due = (
+                qs.filter(task_type=Task.TaskType.CONNECT)
+                .order_by("scheduled_at")
+                .first()
+            )
+            if connect_due is not None:
+                return connect_due
         priority = Case(
             When(task_type=Task.TaskType.FOLLOW_UP, then=Value(0)),
             When(task_type=Task.TaskType.CHECK_PENDING, then=Value(1)),

@@ -1,8 +1,11 @@
 # tests/test_claim_next.py
-"""LOT C : priorité par type dans ``Task.objects.claim_next``.
+"""Priorités de ``Task.objects.claim_next``.
 
-À échéance due égale, follow_up puis check_pending passent avant connect —
-un backlog permanent de connect ne doit plus affamer les relances.
+15/07 — quota connect : tant que moins de EKOALU_DAILY_CONNECT_QUOTA connects
+ont été servies aujourd'hui, une connect due passe EN PREMIER (la priorité
+LOT C sans plancher a affamé les connect du 08 au 13/07 : 0 servie → 0
+qualification → 0 invitation). Au-delà du quota, priorité LOT C : à échéance
+due égale, follow_up puis check_pending passent avant connect.
 """
 from __future__ import annotations
 
@@ -22,8 +25,90 @@ def _mk(task_type, minutes_ago: float = 5, **payload):
     )
 
 
+def _mk_done_connect(n: int) -> None:
+    """n tasks connect terminées AUJOURD'HUI (consomment le quota)."""
+    for i in range(n):
+        Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            status=Task.Status.COMPLETED,
+            scheduled_at=timezone.now() - timedelta(hours=2),
+            completed_at=timezone.now() - timedelta(minutes=30),
+            payload={"campaign_id": 100 + i},
+        )
+
+
+@pytest.mark.django_db
+class TestQuotaConnect:
+    """15/07 : plancher quotidien de connects servies, prioritaire sur LOT C."""
+
+    def test_connect_due_passe_en_premier_sous_le_quota(self):
+        connect = _mk(Task.TaskType.CONNECT, campaign_id=1)
+        _mk(Task.TaskType.FOLLOW_UP, campaign_id=1, public_id="a")
+        _mk(Task.TaskType.CHECK_PENDING, campaign_id=1, public_id="b")
+
+        assert Task.objects.claim_next().pk == connect.pk
+
+    def test_quota_atteint_priorite_lot_c_reprend(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_CONNECT_QUOTA", "3")
+        _mk_done_connect(3)
+        _mk(Task.TaskType.CONNECT, campaign_id=1)
+        follow = _mk(Task.TaskType.FOLLOW_UP, campaign_id=1, public_id="a")
+
+        assert Task.objects.claim_next().pk == follow.pk
+
+    def test_connects_d_hier_ne_consomment_pas_le_quota(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_CONNECT_QUOTA", "1")
+        Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            status=Task.Status.COMPLETED,
+            scheduled_at=timezone.now() - timedelta(days=1, hours=2),
+            completed_at=timezone.now() - timedelta(days=1),
+            payload={"campaign_id": 9},
+        )
+        connect = _mk(Task.TaskType.CONNECT, campaign_id=1)
+        _mk(Task.TaskType.FOLLOW_UP, campaign_id=1, public_id="a")
+
+        assert Task.objects.claim_next().pk == connect.pk
+
+    def test_quota_zero_desactive_le_plancher(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_CONNECT_QUOTA", "0")
+        _mk(Task.TaskType.CONNECT, campaign_id=1)
+        follow = _mk(Task.TaskType.FOLLOW_UP, campaign_id=1, public_id="a")
+
+        assert Task.objects.claim_next().pk == follow.pk
+
+    def test_quota_ignore_sur_claim_restreint(self):
+        """Le laisser-passer pacing (task_types=follow_up) ne sert JAMAIS de
+        connect, quota ou pas — une connect lit une fiche à coup sûr."""
+        _mk(Task.TaskType.CONNECT, campaign_id=1)
+
+        assert Task.objects.claim_next(task_types=(Task.TaskType.FOLLOW_UP,)) is None
+
+    def test_fifo_entre_connects_sous_le_quota(self):
+        older = _mk(Task.TaskType.CONNECT, minutes_ago=60, campaign_id=1)
+        _mk(Task.TaskType.CONNECT, minutes_ago=5, campaign_id=2)
+
+        assert Task.objects.claim_next().pk == older.pk
+
+    def test_connect_non_due_ne_passe_pas(self):
+        Task.objects.create(
+            task_type=Task.TaskType.CONNECT,
+            scheduled_at=timezone.now() + timedelta(hours=1),
+            payload={"campaign_id": 1},
+        )
+        follow = _mk(Task.TaskType.FOLLOW_UP, campaign_id=1, public_id="a")
+
+        assert Task.objects.claim_next().pk == follow.pk
+
+
 @pytest.mark.django_db
 class TestClaimNextPriorite:
+    """Priorité LOT C (quota désactivé ou consommé)."""
+
+    @pytest.fixture(autouse=True)
+    def _quota_off(self, monkeypatch):
+        monkeypatch.setenv("EKOALU_DAILY_CONNECT_QUOTA", "0")
+
     def test_follow_up_puis_check_pending_avant_connect(self):
         """À échéance égale : follow_up > check_pending > connect."""
         connect = _mk(Task.TaskType.CONNECT, campaign_id=1)
