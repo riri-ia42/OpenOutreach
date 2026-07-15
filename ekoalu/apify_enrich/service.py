@@ -58,13 +58,45 @@ def remaining_today() -> int:
 
 def record_usage(n: int) -> None:
     """Compte ``n`` profils envoyes a Apify (AVANT l'appel reseau : on compte
-    les tentatives — Apify facture les runs meme partiellement en echec)."""
+    les tentatives, comme le read_guard ; les echecs sont rembourses apres
+    coup par ``record_failures``)."""
     from django.db.models import F
 
     from ekoalu.apify_enrich.models import ApifyUsageDay
 
     row, _created = ApifyUsageDay.objects.get_or_create(date=timezone.localdate())
     ApifyUsageDay.objects.filter(pk=row.pk).update(count=F("count") + n)
+
+
+def record_failures(n: int) -> None:
+    """Rembourse ``n`` tentatives en echec du plafond + trace la panne.
+
+    15/07 : l'actor HarvestAPI (plan Apify Free) s'est mis a echouer a 100 %
+    (limite 20 runs) — les 40 tentatives/jour saturaient le plafond pour RIEN
+    (le daemon croyait le cap atteint et repliait sur Voyager toute la
+    journee) et la panne restait invisible. Un echec ne coute quasi rien cote
+    Apify (facturation au resultat) : on le sort de ``count`` (plancher 0) et
+    on l'accumule dans ``failed`` (consomme par la preco du recap du soir).
+    """
+    if n <= 0:
+        return
+    from django.db.models import F, Value
+    from django.db.models.functions import Greatest
+
+    from ekoalu.apify_enrich.models import ApifyUsageDay
+
+    row, _created = ApifyUsageDay.objects.get_or_create(date=timezone.localdate())
+    ApifyUsageDay.objects.filter(pk=row.pk).update(
+        count=Greatest(F("count") - n, Value(0)),
+        failed=F("failed") + n,
+    )
+
+
+def failed_today() -> int:
+    from ekoalu.apify_enrich.models import ApifyUsageDay
+
+    row = ApifyUsageDay.objects.filter(date=timezone.localdate()).first()
+    return row.failed if row else 0
 
 
 def apify_ready() -> bool:
@@ -151,6 +183,7 @@ def _run_and_apply(leads: list, stats: dict) -> None:
             "(le repli Voyager du daemon les rattrapera) — %s", len(leads), exc,
         )
         stats["failed"] = len(leads)
+        record_failures(stats["failed"])
         return
     by_pid = _snapshots_by_public_id(items)
     for lead in leads:
@@ -158,6 +191,7 @@ def _run_and_apply(leads: list, stats: dict) -> None:
             stats["enriched"] += 1
         else:
             stats["failed"] += 1
+    record_failures(stats["failed"])
 
 
 def enrich_lead(lead) -> bool:
@@ -179,9 +213,13 @@ def enrich_lead(lead) -> bool:
             "Apify enrich %s en echec (%s) — repli Voyager",
             lead.public_identifier, exc,
         )
+        record_failures(1)
         return False
     by_pid = _snapshots_by_public_id(items)
-    return _apply_snapshot(lead, by_pid.get((lead.public_identifier or "").lower()))
+    ok = _apply_snapshot(lead, by_pid.get((lead.public_identifier or "").lower()))
+    if not ok:
+        record_failures(1)
+    return ok
 
 
 def _snapshots_by_public_id(items: list[dict]) -> dict[str, dict]:

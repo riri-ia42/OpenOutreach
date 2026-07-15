@@ -15,6 +15,11 @@ class ApifyUsageDay(models.Model):
 
     date = models.DateField(unique=True)
     count = models.PositiveIntegerField(default=0)
+    # 15/07 : tentatives en ECHEC du jour. Les echecs sont REMBOURSES de
+    # ``count`` (un actor en panne — ex. limite 20 runs du plan Apify Free —
+    # ne doit ni consommer le plafond pour rien, ni masquer la panne).
+    # ``count`` = reussites effectives + tentatives en cours.
+    failed = models.PositiveIntegerField(default=0)
 
     class Meta:
         app_label = "ekoalu"

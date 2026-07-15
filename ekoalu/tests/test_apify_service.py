@@ -163,6 +163,9 @@ class TestEnrichUrlonlyLeads:
 
         assert stats["enriched"] == 1
         assert stats["failed"] == 1
+        # 15/07 : l'echec est REMBOURSE du plafond + trace dans failed
+        assert service.used_today() == 1
+        assert service.failed_today() == 1
         absent.refresh_from_db()
         assert absent.profile_snapshot is None      # lead laisse INTACT
         assert absent.embedding is None             # repli Voyager possible
@@ -178,11 +181,35 @@ class TestEnrichUrlonlyLeads:
 
         assert stats["failed"] == 2
         assert stats["enriched"] == 0
-        assert stats["used_today"] == 2   # tentatives comptees quand meme
+        # 15/07 : echecs rembourses du plafond (un actor HS ne doit pas
+        # saturer le cap — cf. panne HarvestAPI limite 20 runs plan Free)
+        assert service.used_today() == 0
+        assert service.failed_today() == 2
         for lead in leads:
             lead.refresh_from_db()
             assert lead.profile_snapshot is None
             assert lead.embedding is None
+
+    def test_echecs_rembourses_ne_bloquent_pas_le_lendemain_meme_jour(
+        self, campaign, monkeypatch,
+    ):
+        """Actor HS : les tentatives echouees ne consomment pas le plafond —
+        un retour a la normale dans la journee reprend immediatement."""
+        monkeypatch.setenv("EKOALU_APIFY_DAILY_CAP", "2")
+        _mk_lead("lead-ko", campaign)
+
+        with patch.object(client, "run_profile_scraper",
+                          side_effect=RuntimeError("limite 20 runs")):
+            service.enrich_urlonly_leads(max_leads=10)
+        assert service.remaining_today() == 2      # plafond integralement rendu
+
+        _mk_lead("lead-ok", campaign)
+        with patch.object(client, "run_profile_scraper",
+                          side_effect=lambda urls: [
+                              _actor_item(u.rstrip("/").rsplit("/", 1)[-1])
+                              for u in urls]):
+            stats = service.enrich_urlonly_leads(max_leads=10)
+        assert stats["enriched"] == 2   # lead-ko retente + lead-ok
 
 
 # --------------------------------------------------------------------------
@@ -224,6 +251,9 @@ class TestEnrichLead:
             assert service.enrich_lead(lead) is False
         lead.refresh_from_db()
         assert lead.profile_snapshot is None
+        # 15/07 : tentative remboursee + panne tracee
+        assert service.used_today() == 0
+        assert service.failed_today() == 1
 
 
 # --------------------------------------------------------------------------
