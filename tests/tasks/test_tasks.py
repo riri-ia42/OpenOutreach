@@ -436,7 +436,8 @@ class TestHandleFollowUp:
     ):
         """LOT C : message capturé en file de validation (INTERCEPTED) = le
         Deal RESTE CONNECTED (avant : démotion QUALIFIED qui cassait la chaîne
-        de relance — 6 deals constatés), pas d'ActionLog, re-planifié en 4h."""
+        de relance — 6 deals constatés), pas d'ActionLog, re-planifié en
+        8-12h (15/07 : backoff allongé, le re-check 4h saturait la file)."""
         mock_agent.return_value = FollowUpDecision(
             action="send_message", message="Hi!", follow_up_hours=24,
         )
@@ -453,12 +454,19 @@ class TestHandleFollowUp:
         assert deal.state == ProfileState.CONNECTED
         # Pas d'action comptée (rien n'est parti sur LinkedIn)
         assert ActionLog.objects.filter(action_type=ActionLog.ActionType.FOLLOW_UP).count() == 0
-        # Un follow_up de contrôle est re-planifié
-        assert Task.objects.filter(
+        # Un follow_up de contrôle est re-planifié dans 8-12h (backoff 15/07 :
+        # à 4h, ~23 relances en attente de validation saturaient le débit du
+        # daemon et affamaient les connect)
+        recheck = Task.objects.filter(
             task_type=Task.TaskType.FOLLOW_UP,
             status=Task.Status.PENDING,
             payload__public_id="alice",
-        ).exists()
+        ).first()
+        assert recheck is not None
+        delay = (recheck.scheduled_at - timezone.now()).total_seconds()
+        # >= 8h ferme ; la borne haute est lache car enqueue_follow_up decale
+        # l'echeance tombee hors plage active vers la prochaine ouverture
+        assert 8 * 3600 - 60 <= delay <= 30 * 3600
 
     @patch("linkedin.db.summaries.materialize_profile_summary_if_missing")
     @patch("linkedin.agents.follow_up.run_follow_up_agent")

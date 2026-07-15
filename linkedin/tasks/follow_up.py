@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from datetime import timedelta
 
 from django.utils import timezone
@@ -15,6 +16,19 @@ logger = logging.getLogger(__name__)
 # Required silence between nudges scales with unanswered count:
 # 1 unanswered → 3d, 2 → 6d, 3 → 9d. Skips the LLM call while open.
 MIN_DAYS_PER_UNANSWERED = 3
+
+
+def _pending_validation_recheck_seconds() -> float:
+    """Backoff du re-check quand un message attend la validation Richard.
+
+    8-12h avec jitter (avant : 4h fixe). Le re-check est un no-op DB tant que
+    Richard n'a pas statué, mais chaque task consomme un créneau du daemon
+    (délais humains entre actions) et passe en tête de file (priorité LOT C) —
+    à 4h, ~23 relances en attente saturaient le débit et affamaient les
+    connect (0 servie du 08 au 13/07). La validation Richard débloque de toute
+    façon l'envoi via la file approved, indépendamment de ce re-check.
+    """
+    return random.uniform(8 * 3600, 12 * 3600)
 
 
 def _build_send_profile(deal) -> dict:
@@ -134,7 +148,10 @@ def handle_follow_up(task, session, qualifiers):
             "[%s] follow_up %s skip: PendingOutbound deja en file (attente validation)",
             session.campaign, public_id,
         )
-        enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600)
+        enqueue_follow_up(
+            campaign_id, public_id,
+            delay_seconds=_pending_validation_recheck_seconds(),
+        )
         return
 
     materialize_profile_summary_if_missing(deal, session)
@@ -148,14 +165,17 @@ def handle_follow_up(task, session, qualifiers):
         if sent is INTERCEPTED:
             # LOT C : message capturé en file de validation (PendingOutbound) —
             # résultat NORMAL en mode require_approval, PAS un échec d'envoi.
-            # Le Deal RESTE CONNECTED ; on repasse dans 4h, où le garde
+            # Le Deal RESTE CONNECTED ; on repasse dans 8-12h, où le garde
             # _has_pending_validation court-circuitera l'agent tant que
             # Richard n'a pas statué.
             logger.info(
                 "[%s] follow_up %s: message en file de validation — deal inchangé",
                 session.campaign, public_id,
             )
-            enqueue_follow_up(campaign_id, public_id, delay_seconds=4 * 3600)
+            enqueue_follow_up(
+                campaign_id, public_id,
+                delay_seconds=_pending_validation_recheck_seconds(),
+            )
             return
         if not sent:
             set_profile_state(session, public_id, ProfileState.QUALIFIED.value)
