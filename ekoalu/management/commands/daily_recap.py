@@ -187,8 +187,22 @@ def build_efficiency_analysis(day: date) -> dict:
         kind="invitation", status=OutboundStatus.PENDING,
     ).count()
 
+    # Panne Apify (15/07) : tentatives en échec sans AUCUNE réussite = l'actor
+    # est HS (ex. limite 20 runs du plan Free) — la qualification retombe en
+    # 100 % Voyager sous un cap lectures réduit. Priorité maximale.
+    from ekoalu.apify_enrich.models import ApifyUsageDay
+
+    apify_row = ApifyUsageDay.objects.filter(date=day).first()
+    apify_ok = apify_row.count if apify_row else 0
+    apify_failed = getattr(apify_row, "failed", 0) if apify_row else 0
+
     # --- Préconisations (ordre = priorité, la 1re est "la" préco) ---
     precos: list[str] = []
+    if apify_failed >= 5 and apify_ok == 0:
+        precos.append(
+            f"Apify HS : {apify_failed} tentatives d'enrichissement, 0 réussie. "
+            f"Vérifier le compte/actor (limite runs du plan Free ?). "
+            f"La qualification replie sur Voyager (cap lectures compte).")
     if total and total >= 0.9 * cap:
         precos.append(
             f"Cap interactions presque atteint ({total}/{cap}). Risque anti-ban : "
@@ -224,6 +238,7 @@ def build_efficiency_analysis(day: date) -> dict:
         "selected": selected, "rejected": rejected,
         "efficacite": efficacite, "part_recherche": part_recherche,
         "overdue": overdue, "invit_sent": invit_sent, "invit_pending": invit_pending,
+        "apify_ok": apify_ok, "apify_failed": apify_failed,
         "precos": precos, "preco_top": precos[0],
     }
 

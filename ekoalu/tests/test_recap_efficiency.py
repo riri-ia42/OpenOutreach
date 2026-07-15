@@ -83,3 +83,35 @@ def test_preco_volume_insuffisant_pas_de_fausse_alerte(monkeypatch):
     eff = build_efficiency_analysis(today)
     # efficacité 0% mais sel<10 → la règle efficacité ne se déclenche PAS
     assert "Efficacité tri faible" not in " ".join(eff["precos"])
+
+
+def test_preco_apify_hs(monkeypatch):
+    """15/07 : actor Apify en panne (echecs sans aucune reussite) = preco n°1."""
+    monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "150")
+    monkeypatch.delenv("EKOALU_PROFILE_READS_CAP_RAMP", raising=False)
+    from ekoalu.apify_enrich.models import ApifyUsageDay
+    today = timezone.localdate()
+    ApifyUsageDay.objects.create(date=today, count=0, failed=40)
+    _read_day(today, {"selection": 20}, 20)
+    camp = _campaign()
+    _deals(camp, 7, state="Qualified")
+
+    eff = build_efficiency_analysis(today)
+    assert eff["apify_failed"] == 40
+    assert eff["apify_ok"] == 0
+    assert eff["preco_top"].startswith("Apify HS")
+
+
+def test_preco_apify_pas_d_alerte_si_reussites(monkeypatch):
+    """Des echecs partiels avec des reussites = pas de panne, pas d'alerte."""
+    monkeypatch.setenv("EKOALU_DAILY_PROFILE_READS_CAP", "150")
+    monkeypatch.delenv("EKOALU_PROFILE_READS_CAP_RAMP", raising=False)
+    from ekoalu.apify_enrich.models import ApifyUsageDay
+    today = timezone.localdate()
+    ApifyUsageDay.objects.create(date=today, count=24, failed=16)
+    _read_day(today, {"selection": 20}, 20)
+    camp = _campaign()
+    _deals(camp, 7, state="Qualified")
+
+    eff = build_efficiency_analysis(today)
+    assert "Apify HS" not in " ".join(eff["precos"])
