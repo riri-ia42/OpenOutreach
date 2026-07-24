@@ -44,6 +44,15 @@
         <input type="checkbox" id="bulk-all" class="w-4 h-4 accent-blue-600">
         <span class="font-medium text-gray-700">Tout sélectionner</span>
     </label>
+    <span class="text-gray-300">|</span>
+    <button type="button" id="select-linkedin"
+            class="px-3 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border border-blue-200">
+        Sélectionner LinkedIn (<span id="count-linkedin">0</span>)
+    </button>
+    <button type="button" id="select-email"
+            class="px-3 py-1 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium border border-purple-200">
+        Sélectionner emails (<span id="count-email">0</span>)
+    </button>
     <span class="text-xs text-gray-500">· Coche les messages pour actions en masse</span>
 </div>
 {% endif %}
@@ -56,7 +65,7 @@
             <li class="p-4 hover:bg-gray-50">
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-3 sm:gap-4">
                     {% if o.status == 'pending' or o.status == 'approved' or o.status == 'failed' %}
-                    <input type="checkbox" class="bulk-cb mt-1 w-4 h-4 accent-blue-600" data-id="{{ o.pk }}">
+                    <input type="checkbox" class="bulk-cb mt-1 w-4 h-4 accent-blue-600" data-id="{{ o.pk }}" data-kind="{{ o.kind }}">
                     {% endif %}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1 flex-wrap">
@@ -162,6 +171,10 @@
 
 <script>
 (function() {
+    // Regroupe les kinds par canal (cf. OutboundKind : LinkedIn = invitation/follow_up/reply).
+    const LINKEDIN_KINDS = ['invitation', 'follow_up', 'reply'];
+    const isLinkedin = cb => LINKEDIN_KINDS.includes(cb.dataset.kind);
+
     function updateBulkBar() {
         const checked = [...document.querySelectorAll('.bulk-cb:checked')];
         document.getElementById('bulk-ids').value = checked.map(c => c.dataset.id).join(',');
@@ -169,6 +182,17 @@
         document.getElementById('bulk-form').classList.toggle('hidden', checked.length === 0);
     }
     window.updateBulkBar = updateBulkBar;
+
+    // Sélection par canal : ne coche QUE le canal visé, décoche le reste.
+    function selectChannel(wantLinkedin) {
+        document.querySelectorAll('.bulk-cb').forEach(c => {
+            c.checked = wantLinkedin ? isLinkedin(c) : !isLinkedin(c);
+        });
+        const master = document.getElementById('bulk-all');
+        if (master) master.checked = false;
+        updateBulkBar();
+    }
+
     const master = document.getElementById('bulk-all');
     if (master) {
         master.addEventListener('change', () => {
@@ -176,6 +200,19 @@
             updateBulkBar();
         });
     }
+    const btnLk = document.getElementById('select-linkedin');
+    if (btnLk) btnLk.addEventListener('click', () => selectChannel(true));
+    const btnEmail = document.getElementById('select-email');
+    if (btnEmail) btnEmail.addEventListener('click', () => selectChannel(false));
+
+    // Compteurs par canal affichés sur les boutons.
+    const allCb = [...document.querySelectorAll('.bulk-cb')];
+    const nLk = allCb.filter(isLinkedin).length;
+    const elLk = document.getElementById('count-linkedin');
+    const elEmail = document.getElementById('count-email');
+    if (elLk) elLk.textContent = nLk;
+    if (elEmail) elEmail.textContent = allCb.length - nLk;
+
     document.querySelectorAll('.bulk-cb').forEach(cb => cb.addEventListener('change', updateBulkBar));
     document.body.style.paddingBottom = '80px';
 })();
