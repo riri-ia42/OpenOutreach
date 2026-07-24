@@ -9,10 +9,12 @@ TANT QUE le destinataire unique est richard@ekoalu.com.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 import time
+from pathlib import Path
 
 import requests
 
@@ -22,9 +24,47 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 DEFAULT_SCOPE = "https://graph.microsoft.com/.default offline_access"
 
+# Cache disque du refresh_token ROULE (offline_access renvoie un nouveau
+# refresh_token a chaque refresh). Le persister maintient la lignee vivante :
+# sinon on reutilise indefiniment le token d'origine, qui meurt a 90 jours pile
+# d'inactivite (AADSTS700082) — panne du 2026-07-22. Fallback env au 1er boot.
+_TOKEN_FILE = Path(
+    os.environ.get("EKOALU_GRAPH_TOKEN_FILE")
+    or Path(__file__).resolve().parents[2] / "data" / "graph_token.json"
+)
+
 _token_lock = threading.Lock()
 _cached_token: str | None = None
 _token_expires_at: float = 0.0
+
+
+def _load_refresh_token() -> str:
+    """Refresh token courant : cache disque roule si present, sinon env."""
+    try:
+        data = json.loads(_TOKEN_FILE.read_text(encoding="utf-8"))
+        rt = (data.get("refresh_token") or "").strip()
+        if rt:
+            return rt
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+    return os.environ.get("GRAPH_REFRESH_TOKEN", "").strip()
+
+
+def _persist_refresh_token(refresh_token: str) -> None:
+    """Ecrit le refresh_token roule sur disque (best-effort, jamais bloquant)."""
+    if not refresh_token:
+        return
+    try:
+        _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _TOKEN_FILE.write_text(
+            json.dumps(
+                {"refresh_token": refresh_token, "updated_at": time.time()},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Persistance graph_token.json impossible : %s", exc)
 
 
 class GraphConfigError(RuntimeError):
@@ -57,7 +97,11 @@ def _get_access_token() -> str:
         tenant = _required("GRAPH_TENANT_ID")
         client_id = _required("GRAPH_CLIENT_ID")
         client_secret = _required("GRAPH_CLIENT_SECRET")
-        refresh_token = _required("GRAPH_REFRESH_TOKEN")
+        refresh_token = _load_refresh_token()
+        if not refresh_token:
+            raise GraphConfigError(
+                "Aucun refresh_token (ni data/graph_token.json ni GRAPH_REFRESH_TOKEN)"
+            )
 
         resp = requests.post(
             TOKEN_URL_TEMPLATE.format(tenant=tenant),
@@ -76,6 +120,11 @@ def _get_access_token() -> str:
         token = data.get("access_token")
         if not token:
             raise GraphAuthError(f"Pas d'access_token dans la réponse: {data}")
+        # offline_access renvoie un refresh_token ROULE : le persister pour ne
+        # pas retomber sur le token d'origine (mort a 90j — panne 2026-07-22).
+        rolled = (data.get("refresh_token") or "").strip()
+        if rolled and rolled != refresh_token:
+            _persist_refresh_token(rolled)
         expires_in = int(data.get("expires_in", 3600))
         _cached_token = token
         _token_expires_at = now + expires_in
@@ -286,11 +335,11 @@ def is_configured() -> bool:
     """True si toutes les variables Graph sont présentes."""
     try:
         for name in ("GRAPH_CLIENT_ID", "GRAPH_TENANT_ID", "GRAPH_CLIENT_SECRET",
-                     "GRAPH_REFRESH_TOKEN", "GRAPH_USER_EMAIL"):
+                     "GRAPH_USER_EMAIL"):
             _required(name)
-        return True
     except GraphConfigError:
         return False
+    return bool(_load_refresh_token())
 
 
 def send_reply(
