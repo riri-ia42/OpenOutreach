@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from django.contrib import messages as django_messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -1441,11 +1442,14 @@ def outbound_list(request):
             reason = request.POST.get("bulk_reason", "").strip() or "(rejet en masse)"
             qs_active = qs.exclude(status__in=[OutboundStatus.SENT, OutboundStatus.REJECTED])
             public_ids = list(qs_active.values_list("prospect_public_id", flat=True).distinct())
-            n = qs_active.update(
-                status=OutboundStatus.REJECTED,
-                rejection_reason=reason,
-            )
-            n_leads, _ = _disqualify_leads_from_reject(public_ids, reason)
+            # Tout-ou-rien (cf. refus unitaire) : jamais de message refusé avec
+            # son lead resté actif si l'écriture casse en cours de route.
+            with transaction.atomic():
+                n = qs_active.update(
+                    status=OutboundStatus.REJECTED,
+                    rejection_reason=reason,
+                )
+                n_leads, _ = _disqualify_leads_from_reject(public_ids, reason)
             django_messages.warning(
                 request,
                 f"✗ {n} message(s) refusé(s) — {n_leads} prospect(s) retiré(s) du pipeline.",
@@ -1821,15 +1825,20 @@ def outbound_detail(request, pk: int):
 
         elif action == "reject":
             rejection_reason = request.POST.get("rejection_reason", "")
-            outbound.status = OutboundStatus.REJECTED
-            outbound.rejection_reason = rejection_reason
-            outbound.save()
-            # Apprentissage : un motif exploitable devient une consigne few-shot
+            # Tout-ou-rien : sans transaction, un `database is locked` en cours
+            # de route laissait le message REFUSÉ mais le lead encore actif
+            # (incident 28/07). Un échec remonte maintenant sans demi-refus.
+            with transaction.atomic():
+                outbound.status = OutboundStatus.REJECTED
+                outbound.rejection_reason = rejection_reason
+                outbound.save()
+                n_leads, _ = _disqualify_leads_from_reject(
+                    [outbound.prospect_public_id],
+                    rejection_reason or "(sans raison)",
+                )
+            # Apprentissage : un motif exploitable devient une consigne few-shot.
+            # Hors transaction (best-effort, ne doit jamais annuler le refus).
             _capture_rejection_learning(outbound, rejection_reason)
-            n_leads, _ = _disqualify_leads_from_reject(
-                [outbound.prospect_public_id],
-                rejection_reason or "(sans raison)",
-            )
             msg = "Message refusé."
             if n_leads:
                 msg += " Prospect retiré du pipeline (Lead disqualifié)."

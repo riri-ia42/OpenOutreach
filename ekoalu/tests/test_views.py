@@ -537,6 +537,46 @@ class TestOutboundViews:
         assert deal_b.state == ProfileState.FAILED.value
         assert deal_b.outcome == Outcome.NOT_INTERESTED.value
 
+    def test_outbound_reject_est_tout_ou_rien(self, client_logged, monkeypatch):
+        """Incident 28/07 (`database is locked`) : un echec en cours de refus
+        laissait le message REFUSE mais le lead encore actif — le daemon
+        continuait donc a le travailler. Le refus doit etre atomique.
+        """
+        from django.db import OperationalError
+
+        from crm.models import Lead
+        from ekoalu.outbound_validation.models import (
+            OutboundKind,
+            OutboundStatus,
+            PendingOutbound,
+        )
+
+        lead = Lead.objects.create(
+            public_identifier="atomic-test",
+            linkedin_url="https://www.linkedin.com/in/atomic-test/",
+        )
+        po = PendingOutbound.objects.create(
+            prospect_public_id="atomic-test",
+            kind=OutboundKind.FOLLOW_UP,
+            ai_draft="draft",
+        )
+
+        def boom(*args, **kwargs):
+            raise OperationalError("database is locked")
+
+        monkeypatch.setattr("ekoalu.views._disqualify_leads_from_reject", boom)
+
+        with pytest.raises(OperationalError):
+            client_logged.post(
+                reverse("ekoalu:outbound_detail", args=[po.pk]),
+                data={"action": "reject", "rejection_reason": "deja en relation"},
+            )
+
+        po.refresh_from_db()
+        lead.refresh_from_db()
+        assert po.status == OutboundStatus.PENDING, "refus partiel : message refuse sans disqualification"
+        assert lead.disqualified is False
+
     def test_outbound_bulk_reject_disqualifie_leads(self, client_logged):
         from crm.models import Lead
         from ekoalu.outbound_validation.models import (

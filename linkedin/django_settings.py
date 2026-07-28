@@ -95,6 +95,23 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": str(ROOT_DIR / "data" / "db.sqlite3"),
+        # Concurrence daemon <-> UI de validation (incident 28/07 : "Confirmer
+        # refus" qui ne rend jamais la main, `database is locked` x30 dans
+        # django_stderr.log). Le daemon ecrit en continu ; par defaut SQLite
+        # etait en journal `delete` (une ecriture bloque tout le monde) avec
+        # 5 s de busy_timeout, et les transactions DEFERRED echouent
+        # INSTANTANEMENT en cas d'upgrade lecture->ecriture concurrente.
+        "OPTIONS": {
+            # WAL : lecteurs et ecrivain concurrents ; NORMAL : moins de fsync
+            # (sur, WAL garde la coherence apres crash process).
+            "init_command": "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+            # busy_timeout : une ecriture ATTEND son tour au lieu d'echouer.
+            "timeout": 30,
+            # IMMEDIATE : prend le verrou d'ecriture des le BEGIN, donc le
+            # busy_timeout s'applique vraiment (sinon "database is locked"
+            # immediat, sans attente).
+            "transaction_mode": "IMMEDIATE",
+        },
     }
 }
 
