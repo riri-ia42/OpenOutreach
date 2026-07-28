@@ -136,12 +136,23 @@ class Command(BaseCommand):
 
             # Lead DECP (entreprise ou personne du groupe d'influence) :
             # le marché public gagné sert d'accroche factuelle
-            contexte = ""
+            morceaux = []
             if data.source in (EmailLeadData.SOURCE_DECP, EmailLeadData.SOURCE_DECP_INFLUENCE):
                 from ekoalu.decp_import import build_marche_contexte
-                contexte = build_marche_contexte(data.raw_json)
-                if contexte:
+                marche = build_marche_contexte(data.raw_json)
+                if marche:
+                    morceaux.append(marche)
                     self.stdout.write("  (contexte DECP : marché gagné injecté)")
+
+            # Confrère fabricant : on adapte le discours à ce qu'il NE fait pas
+            # (décision Richard 28/07). Standard si pas de verdict fiable.
+            from ekoalu.fabricant_detect.angles import angle_for_siren
+            angle = angle_for_siren(data.siren)
+            if angle:
+                morceaux.append(angle.contexte)
+                self.stdout.write(f"  (angle fabricant : {angle.resume})")
+
+            contexte = "\n\n".join(morceaux)
 
             draft = generate_cold_email(
                 entreprise=data.entreprise,
