@@ -32,6 +32,7 @@ APIFY_MIN_ENRICHED = 8           # limite free-tier apimaestro 10/j, marge not-f
 SOURCING_MIN_LEADS = 15          # cible rotation = 30, alerte sous la moitié
 OVERDUE_TASKS_MAX = 150
 APPROVED_STUCK_HOURS = 24
+EMAIL_POOL_DAYS_MIN = 3          # jours de réserve avant alerte "manque de leads"
 
 
 def _is_working_day(d) -> bool:
@@ -205,20 +206,28 @@ def build_conformity_report(today=None) -> dict:
         kind=OutboundKind.EMAIL_COLD,
         created_at__gte=y_start, created_at__lt=y_end,
     ).count()
-    # Seuil = le quota d'un jour ouvré (50 depuis le 28/07) : sous ce niveau,
-    # le canal tombe à sec demain.
-    pool_min = conf.DAILY_COLD_MAIL_TARGET
-    jours_restants = len(pool) / pool_min if pool_min else 0
+    # Seuil = EMAIL_POOL_DAYS_MIN jours de quota. Alerter à 1 jour serait trop
+    # tard : la réalimentation demande une action (import DECP, enrichissement
+    # SIRENE) qui ne se fait pas dans la matinée. Richard veut être prévenu
+    # « dès que ça manque », donc avec de la marge (décision 28/07).
+    quota_jour = conf.DAILY_COLD_MAIL_TARGET
+    pool_min = quota_jour * EMAIL_POOL_DAYS_MIN
+    jours_restants = len(pool) / quota_jour if quota_jour else 0
     checks.append(_check(
         "Canal email", len(pool) >= pool_min,
-        f"vivier {len(pool)} lead(s) (~{jours_restants:.1f} jour(s) ouvré(s)), "
-        f"{generated_yesterday} cold mail(s) générés hier",
-        f">= {pool_min} leads en vivier (1 jour de génération)",
-        "Vivier à sec : réalimenter depuis BDD PROSPECT — `manage.py "
-        "import_bdd_prospect --source \"../../BDD PROSPECT/enrichis-sirene.json\" "
-        "--priority P1P2 --dry-run` puis sans --dry-run. ATTENTION : seul "
-        "enrichis-sirene.json porte le code NAF (contacts-propres.json ne l'a "
-        "pas → 100 % de rejets naf_not_target).",
+        f"vivier {len(pool)} lead(s) (~{jours_restants:.1f} jour(s) ouvré(s) "
+        f"à {quota_jour}/j), {generated_yesterday} cold mail(s) générés hier",
+        f">= {pool_min} leads ({EMAIL_POOL_DAYS_MIN} jours de réserve)",
+        "Vivier bientôt à sec — réalimenter, par ordre de préférence : "
+        "(1) `manage.py import_decp_cibles --dry-run` puis sans --dry-run "
+        "(marchés publics attribués, régénéré chaque dimanche par BDD PROSPECT) ; "
+        "(2) `manage.py import_bdd_prospect --source "
+        "\"../../BDD PROSPECT/enrichis-sirene.json\" --priority P1P2` — ATTENTION, "
+        "seul enrichis-sirene.json porte le code NAF, contacts-propres.json ne "
+        "l'a pas (100 % de rejets naf_not_target) ; (3) si les deux sont épuisés, "
+        "enrichissement NAF via l'API SIRENE des ~36 700 contacts de "
+        "contacts-propres.json qui ont un SIREN (chantier de fond, décision "
+        "Richard 28/07 : à lancer dès que les leads manquent).",
     ))
 
     conform = all(c["ok"] for c in checks)
