@@ -58,12 +58,16 @@ def next_active_window_start(now: dt.datetime) -> dt.datetime:
 
 
 def _is_day_active(d: dt.datetime) -> bool:
-    """Jour candidat pour la prochaine fenêtre LinkedIn : poids > 0 ET pas
-    un jour off aléatoire (LOT E) — sinon next_active_window_start renverrait
-    un créneau dans un jour où aucune action LinkedIn n'est permise."""
+    """Jour candidat pour la prochaine fenêtre : poids > 0, pas un jour off
+    aléatoire (LOT E) ET pas un jour férié français — sinon
+    next_active_window_start renverrait un créneau dans un jour où aucune
+    action n'est permise (et `compute_human_delay` boucherait le débit)."""
     if conf.WEEKDAY_WEIGHTS.get(d.weekday(), 0.0) <= 0.0:
         return False
     from ekoalu.human_scheduler.budget import is_day_off
+    from ekoalu.human_scheduler.holidays import is_french_holiday
+    if is_french_holiday(d.date()):
+        return False
     return not is_day_off(d.date())
 
 

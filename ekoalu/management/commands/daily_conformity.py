@@ -32,7 +32,6 @@ APIFY_MIN_ENRICHED = 8           # limite free-tier apimaestro 10/j, marge not-f
 SOURCING_MIN_LEADS = 15          # cible rotation = 30, alerte sous la moitié
 OVERDUE_TASKS_MAX = 150
 APPROVED_STUCK_HOURS = 24
-EMAIL_POOL_MIN = 25              # = 1 jour de génération (ColdLimit du pipeline)
 
 
 def _is_working_day(d) -> bool:
@@ -57,6 +56,7 @@ def build_conformity_report(today=None) -> dict:
     """Évalue les 6 attendus. Retourne {checks, conform, date}."""
     from crm.models import Deal, Lead
     from ekoalu.apify_enrich import service as apify_service
+    from ekoalu import conf
     from ekoalu.apify_enrich.models import ApifyUsageDay
     from ekoalu.email_canal.pool import cold_mail_candidates
     from ekoalu.human_scheduler.budget import is_day_off
@@ -205,10 +205,15 @@ def build_conformity_report(today=None) -> dict:
         kind=OutboundKind.EMAIL_COLD,
         created_at__gte=y_start, created_at__lt=y_end,
     ).count()
+    # Seuil = le quota d'un jour ouvré (50 depuis le 28/07) : sous ce niveau,
+    # le canal tombe à sec demain.
+    pool_min = conf.DAILY_COLD_MAIL_TARGET
+    jours_restants = len(pool) / pool_min if pool_min else 0
     checks.append(_check(
-        "Canal email", len(pool) >= EMAIL_POOL_MIN,
-        f"vivier {len(pool)} lead(s), {generated_yesterday} cold mail(s) générés hier",
-        f">= {EMAIL_POOL_MIN} leads en vivier (1 jour de génération)",
+        "Canal email", len(pool) >= pool_min,
+        f"vivier {len(pool)} lead(s) (~{jours_restants:.1f} jour(s) ouvré(s)), "
+        f"{generated_yesterday} cold mail(s) générés hier",
+        f">= {pool_min} leads en vivier (1 jour de génération)",
         "Vivier à sec : réalimenter depuis BDD PROSPECT — `manage.py "
         "import_bdd_prospect --source \"../../BDD PROSPECT/enrichis-sirene.json\" "
         "--priority P1P2 --dry-run` puis sans --dry-run. ATTENTION : seul "

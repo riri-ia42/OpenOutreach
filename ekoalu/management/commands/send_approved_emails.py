@@ -93,6 +93,33 @@ class Command(BaseCommand):
             ))
             return
 
+        # Quota du jour étalé sur la journée (50 en semaine / 20 le samedi
+        # matin / 0 férié-dimanche). Sans ce plafond glissant, le premier
+        # créneau viderait tout le quota d'un coup = burst reconnaissable.
+        from django.utils import timezone
+
+        from ekoalu.email_canal.quota import (
+            cold_mail_quota_for,
+            cold_mails_sent_on,
+            quota_reason,
+            remaining_allowance,
+        )
+        today = timezone.localtime().date()
+        quota = cold_mail_quota_for(today)
+        already = cold_mails_sent_on(today)
+        allowance = remaining_allowance()
+        self.stdout.write(self.style.NOTICE(
+            f"Quota du jour : {already}/{quota} déjà envoyés ({quota_reason(today)}) "
+            f"— débloqué à cet instant : {allowance}",
+        ))
+        if allowance <= 0:
+            self.stdout.write(self.style.SUCCESS(
+                "Rien à envoyer maintenant (quota du jour atteint ou pas encore "
+                "débloqué) — le créneau suivant prendra le relais.",
+            ))
+            return
+        max_n = min(max_n, allowance)
+
         if not dry_run:
             recovered = recover_stale_sending()
             if recovered:

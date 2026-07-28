@@ -39,6 +39,12 @@ DAILY_INVITE_CAP = int(os.environ.get("EKOALU_DAILY_INVITE_CAP", "8"))
 # compte gratuit : ~100/sem, zone sure 15-20/j. Enforce par process_approved_queue.
 DAILY_MESSAGE_CAP = int(os.environ.get("EKOALU_DAILY_MESSAGE_CAP", "15"))
 
+# Cold mails par jour (decision Richard 28/07 : 50 en semaine, 20 le samedi
+# matin, 0 les jours feries francais). Etalement + jitter : email_canal/quota.py.
+# Reste sous le plafond prudent d'une boite chauffee (sources 2026 : 25-100/j).
+DAILY_COLD_MAIL_TARGET = int(os.environ.get("EKOALU_DAILY_COLD_MAIL_TARGET", "50"))
+SATURDAY_COLD_MAIL_TARGET = int(os.environ.get("EKOALU_SATURDAY_COLD_MAIL_TARGET", "20"))
+
 # Cooldown post-acceptation (heures avant follow-up)
 COOLDOWN_MIN_HOURS = 4
 COOLDOWN_MAX_HOURS = 48

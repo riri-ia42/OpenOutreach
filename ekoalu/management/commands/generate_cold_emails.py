@@ -39,8 +39,10 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--limit", type=int, default=5,
-            help="Nombre max de cold mails à générer dans cette passe (défaut 5).",
+            "--limit", type=int, default=0,
+            help="Nombre max de cold mails à générer. 0 (défaut) = quota du "
+                 "jour (50 en semaine, 20 le samedi, 0 férié/dimanche), moins "
+                 "ce qui a déjà été généré aujourd'hui.",
         )
         parser.add_argument(
             "--dpt", default="",
@@ -55,6 +57,38 @@ class Command(BaseCommand):
             help="Filtre source EmailLeadData (bdd_prospect/manual/...). Vide = toutes.",
         )
 
+    def _quota_du_jour(self) -> int:
+        """Reste à générer aujourd'hui = quota du jour - déjà généré.
+
+        La soustraction rend la commande idempotente : le rattrapage matinal
+        (durcissement 24/07) peut la relancer sans doubler la production.
+        """
+        from django.utils import timezone
+
+        from ekoalu.email_canal.quota import cold_mail_quota_for, quota_reason
+        from ekoalu.outbound_validation.models import OutboundKind, PendingOutbound
+
+        today = timezone.localtime().date()
+        quota = cold_mail_quota_for(today)
+        if quota <= 0:
+            self.stdout.write(self.style.SUCCESS(
+                f"Quota du jour = 0 ({quota_reason(today)}) — aucune génération.",
+            ))
+            return 0
+
+        start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+        deja = PendingOutbound.objects.filter(
+            kind=OutboundKind.EMAIL_COLD, created_at__gte=start,
+        ).count()
+        reste = max(0, quota - deja)
+        self.stdout.write(self.style.NOTICE(
+            f"Quota du jour : {quota} ({quota_reason(today)}) — déjà généré {deja} "
+            f"→ à générer {reste}",
+        ))
+        if reste <= 0:
+            self.stdout.write(self.style.SUCCESS("Quota du jour déjà atteint."))
+        return reste
+
     def handle(self, *args, **opts):
         from ekoalu.email_canal.models import EmailLeadData
 
@@ -62,6 +96,11 @@ class Command(BaseCommand):
         dpt = opts["dpt"].strip()
         source = opts["source"].strip()
         dry_run = bool(opts["dry_run"])
+
+        if limit <= 0:
+            limit = self._quota_du_jour()
+            if limit <= 0:
+                return
 
         # Vivier = source unique partagée avec daily_conformity (email_canal.pool) :
         # lead avec contact_email + EmailLeadData, ni désinscrit, ni bouncé, ni

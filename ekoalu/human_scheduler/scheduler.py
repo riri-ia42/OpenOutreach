@@ -18,6 +18,7 @@ from django.utils import timezone
 
 from ekoalu import conf
 from ekoalu.human_scheduler.budget import is_day_off
+from ekoalu.human_scheduler.holidays import holiday_name
 from ekoalu.human_scheduler.windows import (
     is_active_day,
     is_in_active_window,
@@ -29,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 # Date du dernier log « jour off » — pour ne logger qu'au PREMIER refus du jour.
 _day_off_logged: dt.date | None = None
+# Idem pour les jours fériés (la fonction est appelée en boucle par le daemon).
+_holiday_logged: dt.date | None = None
+
+
+def _log_holiday(day: dt.date, name: str) -> None:
+    global _holiday_logged
+    _holiday_logged = day
+    logger.info("Jour férié (%s) — aucune action aujourd'hui (%s)", name, day.isoformat())
 
 
 def is_action_allowed_now(
@@ -37,6 +46,8 @@ def is_action_allowed_now(
     """True si on peut exécuter une action MAINTENANT.
 
     Vérifie :
+    - jour férié français (TOUS canaux — prospecter le 14 juillet est un
+      marqueur de bot ; demande Richard 28/07)
     - jour off aléatoire (LOT E — canal LinkedIn uniquement : le canal email
       et les commandes manuelles restent actifs, passer channel="email")
     - jour actif (poids > 0)
@@ -45,6 +56,12 @@ def is_action_allowed_now(
     """
     global _day_off_logged
     now = now or timezone.localtime()
+    ferie = holiday_name(now.date())
+    if ferie:
+        today = timezone.localtime().date()
+        if now.date() == today and _holiday_logged != today:
+            _log_holiday(today, ferie)
+        return False
     if channel == "linkedin" and is_day_off(now.date()):
         # Ne logger que pour AUJOURD'HUI : la fonction est aussi appelée avec
         # des dates futures par le scan de fenêtre (next_active_window_start).
