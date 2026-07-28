@@ -134,9 +134,10 @@ class Command(BaseCommand):
             self.stdout.write(f"\n→ {data.entreprise or lead.contact_email} "
                               f"({data.code_naf}, {data.ville})")
 
-            # Lead DECP : le marché public gagné sert d'accroche factuelle
+            # Lead DECP (entreprise ou personne du groupe d'influence) :
+            # le marché public gagné sert d'accroche factuelle
             contexte = ""
-            if data.source == EmailLeadData.SOURCE_DECP:
+            if data.source in (EmailLeadData.SOURCE_DECP, EmailLeadData.SOURCE_DECP_INFLUENCE):
                 from ekoalu.decp_import import build_marche_contexte
                 contexte = build_marche_contexte(data.raw_json)
                 if contexte:

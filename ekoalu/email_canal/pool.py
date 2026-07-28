@@ -80,8 +80,9 @@ def cold_mail_candidates(dpt: str = "", source: str = "") -> tuple[list["Lead"],
 
 
 def _not_priority(lead: "Lead") -> bool:
-    """False (= tête de file) pour une cible prioritaire DECP."""
+    """False (= tête de file) pour une cible prioritaire DECP (entreprise ou
+    personne physique de son groupe d'influence)."""
     data = getattr(lead, "email_data", None)
-    if data is None or data.source != "decp":
+    if data is None or data.source not in ("decp", "decp_influence"):
         return True
     return not bool((data.raw_json or {}).get("cible_prioritaire"))
