@@ -27,27 +27,11 @@ import logging
 
 from django.core.management.base import BaseCommand
 
+from ekoalu.email_canal.pool import cold_mail_candidates
 from ekoalu.email_generator import generate_cold_email, has_niche_mention
 from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
 
 logger = logging.getLogger(__name__)
-
-# Statuts qui bloquent une nouvelle génération : cold mail "en cours", déjà
-# envoyé, OU refusé. Un refus est définitif (cf. lead_exclusion) : on ne
-# regénère jamais un cold mail pour un prospect déjà refusé.
-_BLOCKING_STATUSES = (
-    OutboundStatus.PENDING,
-    OutboundStatus.APPROVED,
-    OutboundStatus.SENDING,  # claim en cours d'envoi (LOT D)
-    OutboundStatus.SENT,
-    OutboundStatus.BLOCKED_COMPANY,
-    OutboundStatus.REJECTED,
-    # FAILED/EXPIRED bloquent aussi la regeneration (P2-1) : un cold mail dont
-    # l'envoi a echoue serait sinon regenere chaque jour → doublon en file. Le
-    # retry legitime d'un FAILED passe par triage_failed_outbound (→ re-pending).
-    OutboundStatus.FAILED,
-    OutboundStatus.EXPIRED,
-)
 
 
 class Command(BaseCommand):
@@ -72,7 +56,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
-        from crm.models import Lead
         from ekoalu.email_canal.models import EmailLeadData
 
         limit = int(opts["limit"])
@@ -80,43 +63,11 @@ class Command(BaseCommand):
         source = opts["source"].strip()
         dry_run = bool(opts["dry_run"])
 
-        # 1. Lead avec contact_email + EmailLeadData + pas désinscrit ni bouncé
-        leads_qs = (
-            Lead.objects
-            .filter(
-                contact_email__isnull=False,
-                unsubscribed_at__isnull=True,
-                email_bounced_at__isnull=True,
-                disqualified=False,
-            )
-            .exclude(contact_email="")
-            .filter(email_data__isnull=False)
-        )
-        if dpt:
-            leads_qs = leads_qs.filter(email_data__dpt=dpt)
-        if source:
-            leads_qs = leads_qs.filter(email_data__source=source)
-
-        # 2. Exclure ceux qui ont déjà un PendingOutbound email_cold "en cours"
-        blocked_public_ids = set(
-            PendingOutbound.objects
-            .filter(kind=OutboundKind.EMAIL_COLD, status__in=_BLOCKING_STATUSES)
-            .values_list("prospect_public_id", flat=True)
-        )
-        # 3. Liste d'exclusion partagée mailing-mailjet (bounces/unsubscribes,
-        # LOT D) : inutile de générer un mail qui sera bloqué à l'envoi.
-        from ekoalu.shared_exclusions import excluded_emails
-        shared_excluded = excluded_emails()
-
-        skipped_excluded = 0
-        candidates = []
-        for lead in leads_qs.select_related("email_data"):
-            if lead.public_identifier in blocked_public_ids:
-                continue
-            if (lead.contact_email or "").strip().lower() in shared_excluded:
-                skipped_excluded += 1
-                continue
-            candidates.append(lead)
+        # Vivier = source unique partagée avec daily_conformity (email_canal.pool) :
+        # lead avec contact_email + EmailLeadData, ni désinscrit, ni bouncé, ni
+        # disqualifié, sans cold mail déjà en cours/envoyé/refusé, hors liste
+        # d'exclusion partagée mailing-mailjet.
+        candidates, skipped_excluded = cold_mail_candidates(dpt=dpt, source=source)
         if skipped_excluded:
             self.stdout.write(self.style.WARNING(
                 f"Skip {skipped_excluded} lead(s) : liste d'exclusion partagée "

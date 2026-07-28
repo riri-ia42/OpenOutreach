@@ -5,17 +5,17 @@ echoue serait regenere a chaque passe → doublon en file de validation.
 """
 from __future__ import annotations
 
-from ekoalu.management.commands.generate_cold_emails import _BLOCKING_STATUSES
+from ekoalu.email_canal.pool import BLOCKING_STATUSES
 from ekoalu.outbound_validation.models import OutboundStatus
 
 
 def test_failed_et_expired_bloquent_la_regeneration():
-    assert OutboundStatus.FAILED in _BLOCKING_STATUSES
-    assert OutboundStatus.EXPIRED in _BLOCKING_STATUSES
+    assert OutboundStatus.FAILED in BLOCKING_STATUSES
+    assert OutboundStatus.EXPIRED in BLOCKING_STATUSES
 
 
 def test_tous_les_statuts_non_renvoyables_sont_bloquants():
     """Seul un lead SANS aucun cold mail doit pouvoir en recevoir un nouveau :
     tout statut existant (ouvert, terminal ou echoue) bloque la regeneration."""
     for status in OutboundStatus:
-        assert status in _BLOCKING_STATUSES, f"{status} devrait bloquer la regen cold-mail"
+        assert status in BLOCKING_STATUSES, f"{status} devrait bloquer la regen cold-mail"

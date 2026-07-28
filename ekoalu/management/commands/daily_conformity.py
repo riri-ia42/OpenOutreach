@@ -13,6 +13,7 @@ Attendus vérifiés (100 % lecture seule, aucun appel réseau payant) :
 4. Qualification (hier)   — >= 1 deal créé s'il y avait des candidats embeddés
 5. Envois                 — aucun message approuvé bloqué depuis > 24 h
 6. Relances               — backlog de tâches en retard < 150
+7. Canal email            — vivier de cold mails >= 1 jour de génération
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ APIFY_MIN_ENRICHED = 8           # limite free-tier apimaestro 10/j, marge not-f
 SOURCING_MIN_LEADS = 15          # cible rotation = 30, alerte sous la moitié
 OVERDUE_TASKS_MAX = 150
 APPROVED_STUCK_HOURS = 24
+EMAIL_POOL_MIN = 25              # = 1 jour de génération (ColdLimit du pipeline)
 
 
 def _is_working_day(d) -> bool:
@@ -56,9 +58,10 @@ def build_conformity_report(today=None) -> dict:
     from crm.models import Deal, Lead
     from ekoalu.apify_enrich import service as apify_service
     from ekoalu.apify_enrich.models import ApifyUsageDay
+    from ekoalu.email_canal.pool import cold_mail_candidates
     from ekoalu.human_scheduler.budget import is_day_off
     from ekoalu.lead_routing.models import LeadDiscovery
-    from ekoalu.outbound_validation.models import OutboundStatus, PendingOutbound
+    from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
     from linkedin.models import Task
 
     now = dj_tz.localtime()
@@ -192,6 +195,25 @@ def build_conformity_report(today=None) -> dict:
         "File saturée : vider la file de validation (relances en attente), "
         "vérifier le débit du daemon et les caps ; voir analyse_semaine pour "
         "le détail par type.",
+    ))
+
+    # 7. Canal email — niveau du vivier de cold mails. Le pipeline du matin ne
+    # fait que PUISER dedans : rien ne le réalimente automatiquement. À sec, il
+    # tourne en "0 candidat" sans lever d'alerte (panne silencieuse 19/06→27/07).
+    pool, _ = cold_mail_candidates()
+    generated_yesterday = PendingOutbound.objects.filter(
+        kind=OutboundKind.EMAIL_COLD,
+        created_at__gte=y_start, created_at__lt=y_end,
+    ).count()
+    checks.append(_check(
+        "Canal email", len(pool) >= EMAIL_POOL_MIN,
+        f"vivier {len(pool)} lead(s), {generated_yesterday} cold mail(s) générés hier",
+        f">= {EMAIL_POOL_MIN} leads en vivier (1 jour de génération)",
+        "Vivier à sec : réalimenter depuis BDD PROSPECT — `manage.py "
+        "import_bdd_prospect --source \"../../BDD PROSPECT/enrichis-sirene.json\" "
+        "--priority P1P2 --dry-run` puis sans --dry-run. ATTENTION : seul "
+        "enrichis-sirene.json porte le code NAF (contacts-propres.json ne l'a "
+        "pas → 100 % de rejets naf_not_target).",
     ))
 
     conform = all(c["ok"] for c in checks)
