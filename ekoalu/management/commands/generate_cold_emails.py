@@ -134,6 +134,14 @@ class Command(BaseCommand):
             self.stdout.write(f"\n→ {data.entreprise or lead.contact_email} "
                               f"({data.code_naf}, {data.ville})")
 
+            # Lead DECP : le marché public gagné sert d'accroche factuelle
+            contexte = ""
+            if data.source == EmailLeadData.SOURCE_DECP:
+                from ekoalu.decp_import import build_marche_contexte
+                contexte = build_marche_contexte(data.raw_json)
+                if contexte:
+                    self.stdout.write("  (contexte DECP : marché gagné injecté)")
+
             draft = generate_cold_email(
                 entreprise=data.entreprise,
                 dirigeant=data.dirigeant,
@@ -143,6 +151,7 @@ class Command(BaseCommand):
                 dpt=data.dpt,
                 effectif_min=data.effectif_min,
                 effectif_max=data.effectif_max,
+                contexte=contexte,
             )
 
             if not draft.is_valid():

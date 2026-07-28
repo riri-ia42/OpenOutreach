@@ -72,4 +72,16 @@ def cold_mail_candidates(dpt: str = "", source: str = "") -> tuple[list["Lead"],
             skipped_excluded += 1
             continue
         candidates.append(lead)
+    # Cibles prioritaires DECP en tête (décision Richard 2026-07-28) : poseurs
+    # non-fabricants qui viennent de gagner un lot — fenêtre commerciale courte.
+    # Tri stable : l'ordre FIFO est conservé à l'intérieur de chaque groupe.
+    candidates.sort(key=_not_priority)
     return candidates, skipped_excluded
+
+
+def _not_priority(lead: "Lead") -> bool:
+    """False (= tête de file) pour une cible prioritaire DECP."""
+    data = getattr(lead, "email_data", None)
+    if data is None or data.source != "decp":
+        return True
+    return not bool((data.raw_json or {}).get("cible_prioritaire"))

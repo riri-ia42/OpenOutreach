@@ -127,6 +127,7 @@ def generate_cold_email(
     max_tokens: int = 900,
     variant: str | None = None,
     instruction: str = "",
+    contexte: str = "",
 ) -> ColdEmailDraft:
     """Génère un cold mail EKOALU pour les données prospect fournies.
 
@@ -160,6 +161,8 @@ def generate_cold_email(
         activite=activite, ville=ville, dpt=dpt,
         effectif_min=effectif_min, effectif_max=effectif_max,
     )
+    if contexte.strip():
+        user_msg += f"\n\n{contexte.strip()}"
     if instruction.strip():
         user_msg += (
             "\n\nCONSIGNE DE RÉGÉNÉRATION (priorité absolue, demandée par Richard) :\n"
