@@ -78,8 +78,11 @@ portes de garage, alarmes) sans aucune mention d'atelier
 
 ## Règles de décision
 
-1. Un catalogue alu+PVC+bois SANS mention d'atelier explicite → `revendeur_poseur`, \
-confiance élevée.
+1. **RÈGLE IMPÉRATIVE.** Catalogue de trois matériaux ou plus (typiquement alu + PVC + bois) \
+SANS mention d'atelier explicite → `revendeur_poseur`, confiance `haute`. Si tu constates \
+toi-même la largeur du catalogue et l'absence d'atelier, tu as déjà la réponse : ne réponds \
+PAS `indetermine`. Une entreprise qui affiche trois matières sans jamais parler de sa \
+production est un revendeur, c'est le cas le plus fréquent du métier.
 2. Mention d'atelier claire et circonstanciée (machines, surface, photos de production) → \
 `fabricant`.
 3. « Fabrication sur mesure » SEUL, sans atelier ni machines, ne suffit pas : les revendeurs \

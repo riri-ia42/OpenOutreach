@@ -312,3 +312,56 @@ class TestTracabiliteBatch:
 
         _log_batch_usage("claude-haiku-4-5", 0, 0)
         assert not ClaudeUsageLog.objects.filter(context="fabricant_detect_batch").exists()
+
+
+class TestGardeFouEscalade:
+    """Passe du 28/07 : 117 appels Sonnet, 1,73 $, ZERO verdict ameliore.
+    100 des 107 indetermines etaient des societes hors metier — changer de
+    modele ne transforme pas un electricien en menuisier."""
+
+    def test_hors_metier_non_escalade(self):
+        from ekoalu.fabricant_detect.classifier import _should_escalate
+        hors_metier = {"verdict": "indetermine", "confiance": "basse", "materiaux": []}
+        assert _should_escalate(hors_metier) is False
+
+    def test_vraie_ambiguite_escaladee(self):
+        from ekoalu.fabricant_detect.classifier import _should_escalate
+        ambigu = {"verdict": "indetermine", "confiance": "basse",
+                  "materiaux": ["alu", "pvc", "bois"]}
+        assert _should_escalate(ambigu) is True
+
+    def test_verdict_conclusif_jamais_escalade(self):
+        from ekoalu.fabricant_detect.classifier import _should_escalate
+        sur = {"verdict": "fabricant", "confiance": "haute", "materiaux": ["alu"]}
+        assert _should_escalate(sur) is False
+
+    def test_faible_conviction_avec_materiaux_escaladee(self):
+        from ekoalu.fabricant_detect.classifier import _should_escalate
+        assert _should_escalate(
+            {"verdict": "fabricant", "confiance": "basse", "materiaux": ["acier"]}) is True
+
+    def test_cas_reels_de_la_passe(self):
+        """Repris tels quels de la passe du 28/07."""
+        from ekoalu.fabricant_detect.classifier import _should_escalate
+        # ETCHART ENERGIES : genie electrique -> aucun materiau
+        assert not _should_escalate(
+            {"verdict": "indetermine", "confiance": "basse", "materiaux": []})
+        # MENUISERIE DU FOREZ : bois+alu+pvc, atelier non mentionne -> a trancher
+        assert _should_escalate(
+            {"verdict": "indetermine", "confiance": "moyenne",
+             "materiaux": ["bois", "alu", "pvc"]})
+
+
+class TestRegleMultiMateriauxImperative:
+    """La regle etait enoncee mais pas appliquee : MENUISERIE DU FOREZ est
+    ressortie `indetermine` alors que le modele constatait lui-meme
+    « trois materiaux sans aucune mention d'atelier »."""
+
+    def test_regle_marquee_imperative(self):
+        assert "RÈGLE IMPÉRATIVE" in SYSTEM_PROMPT
+
+    def test_indetermine_explicitement_interdit_dans_ce_cas(self):
+        assert "ne réponds PAS `indetermine`" in SYSTEM_PROMPT
+
+    def test_seuil_generalise_a_trois_materiaux(self):
+        assert "trois matériaux ou plus" in SYSTEM_PROMPT

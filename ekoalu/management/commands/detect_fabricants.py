@@ -52,6 +52,10 @@ class Command(BaseCommand):
                             help="Haiku seul, pas d'escalade Sonnet.")
         parser.add_argument("--recheck", action="store_true",
                             help="Re-teste les sociétés déjà classées.")
+        parser.add_argument("--only-ambiguous", action="store_true",
+                            help="Re-teste UNIQUEMENT les indéterminés dont un "
+                                 "matériau a été identifié (vraie ambiguïté), en "
+                                 "ignorant les hors-métier et les sites illisibles.")
         parser.add_argument("--workers", type=int, default=8,
                             help="Sites sondés en parallèle (défaut 8).")
         parser.add_argument("--dry-run", action="store_true",
@@ -70,7 +74,21 @@ class Command(BaseCommand):
         if opts["priority_only"]:
             qs = qs.filter(source=EmailLeadData.SOURCE_DECP)
 
-        if not opts["recheck"]:
+        if opts["only_ambiguous"]:
+            # Cible les seuls cas qu'un second regard peut trancher : le modèle a
+            # reconnu une activité menuiserie mais n'a pas conclu. Un hors-métier
+            # ou un site illisible ne se résout pas en reposant la question.
+            ambigus = {
+                v.siren for v in FabricantVerdict.objects.filter(
+                    verdict=FabricantVerdict.INDETERMINE, fetch_error="")
+                if v.materiaux
+            }
+            qs = qs.filter(siren__in=ambigus)
+            deja = set()
+            self.stdout.write(self.style.NOTICE(
+                f"Mode ambigus : {len(ambigus)} société(s) à réexaminer.",
+            ))
+        elif not opts["recheck"]:
             deja = set(FabricantVerdict.objects.values_list("siren", flat=True))
         else:
             deja = set()

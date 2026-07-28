@@ -70,8 +70,24 @@ def _parse_verdict(text: str) -> dict | None:
 
 
 def _is_uncertain(verdict: dict) -> bool:
-    """Cas à réexaminer par Sonnet : indéterminé, ou tranché sans conviction."""
+    """Verdict non concluant : indéterminé, ou tranché sans conviction."""
     return verdict.get("verdict") == "indetermine" or verdict.get("confiance") == "basse"
+
+
+def _should_escalate(verdict: dict) -> bool:
+    """Escalader ne sert QUE si la preuve est ambiguë, pas si l'indétermination
+    est structurelle.
+
+    Mesuré sur la passe du 28/07 : sur 107 indéterminés, 100 étaient des
+    sociétés hors métier (génie électrique, carrelage, protection incendie) ou
+    des sites sans rapport. Les réexaminer a coûté 117 appels Sonnet — 1,73 $,
+    soit 4,5× le batch Haiku — pour **zéro** verdict amélioré : changer de
+    modèle ne transforme pas un électricien en menuisier.
+
+    Le signal discriminant est `materiaux` : s'il est vide, le modèle n'a
+    reconnu aucune activité menuiserie et la question est déjà tranchée.
+    """
+    return _is_uncertain(verdict) and bool(verdict.get("materiaux"))
 
 
 def classify_batch(client, items: list[ClassifyInput], *,
@@ -181,12 +197,17 @@ def classify_with_escalation(client, items: list[ClassifyInput], *,
     by_siren = {item.siren: item for item in items}
     uncertain = [
         by_siren[siren] for siren, verdict in verdicts.items()
-        if _is_uncertain(verdict) and siren in by_siren
+        if _should_escalate(verdict) and siren in by_siren
     ]
     if not uncertain:
         return verdicts, 0
 
-    logger.info("Escalade Sonnet : %d cas incertain(s) sur %d", len(uncertain), len(verdicts))
+    non_concluants = sum(1 for v in verdicts.values() if _is_uncertain(v))
+    logger.info(
+        "Escalade Sonnet : %d cas ambigu(s) sur %d non concluants (%d écartés — "
+        "indétermination structurelle, hors métier)",
+        len(uncertain), non_concluants, non_concluants - len(uncertain),
+    )
     escalated = 0
     for item in uncertain:
         refined = classify_one(client, item)
