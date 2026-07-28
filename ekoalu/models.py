@@ -7,6 +7,7 @@ from ekoalu.company_validation.abm import AbmCampaignLink
 from ekoalu.company_validation.models import ApprovedCompany
 from ekoalu.doctor.models import DoctorAction, DoctorIncident
 from ekoalu.email_canal.models import EmailLeadData
+from ekoalu.fabricant_detect.models import FabricantVerdict
 from ekoalu.follow_up.models import CampaignDmConfig
 from ekoalu.google_sourcing.models import GoogleSourcingState
 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
@@ -28,6 +29,7 @@ __all__ = [
     "DoctorIncident",
     "DoctorAction",
     "EmailLeadData",
+    "FabricantVerdict",
     "LeadDiscovery",
     "ProfileReadDay",
     "GoogleSourcingState",

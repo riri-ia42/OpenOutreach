@@ -1,16 +1,26 @@
-"""Tarifs Claude API en USD par million de tokens (2026-05).
+"""Tarifs Claude API en USD par million de tokens (verifie 2026-07-28).
 
 Cache read = 10% du prix input. Cache write = 125% du prix input.
+Batch API = -50% sur input ET output.
+
+NB : les tarifs Opus 4.5/4.6/4.7 etaient faux ici (15/75, herites de la
+generation Opus 3) — le suivi de cout les surestimait d'un facteur 3.
 """
 from __future__ import annotations
 
 
 # (input, output) USD par million de tokens
 MODEL_PRICING: dict[str, tuple[float, float]] = {
+    # Claude 5 family
+    "claude-fable-5":        (10.0, 50.0),
+    "claude-mythos-5":       (10.0, 50.0),
+    "claude-opus-5":         (5.0, 25.0),
+    "claude-sonnet-5":       (3.0, 15.0),  # tarif intro 2/10 jusqu'au 2026-08-31
     # Claude 4 family
-    "claude-opus-4-7":       (15.0, 75.0),
-    "claude-opus-4-6":       (15.0, 75.0),
-    "claude-opus-4-5":       (15.0, 75.0),
+    "claude-opus-4-8":       (5.0, 25.0),
+    "claude-opus-4-7":       (5.0, 25.0),
+    "claude-opus-4-6":       (5.0, 25.0),
+    "claude-opus-4-5":       (5.0, 25.0),
     "claude-sonnet-4-6":     (3.0, 15.0),
     "claude-sonnet-4-5":     (3.0, 15.0),
     "claude-haiku-4-5":      (1.0, 5.0),
@@ -19,6 +29,9 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-3-5-haiku":      (0.8, 4.0),
     "claude-3-opus":         (15.0, 75.0),
 }
+
+# Remise Batch API (messages.batches) : -50% input et output.
+BATCH_DISCOUNT = 0.5
 
 DEFAULT_PRICING = (3.0, 15.0)  # fallback = Sonnet
 
