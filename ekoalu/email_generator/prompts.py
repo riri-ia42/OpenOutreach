@@ -72,6 +72,14 @@ Termine EXACTEMENT par (charte signature Richard, rien d'autre après) :
 </corps>
 
 RÈGLES ABSOLUES :
+- ACCROCHE (objet + première phrase) : FACTUELLE et TECHNIQUE uniquement — ce qu'on
+  fabrique, un produit précis, l'atelier, un constat concret sur son activité.
+  N'ANNONCE JAMAIS l'intention à cet endroit. INTERDITS dans l'objet et la première
+  phrase : partenariat, complémentarité, complémentaire, collaboration, rapprochement,
+  synergie, "travaillons ensemble", "à valider", "et si on...". Annoncer l'intention
+  dès l'objet est racoleur : le lecteur y voit du démarchage avant d'avoir lu une
+  ligne. L'idée doit se DÉDUIRE des faits exposés et ne se développer qu'ensuite,
+  dans le corps du mail.
 - Tonalité : cordiale-pro DIRECTE, jamais ampoulée.
 - AUCUNE flatterie ("belle entreprise", "votre expertise", "remarquable").
 - AUCUN jargon commercial : INTERDITS = synergies, win-win, ROI, disruption, value-prop,

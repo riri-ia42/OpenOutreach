@@ -188,6 +188,22 @@ def generate_cold_email(
                 return f"{retry.subject}\n{retry.body}"
             return ""
         enforce_style(f"{draft.subject}\n{draft.body}", _regenerate, channel="email_cold")
+
+    # Garde-fou d'accroche : l'objet ne doit pas annoncer l'intention (remarque
+    # Richard 28/07). La règle est dans le prompt, mais 1 objet sur 25 est passé
+    # au travers le 28/07 — on vérifie donc après coup.
+    from ekoalu.message_validator.accroche_guard import enforce_accroche
+
+    def _regenerate_accroche(motif: str) -> tuple[str, str]:
+        retry = _generate_once(
+            client, model_id, system, f"{user_msg}\n\n{motif}",
+            max_tokens, chosen_variant,
+        )
+        return (retry.subject, retry.body) if retry.is_valid() else ("", "")
+
+    draft.subject, draft.body = enforce_accroche(
+        draft.subject, draft.body, _regenerate_accroche,
+    )
     return draft
 
 
