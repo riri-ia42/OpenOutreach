@@ -127,3 +127,31 @@ class TestAngleDepuisLaBase:
         """BOUVIER FRÈRES : charpente/menuiserie bois → tout le métal est ouvert."""
         self._verdict(siren="bouvier", materiaux=["bois"])
         assert angle_for_siren("bouvier") is ANGLE_COMPLEMENT_TOTAL
+
+
+class TestAccrocheNonRacoleuse:
+    """Remarque Richard 28/07 : annoncer le partenariat des l'objet est trop
+    direct — un confrere y voit du demarchage. Le sujet se developpe DANS le
+    mail, il ne s'annonce pas."""
+
+    def test_regle_presente_dans_tous_les_angles(self):
+        from ekoalu.fabricant_detect.angles import REGLE_ACCROCHE
+        for angle in (ANGLE_ALU_VERS_ACIER, ANGLE_ACIER_VERS_ALU,
+                      ANGLE_SOUS_TRAITANCE, ANGLE_COMPLEMENT_TOTAL):
+            assert REGLE_ACCROCHE in angle.contexte
+
+    def test_mots_racoleurs_interdits_en_accroche(self):
+        from ekoalu.fabricant_detect.angles import REGLE_ACCROCHE
+        for mot in ("partenariat", "complémentarité", "collaboration",
+                    "rapprochement", "synergie", "à valider"):
+            assert mot in REGLE_ACCROCHE, f"{mot} doit etre explicitement interdit"
+
+    def test_accroche_exigee_factuelle(self):
+        from ekoalu.fabricant_detect.angles import REGLE_ACCROCHE
+        assert "FACTUELS et TECHNIQUES" in REGLE_ACCROCHE
+        assert "N'ANNONCE JAMAIS" in REGLE_ACCROCHE
+
+    def test_idee_deduite_pas_annoncee(self):
+        from ekoalu.fabricant_detect.angles import REGLE_ACCROCHE
+        assert "DÉDUIRE" in REGLE_ACCROCHE
+        assert "fin de mail" in REGLE_ACCROCHE

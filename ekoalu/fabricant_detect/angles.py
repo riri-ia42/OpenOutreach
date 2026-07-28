@@ -48,16 +48,35 @@ class Angle:
 ANGLE_STANDARD = Angle(cle="standard", resume="Discours standard", contexte="")
 
 
+# Règle d'accroche (remarque Richard 28/07) : annoncer le partenariat dès
+# l'objet est racoleur — un confrère qui lit « partenariat à valider » voit une
+# approche commerciale, pas un pair. L'idée doit se DÉDUIRE de la lecture.
+REGLE_ACCROCHE = (
+    "ACCROCHE — contrainte stricte.\n"
+    "L'objet et la première phrase sont FACTUELS et TECHNIQUES : ce qu'on "
+    "fabrique, un produit précis, l'atelier, une observation concrète sur son "
+    "activité. Rien d'autre.\n"
+    "N'ANNONCE JAMAIS l'intention dans l'objet ni dans la première phrase. Sont "
+    "INTERDITS à cet endroit : partenariat, complémentarité, complémentaire, "
+    "collaboration, rapprochement, synergie, « travaillons ensemble », "
+    "« à valider », « et si on… ». Un confrère qui lit ça y voit du démarchage, "
+    "pas un pair.\n"
+    "L'idée de complémentarité doit se DÉDUIRE des faits exposés, et n'apparaître "
+    "— si elle apparaît — qu'en fin de mail, sobrement, une fois la matière posée."
+)
+
+
 def _angle(cle: str, resume: str, corps: str) -> Angle:
     return Angle(
         cle=cle,
         resume=resume,
         contexte=(
             "CONTEXTE DESTINATAIRE — c'est un CONFRÈRE FABRICANT, pas un client final.\n"
-            f"{corps}\n"
+            f"{corps}\n\n"
+            f"{REGLE_ACCROCHE}\n\n"
             "Ton : d'égal à égal, entre gens du métier. Ne lui explique pas son propre "
             "travail et ne lui propose jamais ce qu'il fabrique déjà — ce serait se "
-            "poser en concurrent. L'angle est la complémentarité."
+            "poser en concurrent."
         ),
     )
 
