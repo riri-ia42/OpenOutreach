@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 
+import requests
 from django.utils import timezone
 
 from ekoalu.apify_enrich import client
@@ -200,7 +201,11 @@ def _run_and_apply(leads: list, stats: dict) -> None:
         record_failures(stats["failed"])
         _saturate_today(str(exc))
         return
-    except RuntimeError as exc:
+    # requests.RequestException n'est PAS un RuntimeError : une panne reseau
+    # transitoire (30/07 07:30) crashait la commande APRES record_usage et
+    # AVANT le remboursement -> 40/40 consommes pour 0 profil, Apify mort
+    # toute la journee.
+    except (RuntimeError, requests.RequestException) as exc:
         logger.warning(
             "Apify enrich : run en echec, %d leads laisses intacts "
             "(le repli Voyager du daemon les rattrapera) — %s", len(leads), exc,
@@ -235,7 +240,7 @@ def enrich_lead(lead) -> bool:
         record_failures(1)
         _saturate_today(str(exc))
         return False
-    except RuntimeError as exc:
+    except (RuntimeError, requests.RequestException) as exc:
         logger.warning(
             "Apify enrich %s en echec (%s) — repli Voyager",
             lead.public_identifier, exc,

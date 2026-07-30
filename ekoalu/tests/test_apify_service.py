@@ -212,6 +212,36 @@ class TestEnrichUrlonlyLeads:
             assert lead.profile_snapshot is None
             assert lead.embedding is None
 
+    def test_panne_reseau_remboursee_et_leads_intacts(self, campaign):
+        """30/07 : une erreur reseau (requests) n'est pas un RuntimeError —
+        elle crashait la commande APRES record_usage et AVANT le remboursement
+        (40/40 consommes pour 0 profil, Apify mort jusqu'a minuit)."""
+        import requests
+
+        leads = [_mk_lead(f"lead-net-{i}", campaign) for i in range(2)]
+
+        with patch.object(client, "run_profile_scraper",
+                          side_effect=requests.ConnectionError("DNS KO")):
+            stats = service.enrich_urlonly_leads(max_leads=10)
+
+        assert stats["failed"] == 2
+        assert stats["enriched"] == 0
+        assert service.used_today() == 0           # tentatives remboursees
+        assert service.failed_today() == 2
+        for lead in leads:
+            lead.refresh_from_db()
+            assert lead.profile_snapshot is None   # repli Voyager possible
+
+    def test_panne_reseau_chemin_daemon_remboursee(self, campaign):
+        import requests
+
+        lead = _mk_lead("solo-net", campaign)
+        with patch.object(client, "run_profile_scraper",
+                          side_effect=requests.ConnectionError("reset")):
+            assert service.enrich_lead(lead) is False
+        assert service.used_today() == 0
+        assert service.failed_today() == 1
+
     def test_limite_free_tier_sature_le_plafond_du_jour(self, campaign, monkeypatch):
         """Disjoncteur 15/07 : apres la limite quotidienne de l'acteur, chaque
         tentative est facturee pour un item d'erreur — on sature le plafond
