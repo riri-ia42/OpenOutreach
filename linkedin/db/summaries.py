@@ -14,7 +14,10 @@ from typing import Iterable
 
 from pydantic import BaseModel, Field
 
-from linkedin.vendor.mem0.configs.prompts import get_update_memory_messages
+from linkedin.vendor.mem0.configs.prompts import (
+    DEFAULT_UPDATE_MEMORY_PROMPT,
+    get_update_memory_messages,
+)
 from linkedin.vendor.mem0.memory.utils import extract_json, remove_code_blocks
 
 logger = logging.getLogger(__name__)
@@ -225,16 +228,28 @@ def _request_memory_actions(existing: list[str], new_facts: list[str]) -> list[_
     vendored `remove_code_blocks` / `extract_json` fallback chain (mirroring
     upstream lines 545-556) so providers that wrap JSON in markdown or emit
     `<think>` blocks still parse cleanly.
+
+    Prompt caching: mem0 renders one flat 7 kB prompt whose first 5.3 kB (the
+    UPDATE rubric) are byte-identical on every call. Passing that rubric as
+    the Anthropic `system` block lets the llm_usage wrapper mark it
+    `cache_control` (~1.3k tokens, well past the 1024-token minimum); only the
+    current memory and the new facts stay in the user message. Rendering with
+    an EMPTY custom prompt yields exactly the original string minus the
+    rubric, so system + user reproduces the upstream text byte for byte.
     """
     from pydantic_ai import Agent
 
     from linkedin.llm import get_llm_model
 
     old_memory = [{"id": str(idx), "text": fact} for idx, fact in enumerate(existing)]
-    prompt = get_update_memory_messages(old_memory, new_facts, None)
+    variable_part = get_update_memory_messages(old_memory, new_facts, "")
 
-    agent = Agent(get_llm_model(), model_settings={"temperature": 0.0, "timeout": 60})
-    text = agent.run_sync(prompt).output
+    agent = Agent(
+        get_llm_model(),
+        system_prompt=DEFAULT_UPDATE_MEMORY_PROMPT,
+        model_settings={"temperature": 0.0, "timeout": 60},
+    )
+    text = agent.run_sync(variable_part).output
     return _ReconcileResponse.model_validate(_parse_memory_response(text)).memory
 
 

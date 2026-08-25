@@ -133,7 +133,7 @@ Profile CRUD backed by Django models:
 
 ## Agents (`linkedin/agents/`)
 
-- **`follow_up.py`** — Follow-up agent. Single LLM call with structured output (`FollowUpDecision`: `send_message`/`mark_completed`/`wait`). Conversation is synced and injected into the prompt (profile/chat fact summaries + last 6 verbatim messages); no tool-calling loop. System prompt from `follow_up_agent.j2`. Full docs: [`docs/follow_up_agent.md`](docs/follow_up_agent.md).
+- **`follow_up.py`** — Follow-up agent. Single LLM call with structured output (`FollowUpDecision`: `send_message`/`mark_completed`/`wait`). Conversation is synced and injected into the prompt (profile/chat fact summaries + last 6 verbatim messages); no tool-calling loop. System prompt from `follow_up_agent.j2` (campaign rubric, cacheable prefix), lead data from `follow_up_agent_user.j2` as the user message. Full docs: [`docs/follow_up_agent.md`](docs/follow_up_agent.md).
 
 ## ML Qualification (`linkedin/ml/`)
 

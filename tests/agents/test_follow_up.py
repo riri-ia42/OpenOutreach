@@ -36,13 +36,18 @@ def _msg(content, is_outgoing):
 
 class TestRenderSystemPrompt:
     def test_includes_three_summary_blocks(self, db, fake_session, deal_with_summaries):
-        from linkedin.agents.follow_up import _render_system_prompt
+        from linkedin.agents.follow_up import _render_system_prompt, _render_user_prompt
 
         # Stub session.self_profile so the prompt builder works without a browser.
         fake_session.self_profile = {"first_name": "Bob", "last_name": "Builder", "urn": "urn:li:fsd_profile:SELF"}
 
         recent = [_msg("Hi, what do you do?", is_outgoing=True), _msg("Sales tooling.", is_outgoing=False)]
-        prompt = _render_system_prompt(fake_session, deal_with_summaries, recent)
+        # System = campaign rubric (cacheable prefix), user = per-lead data.
+        # The model still sees both; assert on the concatenation.
+        prompt = (
+            _render_system_prompt(fake_session, deal_with_summaries)
+            + _render_user_prompt(deal_with_summaries, recent)
+        )
 
         # Profile facts appear under the lead-knowledge block.
         assert "Senior engineer at Acme Corp." in prompt
@@ -57,13 +62,13 @@ class TestRenderSystemPrompt:
         assert "Company:" not in prompt
 
     def test_handles_missing_summaries_gracefully(self, db, fake_session):
-        from linkedin.agents.follow_up import _render_system_prompt
+        from linkedin.agents.follow_up import _render_system_prompt, _render_user_prompt
 
         lead = LeadFactory(public_identifier="bob")
         deal = DealFactory(lead=lead, campaign=fake_session.campaign)
         fake_session.self_profile = {"first_name": "Bob", "last_name": "Builder", "urn": "urn:li:fsd_profile:SELF"}
 
-        prompt = _render_system_prompt(fake_session, deal, [])
+        prompt = _render_system_prompt(fake_session, deal) + _render_user_prompt(deal, [])
 
         # Renders without crashing and shows the empty placeholders.
         assert "(none yet)" in prompt

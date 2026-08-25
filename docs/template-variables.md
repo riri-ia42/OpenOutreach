@@ -1,7 +1,8 @@
 # Template Variables Reference
 
 This document describes the variables available in the follow-up agent's system prompt template
-(`linkedin/templates/prompts/follow_up_agent.j2`) and the data structures from LinkedIn's Voyager API.
+(`linkedin/templates/prompts/follow_up_agent.j2` for the campaign rubric,
+`follow_up_agent_user.j2` for the per-lead data) and the data structures from LinkedIn's Voyager API.
 
 ## Agent System Prompt Variables
 

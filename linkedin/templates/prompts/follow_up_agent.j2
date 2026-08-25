@@ -11,20 +11,6 @@ You are {{ self_name }}, having a LinkedIn conversation with a new connection.
 {{ booking_link }}
 {% endif %}
 
-## What We Know About the Lead
-{{ profile_summary }}
-
-## What We Know From the Conversation So Far
-{{ chat_summary }}
-
-## Most Recent Messages (verbatim)
-Today is {{ today }}. Each line is tagged with how long ago it was sent.
-{% if days_since_last_outgoing is not none -%}
-You last messaged this lead {{ days_since_last_outgoing }} day(s) ago.
-You have sent {{ unanswered_outgoing }} message(s) in a row without a reply.
-{% endif -%}
-{{ recent_messages }}
-
 ## Strategy
 
 You follow the Mom Test method. Your conversations have two natural modes:

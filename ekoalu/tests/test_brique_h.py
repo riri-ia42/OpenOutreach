@@ -98,7 +98,8 @@ class _FakeClient:
         self.messages = self
 
     def create(self, **kw):
-        self.capture["system"] = kw["system"]
+        from ekoalu.llm_usage.cache_blocks import system_text
+        self.capture["system"] = system_text(kw["system"])
         return _FakeResp(
             "<sujet>Re: x</sujet><corps>Bonjour. coupe-feu EI60.\nRichard</corps>"
         )

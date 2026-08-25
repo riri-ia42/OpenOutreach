@@ -18,6 +18,7 @@ import os
 import re
 
 from ekoalu import conf
+from ekoalu.llm_usage.cache_blocks import build_system_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ def _build_user_message(
     return "\n".join(parts)
 
 
-def _call_model(client, model_id: str, system: str, user_msg: str) -> str:
+def _call_model(client, model_id: str, system: list[dict], user_msg: str) -> str:
     """Un appel Claude, texte strippe ou "" si erreur."""
     try:
         resp = client.messages.create(
@@ -219,11 +220,15 @@ def generate_ekoalu_dm(
 
     first_name = _extract_first_name(public_id, profile_summary, chat_summary)
     has_instruction = bool(instruction.strip())
-    system = (
+    # 2 blocs systeme (meme texte, meme ordre) : le prompt DM porte le
+    # cache_control, le few-shot reste hors du prefixe cache. Ici c'est le cas
+    # qui gagne le plus : le few-shot est selectionne PAR PERSONA, donc en une
+    # seule chaine le prefixe changeait a chaque changement de persona.
+    system = build_system_blocks(
         learning.learned_rules_block(CorrectionExample.Channel.LINKEDIN_DM)
         + _render_system_prompt(include_booking, has_instruction=has_instruction,
-                                relance=relance)
-        + _build_few_shot(persona_slug)
+                                relance=relance),
+        _build_few_shot(persona_slug),
     )
     user_msg = _build_user_message(
         public_id=public_id,

@@ -133,23 +133,42 @@ def _load_recent_messages(deal, limit: int = RECENT_MESSAGES_WINDOW) -> list:
     return list(reversed(list(qs)))
 
 
-def _render_system_prompt(session, deal, recent_messages: list) -> str:
-    """Render the agent system prompt from the Jinja2 template."""
-    from django.utils import timezone
+def _env() -> jinja2.Environment:
+    return jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
 
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(PROMPTS_DIR)))
-    template = env.get_template("follow_up_agent.j2")
 
+def _render_system_prompt(session, deal) -> str:
+    """Render the campaign-stable half of the prompt (`follow_up_agent.j2`).
+
+    Holds the identity line, product/objective/booking blocks and the whole
+    strategy/actions/timing/rules rubric — everything that is identical for
+    every lead of a campaign. Split out from the lead data (see
+    `_render_user_prompt`) so Anthropic prompt caching has a stable prefix:
+    the wrapper in `ekoalu/llm_usage/patch.py` marks it `cache_control` once
+    it clears ~4000 chars, which this rubric alone does.
+    """
     campaign = deal.campaign
     self_prof = session.self_profile
     self_name = f"{self_prof.get('first_name', '')} {self_prof.get('last_name', '')}".strip() or session.django_user.username
 
-    now = timezone.now()
-    return template.render(
+    return _env().get_template("follow_up_agent.j2").render(
         self_name=self_name,
         product_docs=campaign.product_docs or "",
         campaign_objective=campaign.campaign_objective or "",
         booking_link=campaign.booking_link or "",
+    )
+
+
+def _render_user_prompt(deal, recent_messages: list) -> str:
+    """Render the per-lead half of the prompt (`follow_up_agent_user.j2`).
+
+    Fact summaries + recency window + today's date: everything that changes
+    from one lead (and one day) to the next, hence never cached.
+    """
+    from django.utils import timezone
+
+    now = timezone.now()
+    return _env().get_template("follow_up_agent_user.j2").render(
         profile_summary=_format_facts(deal.profile_summary),
         chat_summary=_format_facts(deal.chat_summary),
         recent_messages=_format_recent_messages(recent_messages, now),
@@ -165,6 +184,11 @@ def run_follow_up_agent(session, deal) -> FollowUpDecision:
     Sync chat first (which folds new messages into ``deal.chat_summary``),
     then render the prompt from the Deal's persistent summaries plus a small
     recency window of verbatim messages, and ask the LLM to decide.
+
+    The prompt goes out in two halves — campaign rubric as the agent's system
+    prompt, lead data as the user message — so the rubric forms a cacheable
+    prefix shared by every lead of the campaign. Text is unchanged; only the
+    ordering differs (instructions first, data last).
     """
     from linkedin.db.chat import sync_conversation
 
@@ -174,14 +198,14 @@ def run_follow_up_agent(session, deal) -> FollowUpDecision:
     _log_chat_facts(public_id, deal)
 
     recent = _load_recent_messages(deal)
-    system_prompt = _render_system_prompt(session, deal, recent)
 
     agent = Agent(
         get_llm_model(),
+        system_prompt=_render_system_prompt(session, deal),
         output_type=FollowUpDecision,
         model_settings={"temperature": 0.7, "timeout": 60},
     )
-    decision = agent.run_sync(system_prompt).output
+    decision = agent.run_sync(_render_user_prompt(deal, recent)).output
     if decision is None:
         raise RuntimeError(f"LLM returned unparseable response for follow-up of {public_id}")
 

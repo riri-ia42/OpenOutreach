@@ -16,7 +16,9 @@ that can:
 
 The agent's behavior is guided by a system prompt template at
 `linkedin/templates/prompts/follow_up_agent.j2`, which receives campaign context (product docs,
-objective, booking link) and lead profile data.
+objective, booking link). Lead profile data lives in a second template,
+`follow_up_agent_user.j2`, rendered as the user message — the split keeps the campaign rubric
+byte-identical across leads so Anthropic prompt caching can reuse it.
 
 ## Configuration
 

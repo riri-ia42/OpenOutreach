@@ -24,14 +24,18 @@ import logging
 import os
 import time
 
+from ekoalu.llm_usage.cache_blocks import CACHE_MIN_CHARS
+
 logger = logging.getLogger(__name__)
 
 _PATCH_APPLIED = False
 _PYDANTIC_PATCH_APPLIED = False
 
 # Seuil minimum Anthropic pour cache_control = 1024 tokens. On prend 4000 chars
-# comme proxy en FR (~1 token tous les 4 chars).
-_CACHE_MIN_CHARS = 4000
+# comme proxy en FR (~1 token tous les 4 chars). Defini dans `cache_blocks`,
+# que les generateurs utilisent pour poser eux-memes cache_control sur le bon
+# bloc systeme (cf. docstring de cache_blocks).
+_CACHE_MIN_CHARS = CACHE_MIN_CHARS
 
 
 def _cache_enabled() -> bool:
@@ -82,6 +86,14 @@ def _safe_log(model, usage_obj, duration_ms, context=""):
         cache_creation = int(getattr(usage_obj, "cache_creation_input_tokens", 0) or 0)
         cache_read = int(getattr(usage_obj, "cache_read_input_tokens", 0) or 0)
         cost = compute_cost_usd(model, input_tokens, output_tokens, cache_creation, cache_read)
+        if cache_creation or cache_read:
+            # Verification terrain du prompt caching : lecture = 10% du prix
+            # input, ecriture = 125%. Si `read` reste a 0 sur des appels
+            # repetes, un invalidateur silencieux traine dans le prefixe.
+            logger.info(
+                "prompt cache [%s] read=%d write=%d input=%d",
+                context or "?", cache_read, cache_creation, input_tokens,
+            )
         ClaudeUsageLog.objects.create(
             model=model or "unknown",
             input_tokens=input_tokens,

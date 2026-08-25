@@ -17,6 +17,7 @@ import re
 
 from ekoalu import conf
 from ekoalu.email_generator.models import ColdEmailDraft
+from ekoalu.llm_usage.cache_blocks import build_system_blocks
 from ekoalu.email_generator.prompts import (
     DEFAULT_VARIANT,
     build_user_message,
@@ -151,10 +152,13 @@ def generate_cold_email(
 
     # Apprentissage : règles récurrentes en tête + few-shot corrections Richard
     # (canal email_cold — inclut les cold mails ET les emails de relance).
-    system = (
+    # Découpé en 2 blocs système (même texte, même ordre) : le prompt de la
+    # variante porte le cache_control, le few-shot — qui change dès que Richard
+    # corrige un brouillon — reste hors du préfixe caché. Cf. cache_blocks.
+    system = build_system_blocks(
         learning.learned_rules_block(CorrectionExample.Channel.EMAIL_COLD)
-        + render_system_prompt(chosen_variant)
-        + learning.build_few_shot(CorrectionExample.Channel.EMAIL_COLD)
+        + render_system_prompt(chosen_variant),
+        learning.build_few_shot(CorrectionExample.Channel.EMAIL_COLD),
     )
     user_msg = build_user_message(
         entreprise=entreprise, dirigeant=dirigeant, code_naf=code_naf,
@@ -207,7 +211,7 @@ def generate_cold_email(
     return draft
 
 
-def _generate_once(client, model_id: str, system: str, user_msg: str,
+def _generate_once(client, model_id: str, system: list[dict], user_msg: str,
                    max_tokens: int, chosen_variant: str) -> ColdEmailDraft:
     """Un appel Claude + parse + post-traitement (clôture, lien RDV)."""
     try:

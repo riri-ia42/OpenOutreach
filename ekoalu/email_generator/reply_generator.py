@@ -16,6 +16,7 @@ from ekoalu import conf
 from ekoalu.email_generator.generator import _get_anthropic_client
 from ekoalu.email_generator.models import ColdEmailDraft
 from ekoalu.inbox_assist.intent_classifier import Intent
+from ekoalu.llm_usage.cache_blocks import build_system_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -179,10 +180,15 @@ def generate_email_reply(
         logger.warning("Pas de client Anthropic, génération reply impossible")
         return ColdEmailDraft(subject="", body="")
 
-    system = (
+    # 2 blocs système (même texte, même ordre) : prompt d'abord, few-shot
+    # ensuite. Note : le prompt de réponse interpole l'intent, donc il y a un
+    # préfixe distinct par intent (5 max) — et il pèse ~2,5 k car., sous le
+    # minimum cachable de 1024 tokens : le cache ne se déclenche ici que si le
+    # few-shot fait grossir l'ensemble. Cf. cache_blocks.
+    system = build_system_blocks(
         learning.learned_rules_block(CorrectionExample.Channel.EMAIL_REPLY)
-        + _render_reply_system_prompt(intent)
-        + _build_few_shot_for_intent(intent)
+        + _render_reply_system_prompt(intent),
+        _build_few_shot_for_intent(intent),
     )
     user_msg = _build_user_message(
         inbound_subject=inbound_subject,
@@ -210,7 +216,7 @@ def generate_email_reply(
     return draft
 
 
-def _reply_once(client, model_id: str, system: str, user_msg: str,
+def _reply_once(client, model_id: str, system: list[dict], user_msg: str,
                 max_tokens: int) -> ColdEmailDraft:
     """Un appel Claude + parse + normalisation 'Re:'."""
     try:

@@ -138,6 +138,15 @@ def pick_variant(variants: dict[str, tuple[str, float]] | None = None) -> str:
 
     Permet équilibrage A/B sur les 4-6 semaines de test. Renvoie l'id de
     variante (ex "v1", "v2") pour stockage sur PendingOutbound.prompt_variant.
+
+    Impact prompt caching (assumé) : chaque variante est un préfixe distinct,
+    donc 2 entrées de cache séparées, chacune avec son TTL de 5 min. À 50 cold
+    mails/jour étalés sur la journée, les deux entrées expirent souvent entre
+    deux tirages de la même variante — le cache joue surtout sur les rafales.
+    Découper en [préfixe commun caché] + [partie variante] ne servirait à
+    rien : V1 et V2 divergent au Bloc 3, soit après 1 367 caractères (~340
+    tokens), sous le minimum cachable de 1 024 tokens. On garde donc l'A/B tel
+    quel — le gain de mesure prime sur le gain de cache.
     """
     reg = variants if variants is not None else PROMPT_VARIANTS
     if not reg:

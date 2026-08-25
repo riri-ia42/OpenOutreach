@@ -334,8 +334,10 @@ class TestInstructionPriority:
             mocked.return_value = client
             generate_ekoalu_dm(public_id="test", instruction="fais court")
 
+        from ekoalu.llm_usage.cache_blocks import system_text
+
         user_msg = captured["messages"][0]["content"]
-        system = captured["system"]
+        system = system_text(captured["system"])
         # consigne avant "Slug LinkedIn" / "Faits profil"
         assert user_msg.index("CONSIGNE EXPLICITE") < user_msg.index("Faits profil")
         # le system passe en mode consigne prioritaire

@@ -54,17 +54,23 @@ fields are missing for the chosen action.
 
 ## Agent Context
 
-The agent sees a rich prompt rendered from `follow_up_agent.j2` with:
+The agent sees a rich prompt rendered from two templates — `follow_up_agent.j2`
+(campaign-stable half, passed as the agent's **system prompt**) and
+`follow_up_agent_user.j2` (per-lead half, passed as the **user message**). The
+split exists for Anthropic prompt caching: the rubric is byte-identical for
+every lead of a campaign, so it forms a cacheable prefix, while the lead data
+that changes on every call sits after it.
 
-| Section | Source | Built When |
-|---------|--------|------------|
-| Seller identity (`self_name`) | `session.self_profile` | every call |
-| Product docs, campaign objective, booking link | `Campaign` model | every call |
-| Profile facts | `Deal.profile_summary` (JSON fact list) | lazy, once per lead×campaign |
-| Chat facts | `Deal.chat_summary` (JSON fact list) | incremental, on each sync |
-| Recent messages (verbatim, with age) | last 6 `ChatMessage` rows | every call |
-| `days_since_last_outgoing` | computed from messages | every call |
-| `unanswered_outgoing` count | trailing run of outgoing messages | every call |
+| Section | Template | Source | Built When |
+|---------|----------|--------|------------|
+| Seller identity (`self_name`) | system | `session.self_profile` | every call |
+| Product docs, campaign objective, booking link | system | `Campaign` model | every call |
+| Strategy / actions / timing / rules rubric | system | static template text | every call |
+| Profile facts | user | `Deal.profile_summary` (JSON fact list) | lazy, once per lead×campaign |
+| Chat facts | user | `Deal.chat_summary` (JSON fact list) | incremental, on each sync |
+| Recent messages (verbatim, with age) | user | last 6 `ChatMessage` rows | every call |
+| `days_since_last_outgoing` | user | computed from messages | every call |
+| `unanswered_outgoing` count | user | trailing run of outgoing messages | every call |
 
 The split between **summary facts** (durable, LLM-extracted) and **verbatim
 messages** (recent window) lets the agent reason about the full conversation

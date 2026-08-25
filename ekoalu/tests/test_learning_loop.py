@@ -21,6 +21,7 @@ from django.urls import reverse
 from ekoalu import conf, learning
 from ekoalu.follow_up.generator import _render_system_prompt, generate_ekoalu_dm
 from ekoalu.inbox_assist.models import CorrectionExample, PendingReply
+from ekoalu.llm_usage.cache_blocks import system_text
 from ekoalu.message_validator.style_guard import enforce_style, find_style_violations
 
 pytestmark = pytest.mark.django_db
@@ -82,7 +83,7 @@ class TestColdEmailFewShot:
                                     activite="", ville="", dpt="",
                                     effectif_min=10, effectif_max=20)
         assert d.is_valid()
-        system = client.calls[0]["system"]
+        system = system_text(client.calls[0]["system"])
         assert "VERSION_RICHARD_COLD_TOKEN" in system
         assert "EXEMPLES DE FEEDBACK RICHARD" in system
 
@@ -96,7 +97,7 @@ class TestColdEmailFewShot:
             generate_cold_email(entreprise="X", dirigeant="", code_naf="",
                                 activite="", ville="", dpt="",
                                 effectif_min=0, effectif_max=0)
-        assert "TOKEN_DM_LINKEDIN" not in client.calls[0]["system"]
+        assert "TOKEN_DM_LINKEDIN" not in system_text(client.calls[0]["system"])
 
 
 # --- Fix 2 : mode relance sans pitch ----------------------------------------
@@ -311,7 +312,7 @@ class TestDedupAndRules:
         with patch("ekoalu.follow_up.generator._get_anthropic_client",
                    return_value=client):
             generate_ekoalu_dm(public_id="x")
-        system = client.calls[0]["system"]
+        system = system_text(client.calls[0]["system"])
         assert system.startswith("=== REGLES APPRISES")
         assert self.CONSIGNE in system
 

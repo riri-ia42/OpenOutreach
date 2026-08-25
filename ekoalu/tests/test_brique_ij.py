@@ -276,7 +276,8 @@ class TestGenerateEmailReplyUsesFewShot:
                 self.messages = self
 
             def create(self, **kw):
-                captured["system"] = kw["system"]
+                from ekoalu.llm_usage.cache_blocks import system_text
+                captured["system"] = system_text(kw["system"])
                 return _FakeResp()
 
         monkeypatch.setattr(
