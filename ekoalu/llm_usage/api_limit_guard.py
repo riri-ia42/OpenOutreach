@@ -184,7 +184,7 @@ automatiquement, le daemon va reprendre les envois LinkedIn au prochain cycle
 </ul>
 </body></html>
 """
-        send_mail(subject=subject, html_body=html)
+        send_mail(subject=subject, html_body=html, category="alert")
         logger.info("Mail API_LIMIT recovery envoye a Richard")
     except Exception:
         logger.exception("Mail API_LIMIT recovery echoue (sentinel deja purge)")
@@ -276,7 +276,7 @@ FAILED tasks.</p>
 </p>
 </body></html>
 """
-        send_mail(subject=subject, html_body=html)
+        send_mail(subject=subject, html_body=html, category="alert")
         logger.info("Mail API_LIMIT envoye a Richard")
     except Exception:
         logger.exception("Mail API_LIMIT echoue (sentinel cree quand meme)")

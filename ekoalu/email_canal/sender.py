@@ -221,7 +221,8 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
 
     try:
         send_mail(subject=po.subject, html_body=html_body, to=recipient,
-                  inline_images=inline_images, file_attachments=file_attachments)
+                  inline_images=inline_images, file_attachments=file_attachments,
+                  category="prospect")
     except GraphConfigError as exc:
         logger.error("Graph mal configuré : %s", exc)
         return False, f"graph_config: {exc}"

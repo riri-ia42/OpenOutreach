@@ -240,6 +240,20 @@ def _send_via_upload_session(
         raise GraphSendError(f"draft send {resp.status_code}: {resp.text[:300]}")
 
 
+def _report_gate_active(category: str, recipient: str) -> bool:
+    """True si ce mail est un REPORT interne suspendu via l'interrupteur du hub.
+
+    Ne concerne que category="report" (défaut) ET un destinataire @ekoalu.com :
+    les cold mails aux prospects (destinataire externe) et les alertes critiques
+    (category="alert") ne sont jamais gated. Fail-open dans hub_gate.
+    """
+    if category != "report" or not recipient.lower().endswith("@ekoalu.com"):
+        return False
+    from ekoalu.notifications import hub_gate
+
+    return hub_gate.reports_suspended()
+
+
 def send_mail(
     *,
     subject: str,
@@ -248,6 +262,7 @@ def send_mail(
     to: str | None = None,
     inline_images: dict[str, bytes] | None = None,
     file_attachments: list[tuple[str, str, bytes]] | None = None,
+    category: str = "report",
 ) -> None:
     """Envoie un mail via Graph sendMail.
 
@@ -260,6 +275,9 @@ def send_mail(
             dans le HTML via ``<img src="cid:<content_id>">`` (ex : logo signature)
         file_attachments: [(nom_fichier, content_type, bytes)] — pièces jointes
             classiques (ex : guide des solutions PDF sur les cold mails)
+        category: "report" (défaut — récaps/rapports internes, soumis à
+            l'interrupteur mail_suspended du hub-ekoalu) ou "alert" (alertes
+            critiques : STOP LinkedIn, zombie, budget — jamais supprimées).
 
     Raises:
         GraphConfigError, GraphAuthError, GraphSendError.
@@ -267,6 +285,12 @@ def send_mail(
     recipient = (to or os.environ.get("GRAPH_ALERT_RECIPIENT", "richard@ekoalu.com")).strip()
     if not recipient:
         raise GraphConfigError("Destinataire manquant (GRAPH_ALERT_RECIPIENT vide).")
+
+    if _report_gate_active(category, recipient):
+        logger.info(
+            "Mail de report supprimé (interrupteur hub-ekoalu) — sujet: %s", subject[:80]
+        )
+        return
 
     user_email = _required("GRAPH_USER_EMAIL")
     token = _get_access_token()

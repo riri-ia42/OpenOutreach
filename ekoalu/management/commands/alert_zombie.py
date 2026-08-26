@@ -151,7 +151,7 @@ class Command(BaseCommand):
                 ))
                 return
             subject, html = _build_html(kind, health)
-            send_mail(subject=subject, html_body=html)
+            send_mail(subject=subject, html_body=html, category="alert")
             state[f"last_{kind}_at"] = datetime.now(timezone.utc).isoformat()
             _write_state(state)
             self.stdout.write(self.style.SUCCESS(f"Alerte {kind} envoyee"))

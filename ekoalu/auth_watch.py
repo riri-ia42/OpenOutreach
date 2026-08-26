@@ -119,6 +119,7 @@ et s'est mis a l'arret TOUT SEUL pour ne pas aggraver le signal cote LinkedIn
         send_mail(
             subject=f"[URGENT] EKOALU prospection - AUTO-STOP apres {n_failures} echecs auth LinkedIn",
             html_body=html,
+            category="alert",
         )
         logger.info("Mail AUTO-STOP envoye a Richard")
     except Exception:

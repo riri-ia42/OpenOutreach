@@ -221,7 +221,7 @@ jusqu'a acquittement OU minuit (auto-reset).</p>
 </p>
 </body></html>
 """
-        send_mail(subject=subject, html_body=html)
+        send_mail(subject=subject, html_body=html, category="alert")
         logger.info("Mail BUDGET envoye a Richard (cumul=$%.2f)", total)
     except Exception:
         logger.exception("Mail BUDGET echoue (sentinel cree quand meme)")

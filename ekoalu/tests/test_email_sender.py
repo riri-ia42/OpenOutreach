@@ -100,12 +100,13 @@ class TestSendColdEmailSuccess:
         captured = {}
 
         def _mock_send(*, subject, html_body, to, inline_images=None,
-                       file_attachments=None):
+                       file_attachments=None, category="report"):
             captured["subject"] = subject
             captured["html_body"] = html_body
             captured["to"] = to
             captured["inline_images"] = inline_images
             captured["file_attachments"] = file_attachments
+            captured["category"] = category
 
         monkeypatch.setattr("ekoalu.email_canal.sender.send_mail", _mock_send)
         success, err = send_cold_email(po)
@@ -116,6 +117,8 @@ class TestSendColdEmailSuccess:
         assert "Coupe-feu EI60" in captured["html_body"]
         assert "<p " in captured["html_body"]  # HTML conversion
         assert captured["inline_images"] and "logoekoalu" in captured["inline_images"]
+        # Les cold mails prospects ne passent JAMAIS par le gate mail_suspended du hub.
+        assert captured["category"] == "prospect"
 
     def test_guide_joint_au_cold_mais_pas_au_follow_up(self, make_lead_with_po, monkeypatch):
         """Le guide des solutions part en PJ sur le 1er contact uniquement
