@@ -25,7 +25,7 @@ from ekoalu.fabricant_detect.prompts import (
 logger = logging.getLogger(__name__)
 
 MODEL_CHEAP = "claude-haiku-4-5"
-MODEL_ESCALATION = "claude-sonnet-4-6"
+MODEL_ESCALATION = "claude-sonnet-5"  # migration 26/08/2026 (proposition hub #15)
 
 MAX_TOKENS = 1200
 POLL_INTERVAL_SECONDS = 20
@@ -170,7 +170,11 @@ def _log_batch_usage(model: str, input_tokens: int, output_tokens: int) -> None:
 def classify_one(client, item: ClassifyInput, *, model: str = MODEL_ESCALATION) -> dict | None:
     """Appel synchrone unitaire — sert à l'escalade Sonnet (volume faible)."""
     try:
-        response = client.messages.create(**_request_params(item, model))
+        params = _request_params(item, model)
+        # Sonnet 5 pense par défaut : on garde l'iso-comportement 4.6 sur
+        # l'escalade (le batch Haiku, lui, garde ses params inchangés).
+        params["thinking"] = {"type": "disabled"}
+        response = client.messages.create(**params)
     except Exception:  # noqa: BLE001 — un échec réseau ne doit pas tuer la passe
         logger.exception("Escalade %s (%s) en échec", item.siren, item.entreprise)
         return None

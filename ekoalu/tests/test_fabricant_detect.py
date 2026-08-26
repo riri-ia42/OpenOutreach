@@ -232,7 +232,8 @@ class TestTarifs:
     def test_famille_5_connue(self):
         from ekoalu.llm_usage.pricing import get_pricing
         assert get_pricing("claude-opus-5") == (5.0, 25.0)
-        assert get_pricing("claude-sonnet-5") == (3.0, 15.0)
+        # Prix de lancement pérennisé (hausse du 01/09/2026 annulée — veille 26/08).
+        assert get_pricing("claude-sonnet-5") == (2.0, 10.0)
 
     def test_remise_batch(self):
         from ekoalu.llm_usage.pricing import BATCH_DISCOUNT

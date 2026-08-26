@@ -57,8 +57,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--ai-model",
             type=str,
-            default="claude-sonnet-4-6",
-            help="Modèle Anthropic (defaut: claude-sonnet-4-6)",
+            default="claude-sonnet-5",
+            help="Modèle Anthropic (defaut: claude-sonnet-5)",
         )
 
     def handle(self, *args, **options):

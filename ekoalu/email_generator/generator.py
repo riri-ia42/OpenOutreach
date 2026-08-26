@@ -28,7 +28,11 @@ from ekoalu.email_generator.prompts import (
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_MODEL = "claude-sonnet-4-6"
+# Sonnet 5 (migration 26/08/2026, proposition hub #15 validée par Richard) :
+# 2 $/10 $ le Mtok (prix de lancement pérennisé) vs 3 $/15 $ pour Sonnet 4.6.
+# thinking désactivé explicitement dans les appels : iso-comportement 4.6 et
+# content[0] reste un bloc texte (le parse lit resp.content[0].text).
+_DEFAULT_MODEL = "claude-sonnet-5"
 _SUJET_RE = re.compile(r"<sujet>\s*(.+?)\s*</sujet>", re.DOTALL | re.IGNORECASE)
 _CORPS_RE = re.compile(r"<corps>\s*(.+?)\s*</corps>", re.DOTALL | re.IGNORECASE)
 
@@ -125,7 +129,7 @@ def generate_cold_email(
     effectif_min: int = 0,
     effectif_max: int = 0,
     model: str | None = None,
-    max_tokens: int = 900,
+    max_tokens: int = 1200,  # +30 % : le tokenizer Sonnet 5 produit ~30 % de tokens en plus
     variant: str | None = None,
     instruction: str = "",
     contexte: str = "",
@@ -219,6 +223,7 @@ def _generate_once(client, model_id: str, system: list[dict], user_msg: str,
             model=model_id,
             max_tokens=max_tokens,
             system=system,
+            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": user_msg}],
         )
         raw = (resp.content[0].text if resp.content else "").strip()

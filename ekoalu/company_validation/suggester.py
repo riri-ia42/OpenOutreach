@@ -117,9 +117,10 @@ def suggest_companies(n: int = 10, focus: str = "") -> list[dict]:
     client = Anthropic(api_key=api_key)
     try:
         resp = client.messages.create(
-            model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+            model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5"),
             max_tokens=max_tokens_budget,
             system=PROMPT_SYSTEM,
+            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": user_msg}],
         )
         text = resp.content[0].text if resp.content else ""

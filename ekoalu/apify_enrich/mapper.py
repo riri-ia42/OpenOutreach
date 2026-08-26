@@ -145,6 +145,20 @@ def _map_apimaestro_item(item: dict) -> dict:
     }
 
 
+def _as_single_url(value) -> str | None:
+    """Normalise une URL d'acteur Apify : str -> str, liste -> 1er element str
+    non vide, autre -> None. apimaestro renvoie parfois l'input du batch (une
+    liste) dans `profile_input` au lieu d'une chaine."""
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, list):
+        for element in value:
+            if isinstance(element, str) and element.strip():
+                return element
+        return None
+    return None
+
+
 def map_actor_item(item: dict) -> dict:
     """Item JSON brut de l'acteur -> dict au format ``profile_snapshot``.
 
@@ -162,7 +176,10 @@ def map_actor_item(item: dict) -> dict:
         # apimaestro : profil introuvable ("No profile found or wrong input",
         # constate en reel 15/07) — marqueur consomme par le service, qui
         # disqualifie le lead au lieu de stocker un snapshot vide.
-        url = _first(item, "profile_input", "profileUrl")
+        # `profile_input` est parfois une LISTE (l'input du batch renvoye tel
+        # quel par l'acteur) : url.strip() crashait alors toute la passe de
+        # qualification (290 occurrences au 26/08, 0 deal depuis fin juillet).
+        url = _as_single_url(_first(item, "profile_input", "profileUrl"))
         from linkedin.url_utils import url_to_public_id
         return {
             "not_found": True,
@@ -171,7 +188,7 @@ def map_actor_item(item: dict) -> dict:
             "source": SNAPSHOT_SOURCE,
         }
     # a confirmer au test reel : cle de l'URL du profil
-    url = _first(item, "linkedinUrl", "url", "profileUrl", "inputUrl")
+    url = _as_single_url(_first(item, "linkedinUrl", "url", "profileUrl", "inputUrl"))
     # a confirmer au test reel : publicIdentifier direct ou derive de l'URL
     public_identifier = _first(item, "publicIdentifier", "publicId")
     if not public_identifier and url:

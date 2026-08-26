@@ -168,8 +168,9 @@ def _call_model(client, model_id: str, system: list[dict], user_msg: str) -> str
     try:
         resp = client.messages.create(
             model=model_id,
-            max_tokens=900,
+            max_tokens=1200,  # +30 % : tokenizer Sonnet 5
             system=system,
+            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": user_msg}],
         )
         return (resp.content[0].text if resp.content else "").strip()
@@ -239,7 +240,7 @@ def generate_ekoalu_dm(
         instruction=instruction,
         relance=relance,
     )
-    model_id = model or os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    model_id = model or os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 
     text = _post_process(_call_model(client, model_id, system, user_msg),
                          instruction, relance)

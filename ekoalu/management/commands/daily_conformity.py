@@ -300,6 +300,30 @@ class Command(BaseCommand):
             encoding="utf-8",
         )
 
+        # Hub-ekoalu (§14ter, capture Richard 26/08) : le verdict et les
+        # corrections proposées doivent être VISIBLES dans le hub — d'autant
+        # que le mail de report peut être suspendu par l'interrupteur.
+        from ekoalu.notifications.hub_events import post_event, post_proposal
+        if report["conform"]:
+            post_event("conformite", "info", f"Conformité {report['date']:%d/%m} : CONFORME")
+        else:
+            failed = [c["name"] for c in report["checks"] if not c["ok"]]
+            post_event(
+                "conformite", "warn",
+                f"Conformité {report['date']:%d/%m} : NON CONFORME ({', '.join(failed)})",
+                {"rapport": text},
+            )
+            post_proposal(
+                "Conformité NON CONFORME — corrections proposées (à traiter)",
+                "## Constat\nLe contrôle quotidien est NON CONFORME. Corrections proposées "
+                "par le contrôle (détail du jour dans le fil d'événements et "
+                "`data/conformity_last.md`) :\n\n"
+                f"```\n{text}\n```\n\n"
+                "## Proposition\nTraiter les points KO ci-dessus (une session Claude Code "
+                "sur prospection-ia), puis rejouer `manage.py daily_conformity --no-send` "
+                "pour vérifier le retour au vert.",
+            )
+
         if opts["no_send"]:
             return
         from ekoalu.notifications.graph_mailer import is_configured, send_mail

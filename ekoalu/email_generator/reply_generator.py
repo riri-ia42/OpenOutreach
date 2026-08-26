@@ -21,7 +21,7 @@ from ekoalu.llm_usage.cache_blocks import build_system_blocks
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_MODEL = "claude-sonnet-4-6"
+_DEFAULT_MODEL = "claude-sonnet-5"  # migration 26/08/2026 (proposition hub #15)
 
 _BASE_SYSTEM_PROMPT = """Tu rédiges des brouillons de réponse email pour Richard Gros,
 Président d'EKOALU (menuiserie aluminium, acier et bois technique, Chasselay 69).
@@ -165,7 +165,7 @@ def generate_email_reply(
     entreprise: str = "",
     dirigeant: str = "",
     model: str | None = None,
-    max_tokens: int = 600,
+    max_tokens: int = 800,  # +30 % : tokenizer Sonnet 5
 ) -> ColdEmailDraft:
     """Génère un brouillon de réponse email pour le message entrant.
 
@@ -224,6 +224,7 @@ def _reply_once(client, model_id: str, system: list[dict], user_msg: str,
             model=model_id,
             max_tokens=max_tokens,
             system=system,
+            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": user_msg}],
         )
         raw = (resp.content[0].text if resp.content else "").strip()

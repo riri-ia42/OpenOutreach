@@ -238,6 +238,26 @@ class TestMapper:
         snap = map_actor_item({"url": URL})
         assert snap["public_identifier"] == "jean-test"
 
+    def test_profile_input_en_liste_ne_crashe_pas(self):
+        """Bug réel 26/08 : apimaestro renvoie parfois `profile_input` sous forme
+        de LISTE (l'input du batch tel quel) → url.strip() crashait TOUTE la
+        passe de qualification (290 occurrences, 0 deal depuis fin juillet)."""
+        snap = map_actor_item({
+            "message": "No profile found or wrong input",
+            "profile_input": [URL, "autre-profil"],
+        })
+        assert snap["not_found"] is True
+        assert snap["url"] == URL
+        assert snap["public_identifier"] == "jean-test"
+
+    def test_url_en_liste_vide_ou_invalide_tolere(self):
+        snap = map_actor_item({"message": "No profile found", "profile_input": []})
+        assert snap["not_found"] is True
+        assert snap["url"] is None
+        assert snap["public_identifier"] is None
+        snap2 = map_actor_item({"linkedinUrl": [URL]})
+        assert snap2["public_identifier"] == "jean-test"
+
     def test_full_name_reconstruit_depuis_prenom_nom(self):
         snap = map_actor_item({"firstName": "Ana", "lastName": "Bo"})
         assert snap["full_name"] == "Ana Bo"

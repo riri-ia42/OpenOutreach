@@ -15,7 +15,7 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-fable-5":        (10.0, 50.0),
     "claude-mythos-5":       (10.0, 50.0),
     "claude-opus-5":         (5.0, 25.0),
-    "claude-sonnet-5":       (3.0, 15.0),  # tarif intro 2/10 jusqu'au 2026-08-31
+    "claude-sonnet-5":       (2.0, 10.0),  # prix de lancement PÉRENNISÉ (hausse du 01/09/2026 annulée — veille 26/08)
     # Claude 4 family
     "claude-opus-4-8":       (5.0, 25.0),
     "claude-opus-4-7":       (5.0, 25.0),

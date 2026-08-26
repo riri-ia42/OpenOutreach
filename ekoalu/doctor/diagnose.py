@@ -19,7 +19,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 BIBLE_PATH = Path(__file__).resolve().parent / "bible.md"
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-sonnet-5"  # migration 26/08/2026 (proposition hub #15)
 
 # Cap de cout par appel diagnostic. Sonnet 4.6 = 3$/Mtoken input, 15$/Mtoken
 # output. Un appel typique fait ~5k input + 1k output = ~0.03$. On laisse une
@@ -76,8 +76,9 @@ def diagnose(context: dict) -> tuple[dict, float]:
     try:
         resp = client.messages.create(
             model=model,
-            max_tokens=2048,
+            max_tokens=2600,  # +30 % : tokenizer Sonnet 5
             system=bible,
+            thinking={"type": "disabled"},
             messages=[{
                 "role": "user",
                 "content": (

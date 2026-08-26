@@ -83,7 +83,7 @@ def run_ab_qualification(profile_text: str, product_docs: str, campaign_objectiv
     _append_result({
         "public_id": public_id,
         "campaign_id": campaign_id,
-        "champion_model": "claude-sonnet-4-6",
+        "champion_model": "claude-sonnet-5",
         "champion_label": champ_label,
         "champion_reason": champ_reason,
         "challenger_model": challenger_model,
