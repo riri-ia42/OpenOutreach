@@ -119,9 +119,15 @@
 <!-- Régénération avec consigne -->
 <form method="post" class="bg-white rounded-lg shadow-sm p-6 border border-purple-200">
     {% csrf_token %}
-    <h2 class="text-sm font-semibold text-purple-900 mb-3 uppercase tracking-wide">
-        🔄 Régénérer un nouveau brouillon
-    </h2>
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-purple-900 uppercase tracking-wide">
+            🔄 Régénérer un nouveau brouillon
+        </h2>
+        <a href="{% url 'ekoalu:consignes_list' %}"
+           class="text-xs px-3 py-1.5 bg-amber-100 text-amber-800 rounded font-medium hover:bg-amber-200">
+            📋 Consulter / modifier les consignes
+        </a>
+    </div>
     <p class="text-xs text-gray-600 mb-3">
         Tu peux demander à Claude de proposer une nouvelle version. Donne-lui une
         consigne (optionnelle) pour orienter la régénération. La consigne ET la

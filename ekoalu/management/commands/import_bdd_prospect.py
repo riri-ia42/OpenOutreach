@@ -175,13 +175,19 @@ class Command(BaseCommand):
         # Insertion réelle
         from crm.models import Lead
         from ekoalu.email_canal.models import EmailLeadData
+        from ekoalu.sorties.service import is_company_excluded
         created = 0
         skipped_dup = 0
+        skipped_sortie = 0
         errors = 0
         with transaction.atomic():
             for c in eligibles:
                 public_id = make_synthetic_public_identifier(c.siren)
                 url = make_synthetic_linkedin_url(c.siren)
+                # Société sortie de la prospection par Richard : jamais réimportée
+                if is_company_excluded(c.siren):
+                    skipped_sortie += 1
+                    continue
                 # Idempotence : skip si email ou public_id déjà présent
                 if Lead.objects.filter(contact_email=c.email).exists():
                     skipped_dup += 1
@@ -221,7 +227,8 @@ class Command(BaseCommand):
             f"\n--- Import terminé ---\n"
             f"  créés          : {created}\n"
             f"  skippés (dup)  : {skipped_dup}\n"
+            f"  skippés (société sortie) : {skipped_sortie}\n"
             f"  erreurs        : {errors}",
         ))
-        logger.info("import_bdd_prospect: created=%d skipped=%d errors=%d",
-                    created, skipped_dup, errors)
+        logger.info("import_bdd_prospect: created=%d skipped=%d sorties=%d errors=%d",
+                    created, skipped_dup, skipped_sortie, errors)

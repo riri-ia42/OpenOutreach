@@ -16,6 +16,7 @@ from ekoalu.llm_usage.models import ClaudeUsageLog
 from ekoalu.outbound_validation.models import PendingOutbound
 from ekoalu.qualification_feedback.models import QualificationFeedback
 from ekoalu.read_guard.models import ProfileReadDay
+from ekoalu.sorties.models import ProspectionSortie
 
 __all__ = [
     "PendingReply",
@@ -34,4 +35,5 @@ __all__ = [
     "ProfileReadDay",
     "GoogleSourcingState",
     "ApifyUsageDay",
+    "ProspectionSortie",
 ]

@@ -175,6 +175,10 @@ class Command(BaseCommand):
             companies_with_people += 1
             self.stdout.write(f"\n→ {data.entreprise or domain} ({data.siren}) — "
                               f"{len(people)} personne(s)")
+            from ekoalu.sorties.service import is_company_excluded
+            if is_company_excluded(data.siren):
+                self.stdout.write("   (société sortie de la prospection — skip)")
+                continue
             for i, person in enumerate(people, start=1):
                 self.stdout.write(f"   {person.display_name} <{person.email}> "
                                   f"[{person.source}{'/' + person.role if person.role else ''}]")

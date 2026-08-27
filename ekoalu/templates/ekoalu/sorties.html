@@ -1,0 +1,70 @@
+{% extends "ekoalu/base.html" %}
+
+{% block title %}Sorties de prospection — EKOALU{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Sorties de prospection</h1>
+        <p class="text-sm text-gray-500">
+            {{ n_persons }} personne(s) · {{ n_companies }} société(s) sorties volontairement —
+            les sociétés sorties sont aussi bloquées à l'import (BDD PROSPECT, DECP, Mailjet).
+        </p>
+    </div>
+    <a href="{% url 'ekoalu:outbound_list' %}" class="text-sm text-blue-600 hover:underline">← Validation des messages</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    {% if sorties %}
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-2 text-left font-medium text-gray-500">Type</th>
+                    <th class="px-4 py-2 text-left font-medium text-gray-500">Nom</th>
+                    <th class="px-4 py-2 text-left font-medium text-gray-500">Société</th>
+                    <th class="px-4 py-2 text-left font-medium text-gray-500">SIREN</th>
+                    <th class="px-4 py-2 text-left font-medium text-gray-500">Motif</th>
+                    <th class="px-4 py-2 text-left font-medium text-gray-500">Sorti le</th>
+                    <th class="px-4 py-2"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for s in sorties %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2">
+                        {% if s.kind == "company" %}
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800">🏢 Société</span>
+                        {% else %}
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">👤 Personne</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2 font-medium text-gray-900">{{ s.label|default:s.public_identifier }}</td>
+                    <td class="px-4 py-2 text-gray-600">{{ s.company_name }}</td>
+                    <td class="px-4 py-2 text-gray-500 font-mono text-xs">{{ s.siren }}</td>
+                    <td class="px-4 py-2 text-gray-600">{{ s.reason|truncatechars:80 }}</td>
+                    <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ s.created_at|date:"d/m/Y H:i" }}</td>
+                    <td class="px-4 py-2 text-right">
+                        <form method="post" class="inline"
+                              onsubmit="return confirm('Retirer « {{ s.label|escapejs }} » du registre ?\nLes imports futurs redeviennent possibles ; les leads déjà disqualifiés le restent.');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="pk" value="{{ s.pk }}">
+                            <button type="submit" class="text-xs text-gray-400 hover:text-red-600">retirer</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="p-12 text-center text-gray-500">
+        <p class="text-sm">Aucune sortie pour le moment. Les boutons « Sortir prospect » et
+        « Sortir société » de l'écran de validation alimentent ce registre.</p>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

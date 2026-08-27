@@ -119,13 +119,19 @@ class Command(BaseCommand):
             ))
             return
 
+        from ekoalu.sorties.service import is_company_excluded
         created = 0
         created_prio = 0
         skipped_dup = 0
+        skipped_sortie = 0
         errors = 0
         with transaction.atomic():
             for c in eligibles:
                 public_id = make_synthetic_public_identifier(c.siren)
+                # Société sortie de la prospection par Richard : jamais réimportée
+                if is_company_excluded(c.siren):
+                    skipped_sortie += 1
+                    continue
                 if Lead.objects.filter(contact_email=c.email).exists():
                     skipped_dup += 1
                     continue
@@ -160,7 +166,8 @@ class Command(BaseCommand):
             f"\n--- Import terminé ---\n"
             f"  créés              : {created} (dont {created_prio} cibles prioritaires)\n"
             f"  skippés (dup)      : {skipped_dup}\n"
+            f"  skippés (société sortie) : {skipped_sortie}\n"
             f"  erreurs            : {errors}",
         ))
-        logger.info("import_decp_cibles: created=%d (prio=%d) skipped=%d errors=%d",
-                    created, created_prio, skipped_dup, errors)
+        logger.info("import_decp_cibles: created=%d (prio=%d) skipped=%d sorties=%d errors=%d",
+                    created, created_prio, skipped_dup, skipped_sortie, errors)

@@ -1,0 +1,101 @@
+{% extends "ekoalu/base.html" %}
+
+{% block title %}Consignes de génération — EKOALU{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Consignes de génération</h1>
+        <p class="text-sm text-gray-500">
+            Le corpus qui nourrit la génération (few-shot + règles apprises).
+            ⚠ Une consigne rangée sur le mauvais canal n'est jamais vue par les autres
+            générateurs — corriger le canal ici suffit à la faire appliquer.
+        </p>
+    </div>
+    <a href="{% url 'ekoalu:outbound_list' %}" class="text-sm text-blue-600 hover:underline">← Validation des messages</a>
+</div>
+
+<!-- Filtres canal -->
+<div class="bg-white rounded-lg shadow-sm p-1 inline-flex gap-1 border border-gray-200">
+    <a href="?channel=" class="px-4 py-2 rounded text-sm {% if not channel_filter %}bg-gray-200 text-gray-800 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+        Tous
+    </a>
+    {% for value, label, count in channel_tabs %}
+    <a href="?channel={{ value }}" class="px-4 py-2 rounded text-sm {% if channel_filter == value %}bg-blue-100 text-blue-800 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+        {{ label }} ({{ count }})
+    </a>
+    {% endfor %}
+</div>
+
+<!-- Règles apprises promues (>= 3 occurrences) -->
+{% for channel, rules in rules_by_channel.items %}
+{% if rules %}
+<div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+    <h2 class="text-sm font-semibold text-amber-900 mb-2">
+        Règles apprises — injectées en tête de prompt ({{ channel }})
+    </h2>
+    <ul class="list-disc list-inside text-sm text-amber-900 space-y-1">
+        {% for r in rules %}
+        <li>{{ r }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+{% endfor %}
+
+<!-- Liste des consignes -->
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    {% if examples %}
+    <ul class="divide-y divide-gray-200">
+        {% for ex in examples %}
+        <li class="p-4 hover:bg-gray-50">
+            <form method="post" class="flex flex-col sm:flex-row gap-3 items-start">
+                {% csrf_token %}
+                <input type="hidden" name="pk" value="{{ ex.pk }}">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1 flex-wrap text-xs">
+                        <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">#{{ ex.pk }}</span>
+                        <select name="channel" class="border border-gray-300 rounded px-1 py-0.5 text-xs">
+                            {% for value, label in channel_choices %}
+                            <option value="{{ value }}" {% if ex.channel == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <span class="text-gray-500">{{ ex.get_kind_display }}</span>
+                        {% if ex.persona_slug %}<span class="text-gray-400">· {{ ex.persona_slug }}</span>{% endif %}
+                        {% if ex.used_in_prompt %}<span class="text-green-600">· injectée</span>{% endif %}
+                        <span class="text-gray-400 ml-auto">{{ ex.created_at|date:"d/m/Y H:i" }}</span>
+                    </div>
+                    {% if ex.instruction %}
+                    <textarea name="instruction" rows="2"
+                              class="w-full border border-gray-300 rounded px-2 py-1 text-sm">{{ ex.instruction }}</textarea>
+                    {% else %}
+                    <input type="hidden" name="instruction" value="">
+                    {% endif %}
+                    {% if ex.explanation %}
+                    <p class="text-xs text-gray-500 mt-1">Motif : {{ ex.explanation }}</p>
+                    {% endif %}
+                </div>
+                <div class="flex sm:flex-col gap-2 shrink-0">
+                    <button type="submit" name="action" value="update"
+                            class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+                        Enregistrer
+                    </button>
+                    <button type="submit" name="action" value="delete"
+                            onclick="return confirm('Supprimer la consigne #{{ ex.pk }} du corpus ?');"
+                            class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-red-100 hover:text-red-700">
+                        Supprimer
+                    </button>
+                </div>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="p-12 text-center text-gray-500">
+        <p class="text-sm">Aucune consigne pour ce canal.</p>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

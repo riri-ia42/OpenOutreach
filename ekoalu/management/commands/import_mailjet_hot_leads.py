@@ -133,12 +133,17 @@ class Command(BaseCommand):
         skipped_excluded = 0
         errors = 0
         with transaction.atomic():
+            from ekoalu.sorties.service import is_company_excluded
             for row in rows:
                 email = row["email"].strip().lower()
                 url, public_id = _synthetic_identity(row)
                 if email in shared_excluded:
                     # Bounce/unsubscribe connu du canal Mailjet — on n'importe
                     # pas un contact qu'on n'a pas le droit de recontacter.
+                    skipped_excluded += 1
+                    continue
+                # Société sortie de la prospection par Richard : jamais réimportée
+                if is_company_excluded((row.get("siren") or "").strip()):
                     skipped_excluded += 1
                     continue
                 if (email in existing

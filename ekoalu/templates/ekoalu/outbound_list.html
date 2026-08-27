@@ -13,7 +13,15 @@
             </span>
         </p>
     </div>
-    <a href="/admin/ekoalu/pendingoutbound/" class="text-sm text-blue-600 hover:underline">Admin Django</a>
+    <div class="flex items-center gap-3">
+        <a href="{% url 'ekoalu:consignes_list' %}" class="text-sm px-3 py-1.5 bg-amber-100 text-amber-800 rounded font-medium hover:bg-amber-200">
+            📋 Consignes
+        </a>
+        <a href="{% url 'ekoalu:sorties_list' %}" class="text-sm px-3 py-1.5 bg-gray-100 text-gray-700 rounded font-medium hover:bg-gray-200">
+            🚫 Sorties
+        </a>
+        <a href="/admin/ekoalu/pendingoutbound/" class="text-sm text-blue-600 hover:underline">Admin Django</a>
+    </div>
 </div>
 
 <!-- Tabs filtres -->
@@ -115,10 +123,32 @@
                         </p>
                         {% endif %}
                     </div>
-                    <a href="{% url 'ekoalu:outbound_detail' o.pk %}"
-                       class="block text-center px-4 py-3 sm:px-3 sm:py-1 bg-blue-600 text-white text-base sm:text-sm font-medium rounded hover:bg-blue-700 whitespace-nowrap sm:self-start">
-                        {% if o.status == 'pending' %}✓ Valider{% else %}Voir{% endif %}
-                    </a>
+                    <div class="flex sm:flex-col gap-2 sm:self-start shrink-0">
+                        <a href="{% url 'ekoalu:outbound_detail' o.pk %}"
+                           class="block text-center px-4 py-3 sm:px-3 sm:py-1 bg-blue-600 text-white text-base sm:text-sm font-medium rounded hover:bg-blue-700 whitespace-nowrap">
+                            {% if o.status == 'pending' %}✓ Valider{% else %}Voir{% endif %}
+                        </a>
+                        {% if o.status == 'pending' %}
+                        <form method="post" action="{% url 'ekoalu:outbound_sortir_prospect' o.pk %}"
+                              onsubmit="return confirm('Sortir {{ o.prospect_name|default:o.prospect_public_id|escapejs }} de la prospection ?\nTous canaux, toutes campagnes — définitif sauf requalification manuelle.');">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <button type="submit"
+                                    class="w-full px-3 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded border border-orange-200 hover:bg-orange-100 whitespace-nowrap">
+                                👤✗ Sortir prospect
+                            </button>
+                        </form>
+                        <form method="post" action="{% url 'ekoalu:outbound_sortir_societe' o.pk %}"
+                              onsubmit="return confirm('Sortir la société {{ o.prospect_company_display|default:'(inconnue)'|escapejs }} ENTIÈRE de la prospection ?\nTous ses contacts sont retirés et les imports futurs bloqués.');">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <button type="submit"
+                                    class="w-full px-3 py-1 bg-red-50 text-red-700 text-xs font-medium rounded border border-red-200 hover:bg-red-100 whitespace-nowrap">
+                                🏢✗ Sortir société
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
                 </div>
             </li>
             {% endfor %}
