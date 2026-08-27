@@ -61,9 +61,11 @@ def cold_mail_candidates(dpt: str = "", source: str = "") -> tuple[list["Lead"],
         .filter(kind=OutboundKind.EMAIL_COLD, status__in=BLOCKING_STATUSES)
         .values_list("prospect_public_id", flat=True)
     )
+    blocked_persons = _blocked_person_keys(blocked_public_ids)
     shared_excluded = excluded_emails()
 
     skipped_excluded = 0
+    seen_persons: set[tuple[str, str]] = set()
     candidates: list[Lead] = []
     for lead in leads_qs.select_related("email_data"):
         if lead.public_identifier in blocked_public_ids:
@@ -71,12 +73,53 @@ def cold_mail_candidates(dpt: str = "", source: str = "") -> tuple[list["Lead"],
         if (lead.contact_email or "").strip().lower() in shared_excluded:
             skipped_excluded += 1
             continue
+        # Anti-doublon PERSONNE (Richard 27/08) : le même humain existe souvent
+        # sous 2 leads (lead société contact@ + personne influence prenom.nom@).
+        # S'il a déjà un cold mail via l'autre lead — ou si l'autre lead est
+        # aussi candidat dans ce run — on ne le sollicite pas une 2e fois ;
+        # une relance, c'est différent.
+        person = _person_key(lead)
+        if person:
+            if person in blocked_persons or person in seen_persons:
+                continue
+            seen_persons.add(person)
         candidates.append(lead)
     # Cibles prioritaires DECP en tête (décision Richard 2026-07-28) : poseurs
     # non-fabricants qui viennent de gagner un lot — fenêtre commerciale courte.
     # Tri stable : l'ordre FIFO est conservé à l'intérieur de chaque groupe.
     candidates.sort(key=_not_priority)
     return candidates, skipped_excluded
+
+
+def _person_key(lead: "Lead") -> tuple[str, str] | None:
+    """(siren, nom normalisé) identifiant l'humain derrière un lead, ou None."""
+    from ekoalu.person_identity import norm_person_name
+
+    data = getattr(lead, "email_data", None)
+    if data is None or not data.siren or not data.dirigeant:
+        return None
+    name = norm_person_name(data.dirigeant)
+    return (data.siren, name) if name else None
+
+
+def _blocked_person_keys(blocked_public_ids: set[str]) -> set[tuple[str, str]]:
+    """Clés (siren, nom) des personnes ayant déjà un cold mail bloquant."""
+    from ekoalu.email_canal.models import EmailLeadData
+    from ekoalu.person_identity import norm_person_name
+
+    keys: set[tuple[str, str]] = set()
+    rows = (
+        EmailLeadData.objects
+        .filter(lead__public_identifier__in=blocked_public_ids)
+        .exclude(siren="")
+        .exclude(dirigeant="")
+        .values_list("siren", "dirigeant")
+    )
+    for siren, dirigeant in rows:
+        name = norm_person_name(dirigeant)
+        if name:
+            keys.add((siren, name))
+    return keys
 
 
 def _not_priority(lead: "Lead") -> bool:

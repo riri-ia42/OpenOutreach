@@ -186,6 +186,14 @@ class Command(BaseCommand):
                     continue
                 if Lead.objects.filter(contact_email=person.email).exists():
                     continue
+                # Anti-doublon PERSONNE (Richard 27/08) : si la personne est le
+                # dirigeant du lead société, ne pas créer un 2e lead pour le
+                # même humain (il serait sollicité 2 fois : contact@ + nominatif).
+                from ekoalu.person_identity import same_person
+                if same_person(person.display_name, data.dirigeant):
+                    self.stdout.write("      (même personne que le dirigeant du "
+                                      "lead société — skip anti-doublon)")
+                    continue
                 public_id = f"bdd-prospect-{data.siren}-i{i}"
                 if Lead.objects.filter(public_identifier=public_id).exists():
                     public_id = f"bdd-prospect-{data.siren}-i{i}-{int(time.time())}"
