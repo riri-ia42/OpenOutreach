@@ -1548,6 +1548,130 @@ def _disqualify_leads_from_reject(public_ids: list[str], reason: str) -> tuple[i
     return disqualify_leads(public_ids, reason)
 
 
+@staff_member_required
+@require_POST
+def outbound_sortir_prospect(request, pk):
+    """Sort la PERSONNE de la prospection (registre + cascade tous canaux)."""
+    from ekoalu.sorties.service import sortir_prospect
+    po = get_object_or_404(PendingOutbound, pk=pk)
+    label = sortir_prospect(po.prospect_public_id)
+    django_messages.warning(
+        request, f"👤 {label} sorti(e) de la prospection — état : /ekoalu/sorties/",
+    )
+    return redirect(request.POST.get("next") or "/ekoalu/messages/?status=pending")
+
+
+@staff_member_required
+@require_POST
+def outbound_sortir_societe(request, pk):
+    """Sort la SOCIÉTÉ entière (tous ses contacts + garde à l'import)."""
+    from crm.models import Lead
+
+    from ekoalu.sorties.service import sortir_societe
+    po = get_object_or_404(PendingOutbound, pk=pk)
+    lead = (
+        Lead.objects
+        .filter(public_identifier=po.prospect_public_id)
+        .select_related("email_data")
+        .first()
+    )
+    data = getattr(lead, "email_data", None) if lead else None
+    siren = data.siren if data else ""
+    company = (data.entreprise if data else "") or po.prospect_company or ""
+    if not siren and not company:
+        django_messages.error(request, "Société inconnue pour ce prospect (ni siren ni nom).")
+        return redirect(request.POST.get("next") or "/ekoalu/messages/?status=pending")
+    n, label = sortir_societe(siren=siren, company_name=company)
+    django_messages.warning(
+        request,
+        f"🏢 {label} sortie de la prospection — {n} contact(s) retiré(s), "
+        f"imports futurs bloqués (siren {siren or 'inconnu'}).",
+    )
+    return redirect(request.POST.get("next") or "/ekoalu/messages/?status=pending")
+
+
+@staff_member_required
+def consignes_list(request):
+    """Fenêtre de gestion des consignes de génération (demande Richard 27/08).
+
+    Liste les CorrectionExample (le corpus d'apprentissage), permet d'éditer
+    l'instruction et surtout le CANAL — une consigne rangée sur le mauvais
+    canal n'est JAMAIS vue par les autres générateurs (cas vécu : « ne pas se
+    limiter au tertiaire » stockée en linkedin_dm, invisible des cold mails).
+    Affiche aussi les règles apprises promues (>= 3 occurrences) par canal.
+    """
+    from ekoalu.learning import learned_rules
+
+    channel_filter = request.GET.get("channel", "")
+    back = f"{request.path}?channel={channel_filter}" if channel_filter else request.path
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        pk = request.POST.get("pk")
+        if action == "update":
+            ex = get_object_or_404(CorrectionExample, pk=pk)
+            ex.instruction = request.POST.get("instruction", "").strip()
+            new_channel = request.POST.get("channel", "")
+            if new_channel in CorrectionExample.Channel.values:
+                ex.channel = new_channel
+            ex.save(update_fields=["instruction", "channel"])
+            django_messages.success(request, f"Consigne #{pk} mise à jour.")
+        elif action == "delete":
+            ex = get_object_or_404(CorrectionExample, pk=pk)
+            ex.delete()
+            django_messages.info(request, f"Consigne #{pk} supprimée du corpus d'apprentissage.")
+        else:
+            django_messages.error(request, f"Action inconnue : {action}")
+        return redirect(back)
+
+    qs = CorrectionExample.objects.all().order_by("-created_at")
+    if channel_filter:
+        qs = qs.filter(channel=channel_filter)
+
+    rules_by_channel = {
+        value: learned_rules(value)
+        for value, _label in CorrectionExample.Channel.choices
+        if not channel_filter or value == channel_filter
+    }
+    channel_tabs = [
+        (value, label, CorrectionExample.objects.filter(channel=value).count())
+        for value, label in CorrectionExample.Channel.choices
+    ]
+    return render(request, "ekoalu/consignes.html", {
+        "examples": list(qs[:200]),
+        "channel_filter": channel_filter,
+        "channel_choices": CorrectionExample.Channel.choices,
+        "rules_by_channel": rules_by_channel,
+        "channel_tabs": channel_tabs,
+    })
+
+
+@staff_member_required
+def sorties_list(request):
+    """État des personnes et sociétés sorties de la prospection."""
+    from ekoalu.sorties.models import ProspectionSortie
+    from ekoalu.sorties.service import export_shared_json, invalidate_cache
+
+    if request.method == "POST" and request.POST.get("action") == "delete":
+        row = get_object_or_404(ProspectionSortie, pk=request.POST.get("pk"))
+        row.delete()
+        invalidate_cache()
+        export_shared_json()
+        django_messages.info(
+            request,
+            f"Entrée « {row.label} » retirée du registre — les imports futurs redeviennent "
+            "possibles ; les leads déjà disqualifiés le restent (requalifiables via leur fiche).",
+        )
+        return redirect("ekoalu:sorties_list")
+
+    sorties = list(ProspectionSortie.objects.all()[:500])
+    return render(request, "ekoalu/sorties.html", {
+        "sorties": sorties,
+        "n_persons": sum(1 for s in sorties if s.kind == ProspectionSortie.Kind.PERSON),
+        "n_companies": sum(1 for s in sorties if s.kind == ProspectionSortie.Kind.COMPANY),
+    })
+
+
 def _persona_slug_for_outbound(outbound: PendingOutbound) -> str:
     """Infere le persona slug depuis le campaign_name de l'outbound."""
     name = outbound.campaign_name or ""
@@ -1694,6 +1818,7 @@ def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tupl
     connait ni le format sujet/corps ni le lien RDV → hallucinations.)
     """
     from crm.models import Lead
+    from ekoalu.email_generator.contexte import build_generation_contexte
     from ekoalu.email_generator.generator import generate_cold_email
 
     lead = (
@@ -1703,6 +1828,9 @@ def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tupl
         .first()
     )
     data = getattr(lead, "email_data", None) if lead else None
+    # Contexte factuel (marché DECP, angle fabricant) : sans lui, régénérer un
+    # mail DECP perdait l'accroche marché gagné.
+    contexte, _notes = build_generation_contexte(data)
     draft = generate_cold_email(
         entreprise=(data.entreprise if data else outbound.prospect_company or ""),
         dirigeant=(data.dirigeant if data else ""),
@@ -1714,6 +1842,7 @@ def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tupl
         effectif_max=(data.effectif_max if data else 0),
         variant=outbound.prompt_variant or None,
         instruction=instruction,
+        contexte=contexte,
     )
     if not draft.is_valid():
         return False, "Le générateur email a renvoyé un draft vide (clé API ? erreur réseau ?)."

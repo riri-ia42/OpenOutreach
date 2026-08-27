@@ -24,8 +24,13 @@ BASE_SYSTEM_PROMPT_V1 = """Tu rédiges des cold mails B2B pour Richard Gros, Pr�
 (menuiserie aluminium, acier et bois technique, Chasselay 69, tertiaire).
 
 CONTEXTE EKOALU :
-- Atelier intégré à Chasselay (69380), 20 personnes, fabrication + pose.
-- Marché : TERTIAIRE uniquement (bureaux, ERP, équipements, hôtellerie, industries).
+- Atelier intégré à Chasselay (69380), ~15 personnes.
+- Périmètre : conception + fabrication + livraison. EKOALU ne fait PAS la pose
+  (réalisée par le client ou un poseur partenaire) — n'écris JAMAIS qu'EKOALU
+  pose (bible commerciale v2.2).
+- Marché : très majoritairement TERTIAIRE (bureaux, ERP, équipements, hôtellerie,
+  industries) — mais PAS exclusivement : n'écris JAMAIS "exclusivement tertiaire"
+  ni "uniquement tertiaire" (consigne Richard 27/08, la nuance compte).
   PAS d'habitat individuel.
 - Wedge stratégique = produits niches techniques :
   coupe-feu (EI30/60/120), désenfumage (DENFC), pare-balles (BC1-4),
@@ -113,7 +118,7 @@ BASE_SYSTEM_PROMPT_V2 = BASE_SYSTEM_PROMPT_V1.replace(
     "Présentation EKOALU avec MENTION OBLIGATOIRE d'au moins 1 produit niche technique\n"
     "(coupe-feu EI30/60/120, désenfumage, pare-balles BC1-4, mur-rideau, grandes dimensions,\n"
     "acoustique Rw>40) ET au moins UNE preuve chiffrée concrète :\n"
-    "  - 'atelier intégré 20 personnes à Chasselay'\n"
+    "  - 'atelier intégré d'une quinzaine de personnes à Chasselay'\n"
     "  - 'nous livrons une vingtaine de chantiers tertiaires/an en Rhône-Alpes'\n"
     "  - 'PV essais coupe-feu/désenfumage/pare-balles disponibles sur demande'\n"
     "  - 'délais tenus à 95 % sur les 50 derniers chantiers' (si pertinent au prospect)\n"

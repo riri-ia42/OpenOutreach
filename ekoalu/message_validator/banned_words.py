@@ -59,11 +59,27 @@ _CLOSINGS_CREUX = [
     "dans l attente de votre retour",
 ]
 
+# Affirmations fausses sur EKOALU (consigne Richard 27/08 : beaucoup de
+# tertiaire mais PAS exclusivement — la nuance compte ; bible v2.2 : EKOALU
+# ne fait PAS la pose, formulations ciblées pour éviter les faux positifs)
+_AFFIRMATIONS_FAUSSES = [
+    "exclusivement tertiaire",
+    "uniquement tertiaire",
+    "orienté exclusivement",
+    "oriente exclusivement",
+    "nous posons vos",
+    "fabrication et pose",
+    "fabrication + pose",
+    "on fabrique et on pose",
+    "nous assurons la pose",
+]
+
 BANNED_WORDS: list[str] = (
     _JARGON_COMMERCIAL
     + _TOURNURES_AMPOULEES
     + _AUTO_ELOGES
     + _CLOSINGS_CREUX
+    + _AFFIRMATIONS_FAUSSES
 )
 
 # Extra mots bannis via env (séparés par virgule)
