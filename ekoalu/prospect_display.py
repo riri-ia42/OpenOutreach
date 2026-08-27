@@ -173,6 +173,23 @@ def extract_job_title(profile_summary) -> str:
     return ""
 
 
+# Prefixes des public_identifier synthetiques (leads mail-only sans profil
+# LinkedIn) : le nom derive du slug serait un placeholder ("Bdd Prospect",
+# "Mailjet Hot") — on va chercher la vraie personne dans EmailLeadData.
+_SYNTHETIC_SLUG_PREFIXES = ("bdd-prospect-", "mailjet-hot-")
+
+
+def _email_data_display(slug: str) -> dict | None:
+    """dirigeant/entreprise/ville d'un lead mail-only, via EmailLeadData."""
+    from ekoalu.email_canal.models import EmailLeadData
+    return (
+        EmailLeadData.objects
+        .filter(lead__public_identifier=slug)
+        .values("dirigeant", "entreprise", "ville")
+        .first()
+    )
+
+
 def resolve_prospect_display(slug: str, deal=None, company_hint: str = "") -> dict:
     """Renvoie un dict {name, company, location, job_title} pour les templates.
 
@@ -186,6 +203,12 @@ def resolve_prospect_display(slug: str, deal=None, company_hint: str = "") -> di
     company = extract_company(profile_summary) or company_hint or ""
     location = extract_location(profile_summary)
     job_title = extract_job_title(profile_summary)
+    if slug.startswith(_SYNTHETIC_SLUG_PREFIXES):
+        data = _email_data_display(slug)
+        if data:
+            name = data["dirigeant"] or name
+            company = company or data["entreprise"]
+            location = location or data["ville"]
     return {"name": name, "company": company, "location": location, "job_title": job_title}
 
 

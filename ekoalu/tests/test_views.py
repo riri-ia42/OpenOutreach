@@ -448,6 +448,36 @@ class TestOutboundViews:
         r = client_logged.get(reverse("ekoalu:outbound_detail", args=[99999]))
         assert r.status_code == 404
 
+    def test_outbound_list_affiche_nom_et_email_lead_mail_only(self, client_logged):
+        # Capture Richard 27/08 : la liste doit afficher la personne reelle
+        # (EmailLeadData.dirigeant) et l'adresse email, pas "Bdd Prospect".
+        from crm.models import Lead
+        from ekoalu.email_canal.models import EmailLeadData
+        from ekoalu.outbound_validation.models import OutboundKind, PendingOutbound
+        lead = Lead.objects.create(
+            linkedin_url="https://bdd-prospect.local/siren/350246039",
+            public_identifier="bdd-prospect-350246039",
+            contact_email="j.clavagnier@sofipre.fr",
+        )
+        EmailLeadData.objects.create(
+            lead=lead,
+            source=EmailLeadData.SOURCE_BDD_PROSPECT,
+            siren="350246039",
+            entreprise="SOFIPRE",
+            dirigeant="Jean Clavagnier",
+        )
+        PendingOutbound.objects.create(
+            prospect_public_id="bdd-prospect-350246039",
+            kind=OutboundKind.EMAIL_COLD,
+            ai_draft="Bonjour M. Clavagnier, ...",
+        )
+        r = client_logged.get(reverse("ekoalu:outbound_list") + "?status=pending")
+        assert r.status_code == 200
+        html = r.content.decode()
+        assert "Jean Clavagnier" in html
+        assert "j.clavagnier@sofipre.fr" in html
+        assert "Bdd Prospect" not in html
+
     def test_outbound_approve(self, client_logged):
         from ekoalu.outbound_validation.models import (
             OutboundKind,

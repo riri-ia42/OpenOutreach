@@ -1419,7 +1419,7 @@ def campaign_detail(request, pk: int):
 @staff_member_required
 def outbound_list(request):
     """Liste des messages sortants à valider + actions en masse."""
-    from crm.models import Deal
+    from crm.models import Deal, Lead
     from ekoalu.prospect_display import resolve_prospect_display
 
     if request.method == "POST":
@@ -1502,13 +1502,22 @@ def outbound_list(request):
 
     items = list(queryset[:100])
     # Enrichissement nom + societe + ville (un lookup Deal par slug/campaign)
+    # + email destinataire (capture Richard 27/08 : juger l'adresse avant de
+    # valider, surtout les emails deduits par pattern du groupe d'influence)
     slug_camp = [(o.prospect_public_id, o.campaign_id) for o in items]
     deal_map = {}
+    email_map = {}
     if slug_camp:
+        slugs = [s for s, _ in slug_camp]
         deals = Deal.objects.filter(
-            lead__public_identifier__in=[s for s, _ in slug_camp],
+            lead__public_identifier__in=slugs,
         ).select_related("lead", "campaign")
         deal_map = {(d.lead.public_identifier, d.campaign_id): d for d in deals}
+        email_map = dict(
+            Lead.objects.filter(public_identifier__in=slugs)
+            .exclude(contact_email="")
+            .values_list("public_identifier", "contact_email")
+        )
     for o in items:
         d = deal_map.get((o.prospect_public_id, o.campaign_id))
         disp = resolve_prospect_display(o.prospect_public_id, deal=d, company_hint=o.prospect_company)
@@ -1516,6 +1525,7 @@ def outbound_list(request):
         o.prospect_company_display = disp["company"]
         o.prospect_location = disp["location"]
         o.prospect_job_title = disp["job_title"]
+        o.prospect_email = email_map.get(o.prospect_public_id, "")
 
     context = {
         "outbound_list": items,
