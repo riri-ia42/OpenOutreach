@@ -84,7 +84,8 @@ class TestSortirSociete:
                    dirigeant="Marie Perret", email="m.perret@exemple.fr")
         autre = _lead(public_id="bdd-prospect-999", siren="999888777",
                       entreprise="AUTRE SOCIETE")
-        n, label = service.sortir_societe(siren="111222333", company_name="SOFIPRE")
+        n, label, slugs = service.sortir_societe(siren="111222333", company_name="SOFIPRE")
+        assert slugs == ["bdd-prospect-111", "bdd-prospect-111-i2"]
         for lead in (l1, l2, autre):
             lead.refresh_from_db()
         assert n == 2
@@ -105,13 +106,13 @@ class TestSortirSociete:
             prospect_company="Metallerie Durand",
             kind=OutboundKind.INVITATION, ai_draft="x",
         )
-        n, _ = service.sortir_societe(company_name="Metallerie Durand")
+        n, _, _ = service.sortir_societe(company_name="Metallerie Durand")
         lead.refresh_from_db()
         assert n == 1
         assert lead.disqualified is True
 
     def test_sans_siren_ni_nom(self):
-        assert service.sortir_societe() == (0, "")
+        assert service.sortir_societe() == (0, "", [])
 
 
 @pytest.mark.django_db
@@ -153,6 +154,41 @@ class TestVuesSorties:
         lead.refresh_from_db()
         assert lead.disqualified is True
         assert service.is_company_excluded("555666777") is True
+
+    def test_sortir_societe_ajax_renvoie_les_slugs(self, client_logged):
+        # AJAX : l'UI retire les lignes de TOUS les contacts sans recharger
+        # (le rechargement effaçait les cases cochées de Richard).
+        _lead(public_id="bdd-prospect-777", siren="777777777")
+        _lead(public_id="bdd-prospect-777-i2", siren="777777777",
+              dirigeant="Autre Contact", email="autre@exemple.fr")
+        po = PendingOutbound.objects.create(
+            prospect_public_id="bdd-prospect-777",
+            kind=OutboundKind.EMAIL_COLD, ai_draft="brouillon",
+        )
+        r = client_logged.post(
+            f"/ekoalu/messages/{po.pk}/sortir-societe/",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["n"] == 2
+        assert set(data["removed"]) == {"bdd-prospect-777", "bdd-prospect-777-i2"}
+
+    def test_sortir_prospect_ajax(self, client_logged):
+        lead = _lead()
+        po = PendingOutbound.objects.create(
+            prospect_public_id=lead.public_identifier,
+            kind=OutboundKind.EMAIL_COLD, ai_draft="brouillon",
+        )
+        r = client_logged.post(
+            f"/ekoalu/messages/{po.pk}/sortir-prospect/",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["removed"] == [lead.public_identifier]
 
     def test_page_sorties_et_retrait(self, client_logged):
         entry = ProspectionSortie.objects.create(

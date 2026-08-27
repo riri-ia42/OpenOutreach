@@ -1548,13 +1548,26 @@ def _disqualify_leads_from_reject(public_ids: list[str], reason: str) -> tuple[i
     return disqualify_leads(public_ids, reason)
 
 
+def _is_ajax(request) -> bool:
+    return request.headers.get("x-requested-with") == "XMLHttpRequest"
+
+
 @staff_member_required
 @require_POST
 def outbound_sortir_prospect(request, pk):
-    """Sort la PERSONNE de la prospection (registre + cascade tous canaux)."""
+    """Sort la PERSONNE de la prospection (registre + cascade tous canaux).
+
+    En AJAX : JSON {ok, label, removed} — l'UI retire la ligne SANS recharger
+    la page (capture Richard 27/08 : le rechargement effaçait ses cases cochées).
+    """
+    from django.http import JsonResponse
+
     from ekoalu.sorties.service import sortir_prospect
     po = get_object_or_404(PendingOutbound, pk=pk)
     label = sortir_prospect(po.prospect_public_id)
+    if _is_ajax(request):
+        return JsonResponse({"ok": True, "label": label,
+                             "removed": [po.prospect_public_id]})
     django_messages.warning(
         request, f"👤 {label} sorti(e) de la prospection — état : /ekoalu/sorties/",
     )
@@ -1564,7 +1577,13 @@ def outbound_sortir_prospect(request, pk):
 @staff_member_required
 @require_POST
 def outbound_sortir_societe(request, pk):
-    """Sort la SOCIÉTÉ entière (tous ses contacts + garde à l'import)."""
+    """Sort la SOCIÉTÉ entière (tous ses contacts + garde à l'import).
+
+    En AJAX : JSON {ok, label, n, removed} — `removed` liste les slugs de TOUS
+    les contacts de la société pour retirer leurs lignes sans recharger.
+    """
+    from django.http import JsonResponse
+
     from crm.models import Lead
 
     from ekoalu.sorties.service import sortir_societe
@@ -1579,9 +1598,14 @@ def outbound_sortir_societe(request, pk):
     siren = data.siren if data else ""
     company = (data.entreprise if data else "") or po.prospect_company or ""
     if not siren and not company:
+        if _is_ajax(request):
+            return JsonResponse({"ok": False,
+                                 "error": "Société inconnue (ni siren ni nom)."})
         django_messages.error(request, "Société inconnue pour ce prospect (ni siren ni nom).")
         return redirect(request.POST.get("next") or "/ekoalu/messages/?status=pending")
-    n, label = sortir_societe(siren=siren, company_name=company)
+    n, label, slugs = sortir_societe(siren=siren, company_name=company)
+    if _is_ajax(request):
+        return JsonResponse({"ok": True, "label": label, "n": n, "removed": slugs})
     django_messages.warning(
         request,
         f"🏢 {label} sortie de la prospection — {n} contact(s) retiré(s), "

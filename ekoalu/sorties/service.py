@@ -55,12 +55,14 @@ def sortir_prospect(public_id: str, *, reason: str = "") -> str:
 
 
 def sortir_societe(*, siren: str = "", company_name: str = "",
-                   reason: str = "") -> tuple[int, str]:
+                   reason: str = "") -> tuple[int, str, list[str]]:
     """Sort une SOCIÉTÉ entière : toutes les personnes rattachées + registre.
 
     Rattachement par siren (leads mail-only, groupe d'influence) ET par nom
     d'entreprise exact (PendingOutbound.prospect_company / EmailLeadData).
-    Le siren entre aussi dans la garde à l'import. Renvoie (n_personnes, label).
+    Le siren entre aussi dans la garde à l'import.
+    Renvoie (n_personnes, label, slugs_concernés) — les slugs servent à l'UI
+    pour retirer les lignes sans recharger la page.
     """
     from ekoalu.email_canal.models import EmailLeadData
     from ekoalu.lead_exclusion import disqualify_leads
@@ -68,7 +70,7 @@ def sortir_societe(*, siren: str = "", company_name: str = "",
     from ekoalu.sorties.models import ProspectionSortie
 
     if not siren and not company_name:
-        return 0, ""
+        return 0, "", []
     reason = reason or f"Société sortie de la prospection par Richard ({company_name or siren})"
 
     slugs: set[str] = set()
@@ -110,7 +112,7 @@ def sortir_societe(*, siren: str = "", company_name: str = "",
     export_shared_json()
     logger.info("Sortie société : %s (siren=%s) — %d personne(s) disqualifiée(s)",
                 label, siren or "?", len(slugs))
-    return len(slugs), label
+    return len(slugs), label, sorted(slugs)
 
 
 def excluded_sirens() -> frozenset[str]:
