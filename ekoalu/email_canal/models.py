@@ -26,6 +26,7 @@ class EmailLeadData(models.Model):
     SOURCE_MAILJET_HOT = "mailjet_hot"  # ouvreurs/cliqueurs campagnes mailing-mailjet
     SOURCE_DECP = "decp"  # titulaires de marchés publics attribués (séance antichambre)
     SOURCE_DECP_INFLUENCE = "decp_influence"  # personnes physiques du groupe d'influence DECP
+    SOURCE_REFERRAL = "referral"  # mise en relation par un contact (recommandation)
 
     lead = models.OneToOneField(
         "crm.Lead",

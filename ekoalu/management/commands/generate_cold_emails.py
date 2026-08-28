@@ -151,6 +151,7 @@ class Command(BaseCommand):
                 effectif_min=data.effectif_min,
                 effectif_max=data.effectif_max,
                 contexte=contexte,
+                contact_email=lead.contact_email or "",
             )
 
             if not draft.is_valid():

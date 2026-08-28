@@ -176,7 +176,7 @@ def extract_job_title(profile_summary) -> str:
 # Prefixes des public_identifier synthetiques (leads mail-only sans profil
 # LinkedIn) : le nom derive du slug serait un placeholder ("Bdd Prospect",
 # "Mailjet Hot") — on va chercher la vraie personne dans EmailLeadData.
-_SYNTHETIC_SLUG_PREFIXES = ("bdd-prospect-", "mailjet-hot-")
+_SYNTHETIC_SLUG_PREFIXES = ("bdd-prospect-", "mailjet-hot-", "referral-")
 
 
 def _email_data_display(slug: str) -> dict | None:

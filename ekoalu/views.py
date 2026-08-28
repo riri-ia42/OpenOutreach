@@ -1867,6 +1867,7 @@ def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tupl
         variant=outbound.prompt_variant or None,
         instruction=instruction,
         contexte=contexte,
+        contact_email=(lead.contact_email or "") if lead else "",
     )
     if not draft.is_valid():
         return False, "Le générateur email a renvoyé un draft vide (clé API ? erreur réseau ?)."

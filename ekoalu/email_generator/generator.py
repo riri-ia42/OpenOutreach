@@ -133,19 +133,27 @@ def generate_cold_email(
     variant: str | None = None,
     instruction: str = "",
     contexte: str = "",
+    contact_email: str = "",
 ) -> ColdEmailDraft:
     """Génère un cold mail EKOALU pour les données prospect fournies.
 
     Args:
         variant: id de la variante de prompt à utiliser (cf. PROMPT_VARIANTS).
             Si None, tirage aléatoire pondéré via pick_variant() (A/B testing).
+        contact_email: adresse de destination — sert UNIQUEMENT à la garde de
+            salutation (une adresse nominative qui ne recoupe pas le dirigeant
+            → « Bonjour, » sans nom, incident ABAC/Domaison 28/08).
 
     Retourne `ColdEmailDraft(subject="", body="")` si la génération a échoué.
     `variant_used` est rempli systématiquement (même en cas d'échec) pour audit.
     """
     from ekoalu import learning
+    from ekoalu.email_generator.salutation import dirigeant_for_salutation
     from ekoalu.inbox_assist.models import CorrectionExample
     from ekoalu.message_validator.style_guard import enforce_style, find_style_violations
+
+    if contact_email:
+        dirigeant = dirigeant_for_salutation(dirigeant, contact_email)
 
     chosen_variant = variant or pick_variant()
 
