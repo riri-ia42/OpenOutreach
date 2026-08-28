@@ -69,6 +69,8 @@ class TestResolveSiren:
             results = self._results
 
             class R:
+                status_code = 200
+
                 def raise_for_status(self):
                     pass
 
@@ -145,3 +147,24 @@ class TestCommande:
         call_command("export_linkedin_enrichment")
         # 2e run : siren lu depuis l'export précédent, aucune résolution
         assert len(calls) == 1
+
+    def test_erreur_transitoire_retentee_introuvable_non(self, tmp_path, monkeypatch):
+        # Un 429/réseau (None) doit être RETENTÉ au run suivant ; un introuvable
+        # confirmé ('') ne doit PAS l'être.
+        import ekoalu.management.commands.export_linkedin_enrichment as mod
+        monkeypatch.setattr(mod, "EXPORT_PATH", tmp_path / "linkedin-enrichis.json")
+        Lead.objects.create(
+            linkedin_url="https://www.linkedin.com/in/patrick-gomes",
+            public_identifier="patrick-gomes", profile_snapshot=_snap(),
+        )
+        calls = []
+        # Run 1 : erreur transitoire
+        monkeypatch.setattr(mod, "resolve_siren", lambda c, s: calls.append(c) or None)
+        call_command("export_linkedin_enrichment")
+        # Run 2 : introuvable confirmé — a bien été retenté
+        monkeypatch.setattr(mod, "resolve_siren", lambda c, s: calls.append(c) or "")
+        call_command("export_linkedin_enrichment")
+        assert len(calls) == 2
+        # Run 3 : introuvable définitif — plus aucun appel
+        call_command("export_linkedin_enrichment")
+        assert len(calls) == 2

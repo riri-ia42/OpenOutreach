@@ -68,17 +68,27 @@ def snapshot_fields(snap: dict) -> dict | None:
     }
 
 
-def resolve_siren(company: str, session: requests.Session) -> str:
-    """SIREN via API gouv ('' si introuvable/ambigu). Jamais bloquant."""
+def resolve_siren(company: str, session: requests.Session) -> str | None:
+    """SIREN via API gouv. '' = définitivement introuvable/ambigu (cacheable),
+    None = erreur transitoire (429/réseau — à retenter au prochain run)."""
     if not company or len(company) < 3:
         return ""
-    try:
-        r = session.get(RECHERCHE_API, params={"q": company, "per_page": 1}, timeout=15)
-        r.raise_for_status()
-        results = r.json().get("results", [])
-    except requests.RequestException as exc:
-        logger.warning("API gouv KO pour %r : %s", company, exc)
-        return ""
+    for attempt in (1, 2):
+        try:
+            r = session.get(RECHERCHE_API, params={"q": company, "per_page": 1}, timeout=15)
+            if r.status_code == 429 and attempt == 1:
+                time.sleep(2.5)
+                continue
+            r.raise_for_status()
+            results = r.json().get("results", [])
+            break
+        except requests.RequestException as exc:
+            if attempt == 2:
+                logger.warning("API gouv KO pour %r : %s", company, exc)
+                return None
+            time.sleep(2.5)
+    else:  # pragma: no cover
+        return None
     if not results:
         return ""
     res = results[0]
@@ -142,18 +152,22 @@ class Command(BaseCommand):
             slug = lead.public_identifier
             prev = previous.get(slug) or {}
             siren = prev.get("siren", "")
+            definitif = bool(prev.get("siren_definitif"))
             if siren:
                 reused += 1
-            elif fields["societe"] and prev.get("societe") == fields["societe"] \
-                    and "siren" in prev:
-                siren = prev["siren"]  # déjà tenté, introuvable : ne pas retenter
-                reused += 1
+            elif definitif and prev.get("societe") == fields["societe"]:
+                reused += 1  # déjà tenté SANS erreur : introuvable, ne pas retenter
             elif fields["societe"] and api_calls < opts["max_api_calls"]:
-                siren = resolve_siren(fields["societe"], session)
+                resolved = resolve_siren(fields["societe"], session)
                 api_calls += 1
                 time.sleep(THROTTLE_SECONDS)
-                if siren:
+                if resolved:  # trouvé
+                    siren = resolved
+                    definitif = True
                     new_siren += 1
+                elif resolved == "":  # introuvable CONFIRMÉ par l'API
+                    definitif = True
+                # None (429/réseau) : ni siren ni definitif → retenté au prochain run
             if not siren:
                 no_siren += 1
 
@@ -163,6 +177,7 @@ class Command(BaseCommand):
             profils[slug] = {
                 **fields,
                 "siren": siren,
+                "siren_definitif": definitif,
                 "linkedin_url": lead.linkedin_url,
                 "email": lead.contact_email or "",
                 "statut_prospection": statut,
