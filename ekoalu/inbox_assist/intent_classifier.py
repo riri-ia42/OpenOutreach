@@ -27,6 +27,7 @@ class Intent(str, enum.Enum):
     OBJECTION = "objection"
     OFF_TOPIC = "off_topic"
     OPT_OUT = "opt_out"
+    WRONG_FIT = "wrong_fit"  # activité incompatible (« exclusivement revêtements de sols »)
 
 
 # Patterns par intention (case-insensitive). Ordre important : OPT_OUT > RDV > OBJECTION > TECH.
@@ -77,6 +78,50 @@ _PATTERNS_TECHNICAL = [
 ]
 
 
+# Activité incompatible : le prospect dit que son métier n'a pas de rapport.
+# → sortie polie, pas de lien RDV, candidat à la sortie de prospection.
+_PATTERNS_WRONG_FIT = [
+    r"\b(?:nous faisons|on fait|nous sommes)\s+(?:exclusivement|uniquement)\b",
+    r"\b(?:exclusivement|uniquement)\s+(?:dans|des|du|de la|de l')\b",
+    r"\bne (?:faisons|fait|fabriquons|posons|traitons|vendons) (?:pas|plus|aucun)\b",
+    r"\bpas (?:notre|mon) (?:activit[ée]|m[ée]tier|domaine|secteur|c[oe]ur de m[ée]tier)\b",
+    r"\bhors de (?:notre|mon) (?:activit[ée]|p[ée]rim[èe]tre|domaine)\b",
+    r"\b(?:pas|non) concern[ée]s?\b",
+    r"\baucun rapport avec (?:notre|mon)\b",
+    r"\bne (?:travaillons|travaille) pas (?:dans|sur|avec) ce\b",
+    r"\bnous ne sommes pas (?:menuisiers?|fabricants?|poseurs?|dans)\b",
+]
+
+# Marqueurs de début de mail cité (réponse Outlook/Gmail) : tout ce qui suit est
+# NOTRE propre message — le classifier ne doit JAMAIS le lire (bug 31/08 :
+# « mon agenda en ligne » du cold mail cité faisait classer un refus en rdv_request).
+_QUOTED_MARKERS = re.compile(
+    r"(?im)^[>\s]*(?:de\s?:|from\s?:|-{2,}\s?(?:message d'origine|original message)"
+    r"|le .{4,80} a [ée]crit\s?:|envoy[ée]\s?:|on .{4,80} wrote\s?:)",
+)
+# Corps aplati (Graph text sans sauts de ligne) : marqueurs à casse STRICTE
+# pour ne pas couper sur du « de : » de prose française.
+_QUOTED_MARKERS_INLINE = re.compile(
+    r"\s(?:De\s?:\s|From\s?:\s|Envoy[ée]\s?:\s|-{2,}\s?Message d'origine)",
+)
+
+
+def strip_quoted_reply(text: str) -> str:
+    """Ne garde que la partie écrite par l'expéditeur (coupe le fil cité)."""
+    if not text:
+        return ""
+    cut = len(text)
+    m = _QUOTED_MARKERS.search(text)
+    if m:
+        cut = min(cut, m.start())
+    m2 = _QUOTED_MARKERS_INLINE.search(text)
+    if m2:
+        cut = min(cut, m2.start())
+    stripped = text[:cut]
+    # Filet : si le marqueur ouvre le message (transfert), garder l'original
+    return stripped if stripped.strip() else text
+
+
 def _any_match(text: str, patterns: list[str]) -> bool:
     """True si au moins un pattern matche text (case-insensitive)."""
     text_lower = text.lower()
@@ -88,16 +133,23 @@ def classify_intent(text: str) -> Intent:
 
     Ordre de priorité (le premier qui matche gagne) :
     1. OPT_OUT (priorité absolue — désinscription)
-    2. RDV_REQUEST (signal d'achat fort)
-    3. OBJECTION
-    4. TECHNICAL_QUESTION
-    5. OFF_TOPIC (par défaut)
+    2. WRONG_FIT (activité incompatible — avant RDV : un refus net prime)
+    3. RDV_REQUEST (signal d'achat fort)
+    4. OBJECTION
+    5. TECHNICAL_QUESTION
+    6. OFF_TOPIC (par défaut)
+
+    Seule la partie écrite par l'expéditeur est analysée — le fil cité
+    (notre propre cold mail) est coupé (bug rdv_request du 31/08).
     """
     if not text or not text.strip():
         return Intent.OFF_TOPIC
+    text = strip_quoted_reply(text)
 
     if _any_match(text, _PATTERNS_OPT_OUT):
         return Intent.OPT_OUT
+    if _any_match(text, _PATTERNS_WRONG_FIT):
+        return Intent.WRONG_FIT
     if _any_match(text, _PATTERNS_RDV):
         return Intent.RDV_REQUEST
     if _any_match(text, _PATTERNS_OBJECTION):

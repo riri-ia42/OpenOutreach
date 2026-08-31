@@ -912,6 +912,21 @@ def email_reply_action(request, pk: int):
                 import logging
                 logging.exception("CorrectionExample (email reply) creation failed")
 
+        # Sortie de prospection à l'approbation (capture Richard 31/08) :
+        # case pré-cochée pour wrong_fit/opt_out. La réponse approuvée part
+        # quand même (le sender des replies ne filtre pas les disqualifiés).
+        if request.POST.get("sortir_prospect"):
+            from ekoalu.sorties.service import sortir_prospect
+            label = sortir_prospect(
+                pr.prospect_public_id,
+                reason=f"Réponse « {pr.intent} » — sorti à l'approbation de la réponse",
+            )
+            django_messages.warning(
+                request,
+                f"🚫 {label or pr.prospect_public_id} sorti(e) de la prospection "
+                "(la réponse approuvée partira quand même).",
+            )
+
         django_messages.success(
             request,
             f"Réponse #{pr.pk} approuvée — sera envoyée au prochain "

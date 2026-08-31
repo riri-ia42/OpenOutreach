@@ -86,6 +86,12 @@ _INTENT_GUIDANCE = {
         "'C'est noté, je vous retire de notre base, plus aucune relance de notre "
         "part. Bonne continuation.' Puis la clôture habituelle."
     ),
+    Intent.WRONG_FIT: (
+        "Le prospect indique que son activité n'a pas de rapport avec les "
+        "menuiseries (ex : 'nous faisons exclusivement des revêtements de sols'). "
+        "Sortie polie en UNE phrase : tu as compris son activité (la nommer), tu "
+        "ne poursuis pas. AUCUN lien RDV, AUCUNE relance, AUCUN argumentaire."
+    ),
 }
 
 

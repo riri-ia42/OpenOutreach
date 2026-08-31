@@ -184,18 +184,53 @@ class Command(BaseCommand):
                 "disqualifie": lead.disqualified,
             }
 
+        # Statuts des leads MAIL-ONLY (bdd-prospect/mailjet-hot/referral) —
+        # capture Richard 31/08 : « l'app réactualise-t-elle la bdd ? » Elle le
+        # fait désormais : exclude (disqualifié/désinscrit) > responded (a
+        # répondu) > contacted (cold mail envoyé). Appliqué par l'import
+        # antichambre sur Contact.prospectionIaStatus (clé email).
+        from ekoalu.inbox_assist.models import PendingReply
+        from ekoalu.outbound_validation.models import PendingOutbound
+
+        statuts_email: dict[str, str] = {}
+        mail_only = (
+            Lead.objects
+            .exclude(contact_email__isnull=True).exclude(contact_email="")
+            .filter(linkedin_url__startswith="https://bdd-prospect.local")
+            | Lead.objects
+            .exclude(contact_email__isnull=True).exclude(contact_email="")
+            .filter(linkedin_url__startswith="https://mailjet-hot.local")
+        )
+        responded = set(PendingReply.objects.values_list("prospect_public_id", flat=True))
+        contacted = set(
+            PendingOutbound.objects
+            .filter(kind="email_cold", status__in=("sent", "sending"))
+            .values_list("prospect_public_id", flat=True)
+        )
+        for lead in mail_only.iterator():
+            email = lead.contact_email.strip().lower()
+            if lead.disqualified or lead.unsubscribed_at:
+                statuts_email[email] = "exclude"
+            elif lead.public_identifier in responded:
+                statuts_email[email] = "responded"
+            elif lead.public_identifier in contacted:
+                statuts_email[email] = "contacted"
+
         payload = {
             "genere_le": timezone.localtime().isoformat(),
             "description": ("Profils LinkedIn remontés par prospection-ia "
                             "(export_linkedin_enrichment) — nom/poste/société/URL. "
                             "Consommé par l'import antichambre (nom/prenom/poste + linkedinUrl) "
-                            "et la boucle de découverte d'emails."),
+                            "et la boucle de découverte d'emails. "
+                            "statuts_email = statut de prospection des leads mail-only (clé email)."),
             "profils": profils,
+            "statuts_email": statuts_email,
         }
         self.stdout.write(
             f"Profils exportés : {len(profils)} (skip sans nom : {skipped})\n"
             f"SIREN : {reused} réutilisés, {new_siren} résolus ce run "
-            f"({api_calls} appels API), {no_siren} sans siren"
+            f"({api_calls} appels API), {no_siren} sans siren\n"
+            f"Statuts mail-only : {len(statuts_email)}"
         )
         if opts["dry_run"]:
             self.stdout.write("(dry-run : rien écrit)")

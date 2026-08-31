@@ -55,6 +55,14 @@
                           class="w-full text-sm border border-gray-300 rounded p-2 font-mono"
                           placeholder="Édite si besoin — vide = envoyer le brouillon IA tel quel"
                           >{{ pr.final_sent|default:pr.ai_draft }}</textarea>
+                <label class="inline-flex items-center gap-2 text-sm px-2 py-1 rounded
+                              {% if pr.intent == 'wrong_fit' or pr.intent == 'opt_out' %}bg-orange-50 border border-orange-200 text-orange-800{% else %}text-gray-600{% endif %}">
+                    <input type="checkbox" name="sortir_prospect" value="1"
+                           class="w-4 h-4 accent-orange-600"
+                           {% if pr.intent == 'wrong_fit' or pr.intent == 'opt_out' %}checked{% endif %}>
+                    🚫 Sortir ce prospect de la prospection à l'approbation
+                    (la réponse part quand même — cascade tous canaux + registre)
+                </label>
                 <div class="flex gap-2">
                     <button type="submit" name="action" value="approve"
                             class="px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700">
