@@ -171,15 +171,29 @@ def build_conformity_report(today=None) -> dict:
             ">= 1 si candidats", "",
         ))
 
-    # 5. Envois — messages approuvés bloqués depuis > 24h
+    # 5. Envois — la file approved DRAINE-t-elle ? Depuis les validations en
+    # masse (31/08 : 141 approuvés d'un coup = ~3 jours de quota), un message
+    # qui attend > 24h est NORMAL. Le vrai signal de panne : il reste des
+    # approuvés ET le dernier jour ouvré a envoyé bien moins que le quota.
     stuck_cutoff = now - timedelta(hours=APPROVED_STUCK_HOURS)
     stuck = PendingOutbound.objects.filter(
         status=OutboundStatus.APPROVED, approved_at__lt=stuck_cutoff,
     ).count()
+    from ekoalu.email_canal.quota import cold_mail_quota_for
+    prev_day = now.date() - timedelta(days=1)
+    while cold_mail_quota_for(prev_day) == 0:  # remonte au dernier jour actif
+        prev_day -= timedelta(days=1)
+    quota_prev = cold_mail_quota_for(prev_day)
+    sent_prev = PendingOutbound.objects.filter(
+        status=OutboundStatus.SENT,
+        sent_at__date=prev_day,
+    ).count()
+    draining = sent_prev >= max(1, int(quota_prev * 0.5))
     checks.append(_check(
-        "Envois", stuck == 0,
-        f"{stuck} message(s) approuvé(s) bloqué(s) > {APPROVED_STUCK_HOURS}h",
-        "0 bloqué",
+        "Envois", stuck == 0 or draining,
+        f"{stuck} approuvé(s) > {APPROVED_STUCK_HOURS}h — dernier jour actif "
+        f"({prev_day}) : {sent_prev} envoyé(s) / quota {quota_prev}",
+        "file qui draine (>= 50 % du quota) ou 0 en attente",
         "Vérifier le daemon (drain de la file approved), les caps quotidiens "
         "(EKOALU_DAILY_INVITE_CAP / MESSAGE_CAP) et la session LinkedIn "
         "(auth_watch, checkpoint).",
