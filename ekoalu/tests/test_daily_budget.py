@@ -158,6 +158,25 @@ class TestJitterJournalier:
         assert len(values) > 10  # pas un facteur fige
 
 
+class TestJoursOffTransMois:
+    def test_jours_off_jamais_consecutifs_trans_mois(self):
+        # Incident 31/08 : lundi 31/08 (tirage août) + mardi 01/09 (tirage
+        # septembre) = 2 jours morts consécutifs. La contrainte doit tenir
+        # à cheval sur les mois, pour tous les mois à venir.
+        import datetime as dt
+
+        from ekoalu.human_scheduler.budget import days_off_for_month
+        months = [(2026, m) for m in range(9, 13)] + [(2027, m) for m in range(1, 13)]
+        for year, month in months:
+            prev = (year, month - 1) if month > 1 else (year - 1, 12)
+            prev_offs = set(days_off_for_month(*prev))
+            for d in days_off_for_month(year, month):
+                for delta in (-1, 1):
+                    assert d + dt.timedelta(days=delta) not in prev_offs, (
+                        f"{d} consécutif à un jour off de {prev}"
+                    )
+
+
 @pytest.mark.django_db
 class TestCapLecturesPondere:
     """Le cap lectures effectif = nominal x poids jour (point 1 audit)."""

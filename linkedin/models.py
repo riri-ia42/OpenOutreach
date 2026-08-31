@@ -279,10 +279,8 @@ class TaskQuerySet(models.QuerySet):
         if task_types is not None:
             qs = qs.filter(task_type__in=task_types)
         elif (quota := daily_connect_quota()) > 0 and self._connects_served_today() < quota:
-            connect_due = (
-                qs.filter(task_type=Task.TaskType.CONNECT)
-                .order_by("scheduled_at")
-                .first()
+            connect_due = self._richest_connect(
+                qs.filter(task_type=Task.TaskType.CONNECT),
             )
             if connect_due is not None:
                 return connect_due
@@ -297,6 +295,44 @@ class TaskQuerySet(models.QuerySet):
             .order_by("type_priority", "scheduled_at")
             .first()
         )
+
+    def _richest_connect(self, connects_qs) -> "Task | None":
+        """Parmi les connect DUES, sert d'abord la campagne la plus riche en
+        candidats qualifiables (embeddés, non disqualifiés, sans deal).
+
+        Incident 31/08 : la FIFO sur scheduled_at faisait tourner les ~120
+        campagnes ABM artisanales VIDES (créées 28/07) devant les campagnes à
+        réservoir (Alkern 135 candidats, Bateg 119, Vinci, Eiffage…) — à 12
+        connects/j, 8 jours ouvrés à 0 qualification, 0 deal, 0 invitation.
+        Une campagne vide coule naturellement en fin de file ; à richesse
+        égale (dont 0 partout), retour au FIFO scheduled_at.
+        """
+        due = list(connects_qs.order_by("scheduled_at")[:400])
+        if not due:
+            return None
+        campaign_ids = {
+            (t.payload or {}).get("campaign_id") for t in due
+        } - {None}
+        counts: dict[int, int] = {}
+        if campaign_ids:
+            from crm.models import Deal, Lead
+            from ekoalu.lead_routing.models import LeadDiscovery
+            leads_with_deal = Deal.objects.values("lead_id")
+            rows = (
+                LeadDiscovery.objects
+                .filter(
+                    campaign_id__in=campaign_ids,
+                    lead__embedding__isnull=False,
+                    lead__disqualified=False,
+                )
+                .exclude(lead_id__in=leads_with_deal)
+                .values_list("campaign_id", flat=True)
+            )
+            for cid in rows:
+                counts[cid] = counts.get(cid, 0) + 1
+        # max par richesse ; None/0 candidats = 0 → FIFO préservé entre eux
+        # (le tri Python est stable, `due` est déjà en ordre scheduled_at)
+        return max(due, key=lambda t: counts.get((t.payload or {}).get("campaign_id"), 0))
 
     def seconds_to_next(self) -> float | None:
         """Seconds until the next pending task, or None if queue is empty."""

@@ -38,6 +38,49 @@ def _mk_done_connect(n: int) -> None:
 
 
 @pytest.mark.django_db
+class TestRichesseCampagne:
+    """31/08 : parmi les connects dues, la campagne la plus RICHE en candidats
+    qualifiables passe d'abord (la FIFO faisait tourner ~120 ABM vides devant
+    les réservoirs → 8 jours ouvrés à 0 deal)."""
+
+    def _lead_candidat(self, campaign_id: int, slug: str):
+        from crm.models import Lead
+        from ekoalu.lead_routing.models import LeadDiscovery
+        from linkedin.models import Campaign
+        Campaign.objects.get_or_create(pk=campaign_id,
+                                       defaults={"name": f"EKOALU - test {campaign_id}"})
+        lead = Lead.objects.create(
+            linkedin_url=f"https://www.linkedin.com/in/{slug}",
+            public_identifier=slug,
+            embedding=b"\x00" * 4,
+        )
+        LeadDiscovery.objects.create(lead=lead, campaign_id=campaign_id)
+        return lead
+
+    def test_campagne_riche_servie_avant_fifo(self):
+        vide = _mk(Task.TaskType.CONNECT, minutes_ago=60, campaign_id=11)  # plus ancienne
+        riche = _mk(Task.TaskType.CONNECT, minutes_ago=5, campaign_id=22)
+        self._lead_candidat(22, "candidat-a")
+        self._lead_candidat(22, "candidat-b")
+        assert Task.objects.claim_next().pk == riche.pk
+        assert vide.pk != riche.pk
+
+    def test_candidat_avec_deal_ne_compte_pas(self):
+        from crm.models import Deal
+        ancienne = _mk(Task.TaskType.CONNECT, minutes_ago=60, campaign_id=11)
+        _mk(Task.TaskType.CONNECT, minutes_ago=5, campaign_id=22)
+        lead = self._lead_candidat(22, "candidat-c")
+        Deal.objects.create(lead=lead, campaign_id=22, state="Failed")
+        # le seul candidat de 22 a déjà un deal → richesses égales (0) → FIFO
+        assert Task.objects.claim_next().pk == ancienne.pk
+
+    def test_toutes_vides_fifo_conserve(self):
+        ancienne = _mk(Task.TaskType.CONNECT, minutes_ago=60, campaign_id=11)
+        _mk(Task.TaskType.CONNECT, minutes_ago=5, campaign_id=22)
+        assert Task.objects.claim_next().pk == ancienne.pk
+
+
+@pytest.mark.django_db
 class TestQuotaConnect:
     """15/07 : plancher quotidien de connects servies, prioritaire sur LOT C."""
 

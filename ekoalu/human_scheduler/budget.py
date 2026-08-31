@@ -82,7 +82,10 @@ def _days_off_enabled() -> bool:
 
 def days_off_for_month(year: int, month: int) -> tuple[dt.date, ...]:
     """Jours off aléatoires du mois : 1 à RANDOM_DAYS_OFF_PER_MONTH jours
-    OUVRÉS (lundi-vendredi), jamais 2 consécutifs, tirage déterministe."""
+    OUVRÉS (lundi-vendredi), jamais 2 consécutifs — Y COMPRIS à cheval sur
+    deux mois (incident 31/08 : lundi 31/08 tiré pour août + mardi 01/09 tiré
+    pour septembre = 2 jours morts consécutifs, la règle ne regardait que le
+    mois courant), tirage déterministe."""
     rng = _seeded_rng(f"days-off:{year:04d}-{month:02d}")
     last_day = calendar.monthrange(year, month)[1]
     workdays = [
@@ -90,11 +93,22 @@ def days_off_for_month(year: int, month: int) -> tuple[dt.date, ...]:
         for day in range(1, last_day + 1)
         if dt.date(year, month, day).weekday() < 5
     ]
+    # Jours off du mois PRÉCÉDENT proches de la frontière (mêmes seeds,
+    # récursion bornée à 1 niveau : on ne regarde que le tirage brut du mois
+    # d'avant, lui-même contraint par son propre mois d'avant, etc. — la
+    # chaîne est déterministe car chaque mois n'inspecte que le passé).
+    prev_year, prev_month = (year, month - 1) if month > 1 else (year - 1, 12)
+    boundary = {
+        d for d in days_off_for_month(prev_year, prev_month)
+        if (dt.date(year, month, 1) - d).days <= 3
+    } if (year, month) > (2026, 8) else set()
     count = rng.randint(1, max(1, conf.RANDOM_DAYS_OFF_PER_MONTH))
     picked: list[dt.date] = []
     for candidate in rng.sample(workdays, len(workdays)):
         if any(abs((candidate - p).days) <= 1 for p in picked):
-            continue  # jamais 2 jours off consécutifs
+            continue  # jamais 2 jours off consécutifs (intra-mois)
+        if any(abs((candidate - p).days) <= 1 for p in boundary):
+            continue  # ni collé à un jour off de fin de mois précédent
         picked.append(candidate)
         if len(picked) >= count:
             break
