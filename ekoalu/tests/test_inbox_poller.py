@@ -203,6 +203,105 @@ class TestProcessMessage:
         assert result == "no_lead_match"
 
 
+# --- Fallback réponse d'un collègue (même domaine pro) -----------------------
+
+
+def _sent_cold(lead, *, sent_at=None):
+    from django.utils import timezone
+
+    from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+    po = PendingOutbound.objects.create(
+        prospect_public_id=lead.public_identifier,
+        kind=OutboundKind.EMAIL_COLD,
+        status=OutboundStatus.SENT,
+        ai_draft="cold",
+        sent_at=sent_at or timezone.now(),
+    )
+    return po
+
+
+class TestColleagueReply:
+    """Cas réel 01/09 : cold mail à j.bondoux@bastide-bondoux.fr, réponse de
+    t.perrin@bastide-bondoux.fr — sans fallback domaine, la réponse était
+    invisible du dashboard (no_lead_match)."""
+
+    def test_collegue_meme_domaine_rattache_au_lead(self, make_lead_email, monkeypatch, fake_reply):
+        lead = make_lead_email(email="j.bondoux@bastide-bondoux.fr", siren="10")
+        _sent_cold(lead)
+        captured = {}
+
+        def _gen(**kw):
+            captured.update(kw)
+            return fake_reply
+
+        monkeypatch.setattr("ekoalu.email_canal.inbox_poller.generate_email_reply", _gen)
+        msg = _msg(id="col-1", from_email="t.perrin@bastide-bondoux.fr")
+        msg["from_name"] = "Thierry Perrin"
+        result = process_message(msg)
+        assert result == "draft_created"
+        pr = PendingReply.objects.get(inbound_message_id="col-1")
+        assert pr.prospect_public_id == lead.public_identifier
+        assert pr.sender_email == "t.perrin@bastide-bondoux.fr"
+        # Le brouillon s'adresse au RÉPONDANT, pas au dirigeant d'origine
+        assert captured["dirigeant"] == "Thierry Perrin"
+
+    def test_domaine_sans_cold_envoye_ignore(self, make_lead_email, monkeypatch):
+        """Même domaine mais aucun cold SENT = courrier normal, pas une réponse."""
+        make_lead_email(email="j.bondoux@bastide-bondoux.fr", siren="10")
+        monkeypatch.setattr(
+            "ekoalu.email_canal.inbox_poller.generate_email_reply",
+            lambda **kw: pytest.fail("ne doit pas être appelé"),
+        )
+        result = process_message(_msg(id="col-2", from_email="t.perrin@bastide-bondoux.fr"))
+        assert result == "no_lead_match"
+
+    def test_webmail_jamais_rattache_par_domaine(self, make_lead_email, monkeypatch):
+        """Sur gmail/wanadoo, partager le domaine ne prouve RIEN."""
+        lead = make_lead_email(email="entreprise.bat@gmail.com", siren="11")
+        _sent_cold(lead)
+        monkeypatch.setattr(
+            "ekoalu.email_canal.inbox_poller.generate_email_reply",
+            lambda **kw: pytest.fail("ne doit pas être appelé"),
+        )
+        result = process_message(_msg(id="col-3", from_email="autre.personne@gmail.com"))
+        assert result == "no_lead_match"
+
+    def test_multi_leads_meme_domaine_prend_le_plus_recent(self, make_lead_email, monkeypatch, fake_reply):
+        import datetime as dt
+
+        from django.utils import timezone
+
+        old = make_lead_email(email="a.ancien@acme.fr", siren="12")
+        recent = make_lead_email(email="b.recent@acme.fr", siren="13")
+        _sent_cold(old, sent_at=timezone.now() - dt.timedelta(days=30))
+        _sent_cold(recent, sent_at=timezone.now() - dt.timedelta(days=2))
+        monkeypatch.setattr(
+            "ekoalu.email_canal.inbox_poller.generate_email_reply",
+            lambda **kw: fake_reply,
+        )
+        result = process_message(_msg(id="col-4", from_email="collegue@acme.fr"))
+        assert result == "draft_created"
+        pr = PendingReply.objects.get(inbound_message_id="col-4")
+        assert pr.prospect_public_id == recent.public_identifier
+
+    def test_match_exact_prime_sur_le_domaine(self, make_lead_email, monkeypatch, fake_reply):
+        """Si l'expéditeur EST un lead, pas de fallback — dirigeant d'origine conservé."""
+        lead = make_lead_email(email="j.bondoux@bastide-bondoux.fr", siren="10",
+                               dirigeant="JACQUES BONDOUX")
+        _sent_cold(lead)
+        captured = {}
+
+        def _gen(**kw):
+            captured.update(kw)
+            return fake_reply
+
+        monkeypatch.setattr("ekoalu.email_canal.inbox_poller.generate_email_reply", _gen)
+        result = process_message(_msg(id="col-5", from_email="j.bondoux@bastide-bondoux.fr"))
+        assert result == "draft_created"
+        assert captured["dirigeant"] == "JACQUES BONDOUX"
+
+
 # --- poll_inbox --------------------------------------------------------------
 
 

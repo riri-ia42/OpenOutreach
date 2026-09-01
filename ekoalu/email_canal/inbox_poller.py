@@ -42,6 +42,39 @@ def _lookup_lead_by_email(email: str):
     return Lead.objects.filter(contact_email__iexact=email).first()
 
 
+def _lookup_lead_by_domain(sender: str):
+    """Fallback COLLÈGUE : on écrit au dirigeant, un collègue répond.
+
+    Cas réel (01/09, Bastide Bondoux) : cold mail à j.bondoux@, réponse de
+    t.perrin@ — même domaine, autre personne → le match exact échoue et la
+    réponse disparaissait du dashboard. On rattache au lead du même domaine
+    PRO (jamais un webmail : sur gmail/wanadoo le domaine ne prouve rien)
+    ayant reçu le cold mail SENT le plus récent — sans cold envoyé au
+    domaine, pas de rattachement (le mail est un courrier normal).
+    """
+    from crm.models import Lead
+    from ekoalu.influence_enrich import email_domain, is_company_domain
+    from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
+
+    domain = email_domain(sender)
+    if not is_company_domain(domain):
+        return None
+    leads = {
+        lead.public_identifier: lead
+        for lead in Lead.objects.filter(contact_email__iendswith="@" + domain)
+    }
+    if not leads:
+        return None
+    last_cold = (
+        PendingOutbound.objects.filter(
+            prospect_public_id__in=leads.keys(),
+            kind=OutboundKind.EMAIL_COLD,
+            status=OutboundStatus.SENT,
+        ).order_by("-sent_at").first()
+    )
+    return leads.get(last_cold.prospect_public_id) if last_cold else None
+
+
 def _cold_variant_for(lead) -> str:
     """Variante du dernier cold mail envoyé à ce prospect (brique K, A/B).
 
@@ -122,8 +155,14 @@ def process_message(msg: dict, *, generate_draft=True) -> str:
         return "self_skipped"
 
     lead = _lookup_lead_by_email(sender)
+    colleague_reply = False
     if not lead:
-        return "no_lead_match"
+        lead = _lookup_lead_by_domain(sender)
+        if not lead:
+            return "no_lead_match"
+        colleague_reply = True
+        logger.info("Message %s : expéditeur %s rattaché par DOMAINE au lead %s "
+                    "(réponse d'un collègue)", msg_id, sender, lead.public_identifier)
 
     # Récupère le contexte enrichi si disponible (EmailLeadData)
     entreprise = ""
@@ -134,6 +173,12 @@ def process_message(msg: dict, *, generate_draft=True) -> str:
         dirigeant = data.dirigeant
     except Exception:  # noqa: BLE001 — pas d'EmailLeadData, on continue
         pass
+
+    # Réponse d'un collègue : le brouillon s'adresse au RÉPONDANT, jamais au
+    # dirigeant du lead d'origine (sinon on salue M. Bondoux en écrivant à
+    # M. Perrin — même famille d'incident que la garde de salutation du 28/08).
+    if colleague_reply:
+        dirigeant = (msg.get("from_name") or "").strip()
 
     body_text = msg.get("body_text", "") or ""
     intent = classify_intent(body_text)
