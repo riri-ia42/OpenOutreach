@@ -95,7 +95,8 @@ def extract_facts(text: str, *, context: str = "") -> list[str]:
         get_llm_model(),
         system_prompt=system,
         output_type=FactList,
-        model_settings={"temperature": 0.0, "timeout": 60},
+        # claude-sonnet-5 rejette temperature (400 invalid_request_error)
+        model_settings={"timeout": 60},
     )
     result: FactList = agent.run_sync(text).output
     return list(result.facts)
@@ -247,7 +248,8 @@ def _request_memory_actions(existing: list[str], new_facts: list[str]) -> list[_
     agent = Agent(
         get_llm_model(),
         system_prompt=DEFAULT_UPDATE_MEMORY_PROMPT,
-        model_settings={"temperature": 0.0, "timeout": 60},
+        # claude-sonnet-5 rejette temperature (400 invalid_request_error)
+        model_settings={"timeout": 60},
     )
     text = agent.run_sync(variable_part).output
     return _ReconcileResponse.model_validate(_parse_memory_response(text)).memory

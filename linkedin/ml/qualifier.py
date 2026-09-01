@@ -139,7 +139,8 @@ def qualify_with_llm(profile_text: str, product_docs: str, campaign_objective: s
         model or get_llm_model(),
         output_type=QualificationDecision,
         system_prompt=system_prompt,
-        model_settings={"temperature": 0.7, "timeout": 60},
+        # claude-sonnet-5 rejette temperature (400 invalid_request_error)
+        model_settings={"timeout": 60},
     )
     decision = agent.run_sync(user_prompt).output
 

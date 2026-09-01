@@ -203,7 +203,8 @@ def run_follow_up_agent(session, deal) -> FollowUpDecision:
         get_llm_model(),
         system_prompt=_render_system_prompt(session, deal),
         output_type=FollowUpDecision,
-        model_settings={"temperature": 0.7, "timeout": 60},
+        # claude-sonnet-5 rejette temperature (400 invalid_request_error)
+        model_settings={"timeout": 60},
     )
     decision = agent.run_sync(_render_user_prompt(deal, recent)).output
     if decision is None:

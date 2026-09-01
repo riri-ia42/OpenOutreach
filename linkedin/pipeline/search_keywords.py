@@ -44,7 +44,8 @@ def generate_search_keywords(
     agent = Agent(
         get_llm_model(),
         output_type=SearchKeywords,
-        model_settings={"temperature": 0.9},
+        # claude-sonnet-5 rejette temperature (400) — la diversité vient du prompt
+        model_settings={"timeout": 60},
     )
     result = agent.run_sync(prompt).output
 
