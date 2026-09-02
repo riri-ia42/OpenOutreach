@@ -75,6 +75,24 @@ def map_record(record: dict) -> dict | None:
         return None
 
     experience = _as_dict_list(record.get("experience"))
+    positions = [_map_position(p) for p in experience]
+    # Profils pauvres (confirmé au smoke réel 02/09 : david-cantais, 28 relations,
+    # experience=null) : current_company porte quand même l'entreprise courante —
+    # on synthétise une position pour que l'embedding/le tri LLM la voient.
+    if not positions:
+        company = record.get("current_company")
+        company_name = _first(record, "current_company_name") or (
+            company.get("name") if isinstance(company, dict) else None)
+        if company_name:
+            positions.append({
+                "title": _first(record, "position"),
+                "company_name": company_name,
+                "company_urn": None,
+                "location": None,
+                "date_range": None,
+                "description": None,
+                "urn": None,
+            })
     full_name = _first(record, "name", "full_name")
     names = (full_name or "").split(None, 1)
     return {
@@ -92,7 +110,7 @@ def map_record(record: dict) -> dict | None:
         "industry": None,
         "country_code": _first(record, "country_code"),
         "supported_locales": [],
-        "positions": [_map_position(p) for p in experience],
+        "positions": positions,
         "educations": [_map_education(e) for e in _as_dict_list(record.get("education"))],
         "connection_distance": None,
         "connection_degree": None,

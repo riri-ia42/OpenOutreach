@@ -37,6 +37,24 @@ class TestMapper:
         assert snap["positions"][0]["company_name"] == "Vinci Construction"
         assert snap["educations"][0]["school_name"] == "INSA Lyon"
 
+    def test_profil_pauvre_current_company_synthetise_position(self):
+        """Smoke réel 02/09 (david-cantais, 28 relations) : experience=null mais
+        current_company présent — l'entreprise doit atteindre l'embedding."""
+        snap = map_record({
+            "url": "https://www.linkedin.com/in/david-cantais-426345248",
+            "name": "david cantais",
+            "position": None,
+            "experience": None,
+            "current_company": {"name": "GSE Intégration", "location": None},
+            "current_company_name": "GSE Intégration",
+            "city": "Yvetot, Normandy, France",
+            "country_code": "FR",
+        })
+        assert snap["positions"] == [{
+            "title": None, "company_name": "GSE Intégration", "company_urn": None,
+            "location": None, "date_range": None, "description": None, "urn": None,
+        }]
+
     def test_item_erreur_ignore(self):
         assert map_record({"error": "crawl failed", "url": "x"}) is None
 
