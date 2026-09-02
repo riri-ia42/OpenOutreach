@@ -56,6 +56,28 @@ HEARTBEAT_SLICE = 60      # wake every minute during long sleeps
 # task check_pending). Le comportement « file vide → reconcile » est conservé.
 RECONCILE_INTERVAL_SECONDS = 30 * 60
 
+# Fiche #36 (02/09) : une erreur LLM n'arrête plus le daemon sauf si la config
+# est morte (auth). La panne du 25/08 (400 « temperature ») a arrêté le daemon
+# 47 fois et emporté les étages SANS LLM (connects, drain de la file) 6 jours.
+LLM_ERROR_STREAK_ALERT = 5  # au-delà : événement severity=error au hub
+
+
+def llm_error_action(status: int | None) -> str:
+    """Décide la réaction à un ModelHTTPError selon le code HTTP.
+
+    401/403 → "stop"     : la config est morte (clé invalide), insister ne sert
+                           à rien.
+    429/5xx → "backoff"  : transitoire, on temporise puis on continue.
+    autre   → "continue" : un 400 est une erreur de REQUÊTE (paramètre refusé) ;
+                           elle se répétera à l'identique mais ne doit pas
+                           emporter les étages qui n'utilisent pas le LLM.
+    """
+    if status in (401, 403):
+        return "stop"
+    if status == 429 or (status is not None and status >= 500):
+        return "backoff"
+    return "continue"
+
 
 # ── Cloud promo ──────────────────────────────────────────────────────
 
@@ -365,6 +387,7 @@ def run_daemon(session):
     cloud_promo = _CloudPromoRotator(interval=60)
     heartbeat = Heartbeat()
     rhythm = _HumanRhythmBreak(heartbeat)
+    llm_error_streak = 0  # erreurs LLM consécutives (fiche #36)
 
     # LOT C : reconcile au démarrage — récupère les RUNNING stale (crash
     # précédent) et recrée les tasks manquantes SANS attendre que la file se
@@ -565,17 +588,38 @@ def run_daemon(session):
             continue
         except ModelHTTPError as e:
             task.mark_failed()
+            status = getattr(e, "status_code", None)
+            action = llm_error_action(status)
+            if action == "stop":
+                logger.error(
+                    colored("Daemon stopped — LLM auth error", "red", attrs=["bold"])
+                    + " (HTTP %s)\n%s\nCheck llm_provider, ai_model, llm_api_key,"
+                    + " and llm_api_base in Admin → Site Configuration.", status, e,
+                )
+                return
+            llm_error_streak += 1
             logger.error(
-                colored("Daemon stopped — LLM API error", "red", attrs=["bold"])
-                + "\n%s\nCheck llm_provider, ai_model, llm_api_key, and llm_api_base in Admin → Site Configuration.", e,
+                "LLM API error (HTTP %s) sur %s — task en échec, le daemon continue"
+                " (connects/drain/check_pending restent actifs)\n%s", status, task, e,
             )
-            return
+            if llm_error_streak % LLM_ERROR_STREAK_ALERT == 0:
+                from ekoalu.notifications.hub_events import post_event
+                post_event(
+                    "prospection.llm_erreurs", "error",
+                    f"{llm_error_streak} erreurs LLM consécutives (HTTP {status})"
+                    " — vérifier modèle/paramètres dans Site Configuration",
+                    payload={"derniere_erreur": str(e)[:500]},
+                )
+            if action == "backoff":
+                sleep_with_heartbeat(120, heartbeat, f"backoff LLM (HTTP {status})")
+            continue
         except Exception:
             task.mark_failed()
             logger.exception("Task %s failed", task)
             continue
 
         task.mark_completed()
+        llm_error_streak = 0
         from ekoalu import auth_watch
         auth_watch.reset()
         cloud_promo.maybe_log()

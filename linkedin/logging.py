@@ -64,11 +64,28 @@ SILENCED_LOGGERS = (
 )
 
 
+def force_utf8(stream) -> bool:
+    """Reconfigure un stream texte en UTF-8 avec errors="replace".
+
+    Fiche #36 (02/09) : sous Windows, stdout redirigé vers daemon.log est en
+    cp1252 — toute ligne contenant une flèche (→, ▶) levait UnicodeEncodeError
+    et devenait un bloc « --- Logging error --- » : le message d'alerte
+    « Daemon stopped » de la panne du 25/08 n'a jamais été écrit en clair.
+    Retourne True si la reconfiguration a pris.
+    """
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+        return True
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def configure_logging(level: int = logging.DEBUG):
     """Configure root logger with colored output and silence noisy libraries."""
     root = logging.getLogger()
     root.handlers.clear()
 
+    force_utf8(sys.stdout)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(ColoredFormatter("%(message)s"))
     handler.setLevel(level)
