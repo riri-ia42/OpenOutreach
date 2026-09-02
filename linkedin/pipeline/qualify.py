@@ -72,16 +72,15 @@ def _urlonly_embed_per_cycle() -> int:
 def _embed_urlonly_leads(session, lead_ids) -> None:
     """Embed up to N URL-only leads of the campaign.
 
-    Apify-first (câblage 07/07) : quand Apify est prêt (token configuré,
-    kill-switch EKOALU_APIFY_ENRICH non posé, plafond quotidien non atteint),
-    le snapshot + l'embedding viennent d'un fetch cookieless — ZÉRO lecture
-    Voyager, le cap read_guard n'est pas consommé (on ne passe pas par
-    get_profile/get_embedding patchés). Repli Voyager (chemin historique,
-    1 lecture compte) sur échec Apify ; comportement d'origine inchangé si
-    Apify non configuré.
+    Chaîne cookieless d'abord (02/09, décision Richard) : Bright Data →
+    Apify → mini-fiche SERP (cf. ekoalu/enrichment_chain.py) — ZÉRO lecture
+    Voyager, le cap read_guard n'est pas consommé. Repli Voyager (chemin
+    historique, 1 lecture compte) seulement si TOUTE la chaîne a échoué ;
+    comportement d'origine inchangé si aucun fournisseur n'est configuré et
+    qu'aucune SerpMeta n'existe.
     """
     from crm.models import Lead
-    from ekoalu.apify_enrich import service as apify_service
+    from ekoalu.enrichment_chain import enrich_lead_cookieless
     from ekoalu.read_guard.guard import ReadCapExceededError
     from linkedin.conf import CAMPAIGN_CONFIG
 
@@ -92,10 +91,9 @@ def _embed_urlonly_leads(session, lead_ids) -> None:
         Lead.objects.filter(pk__in=lead_ids, embedding__isnull=True)
         .order_by("creation_date")[:limit]
     )
-    apify_first = apify_service.apify_ready()
     voyager_reads = 0
     for lead in pending:
-        if apify_first and apify_service.enrich_lead(lead):
+        if enrich_lead_cookieless(lead):
             continue  # snapshot + embedding posés sans toucher au compte
         if voyager_reads:
             # LOT C : même cadence que l'enrichissement search — jamais deux

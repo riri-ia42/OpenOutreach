@@ -54,9 +54,19 @@ class Command(BaseCommand):
             return
 
         now = timezone.now()
-        bounced = replaced = unknown = 0
+        bounced = replaced = unknown = skipped = 0
         for c in pending:
             email = (c.get("email") or "").lower()
+            if c.get("type") == "new_contact":
+                # Migration de messagerie (validé Richard 2026-09-01) : les nouveaux contacts
+                # sont créés dans l'antichambre (sas « a_valider ») et ajoutés à la liste de
+                # masse Mailjet. Ici un Lead représente une personne découverte via
+                # LinkedIn/DECP et exige linkedin_url + public_identifier : on n'en fabrique
+                # pas depuis une simple adresse. Marqué importé pour ne pas rester en attente.
+                skipped += 1
+                if not opts["dry_run"]:
+                    c["imported_by"] = [*(c.get("imported_by") or []), APP]
+                continue
             leads = list(Lead.objects.filter(contact_email__iexact=email))
             if not leads:
                 unknown += 1
@@ -84,5 +94,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(
             f"Import terminé : {bounced} bounce(s), {replaced} remplacée(s), "
+            f"{skipped} nouveau(x) contact(s) laissé(s) à l'antichambre, "
             f"{unknown} inconnue(s) du CRM (marquées importées)."
         ))

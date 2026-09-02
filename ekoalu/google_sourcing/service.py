@@ -59,6 +59,9 @@ class _Harvest:
     known_urls: list[str] = field(default_factory=list)
     seen: set[str] = field(default_factory=set)
     query_by_url: dict[str, str] = field(default_factory=dict)  # traçabilité
+    # 02/09 : title/snippet SERP conservés — mini-fiche gratuite (cf.
+    # snippet_profile.py), avant on les jetait après le pré-filtre.
+    meta_by_url: dict[str, dict] = field(default_factory=dict)
 
 
 def _lead_known(pid: str) -> bool:
@@ -171,6 +174,10 @@ def _classify_results(q: str, results: list[dict], harvest: _Harvest,
             continue
         harvest.seen.add(pid)
         harvest.query_by_url[u] = q
+        harvest.meta_by_url[u] = {
+            "title": (r.get("title") or "")[:300],
+            "snippet": r.get("snippet") or "",
+        }
         if _lead_known(pid):
             known_on_page += 1
             harvest.known_urls.append(u)
@@ -206,6 +213,14 @@ def _persist_harvest(campaign, harvest: _Harvest, result: SourcingResult,
             lead_id=lead.pk, campaign=campaign,
             defaults={"query": harvest.query_by_url.get(u, "")},
         )
+        meta = harvest.meta_by_url.get(u)
+        if meta and meta.get("title"):
+            from ekoalu.google_sourcing.models import SerpMeta
+
+            SerpMeta.objects.update_or_create(
+                lead=lead,
+                defaults={"title": meta["title"], "snippet": meta["snippet"]},
+            )
         if lead_created:
             result.new_leads += 1
         else:
