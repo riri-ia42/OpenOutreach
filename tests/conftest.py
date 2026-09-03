@@ -29,6 +29,18 @@ def _mock_embeddings(request):
 
 
 @pytest.fixture(autouse=True)
+def _no_provider_tokens(monkeypatch):
+    """Purge les tokens des fournisseurs d'enrichissement (03/09).
+
+    django_settings charge .env.production : le VRAI token Bright Data (et
+    Apify) arrivait dans les tests -> la chaine cookieless de
+    _embed_urlonly_leads faisait de VRAIS appels API pendant la suite.
+    """
+    for var in ("EKOALU_BRIGHTDATA_TOKEN", "EKOALU_APIFY_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_random_days_off(monkeypatch):
     """Desactive les jours off aleatoires LinkedIn (LOT E) pendant les tests.
 

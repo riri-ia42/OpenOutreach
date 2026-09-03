@@ -57,7 +57,7 @@ def _lead(pid, campaign, **kwargs):
 
 
 class TestChecks:
-    def test_apify_hs_ko_avec_correction(self):
+    def test_enrichissement_hs_ko_avec_correction(self):
         from ekoalu.apify_enrich.models import ApifyUsageDay
 
         today = _next_weekday_pair()
@@ -66,18 +66,29 @@ class TestChecks:
         _lead("backlog-1", camp)  # backlog non vide
 
         report = build_conformity_report(today=today)
-        c = _get(report, "Apify")
+        c = _get(report, "Enrichissement")
         assert c["ok"] is False
         assert "compte Apify" in c["correction"]
         assert report["conform"] is False
 
-    def test_apify_ok_si_taux_suffisant(self):
-        from ekoalu.apify_enrich.models import ApifyUsageDay
+    def test_enrichissement_ok_via_la_chaine(self):
+        """Depuis le 02/09 la vérité terrain = snapshots cookieless TOUTES
+        sources (le KO du 03/09 venait d'un contrôle qui ne comptait
+        qu'Apify alors que Bright Data avait enrichi 40/40)."""
+        from datetime import datetime
 
         today = _next_weekday_pair()
-        ApifyUsageDay.objects.create(date=today, count=38, failed=2)
+        stamp = timezone.make_aware(datetime.combine(today, datetime.min.time().replace(hour=8)))
+        camp = _campaign()
+        lead = _lead("enrichi-bd-1", camp)
+        lead.profile_snapshot = {"source": "brightdata", "headline": "x"}
+        lead.profile_snapshot_at = stamp
+        lead.embedding = b"\x00" * 4
+        lead.save()
         report = build_conformity_report(today=today)
-        assert _get(report, "Apify")["ok"] is True
+        c = _get(report, "Enrichissement")
+        assert c["ok"] is True  # backlog vide -> attendu min(8, 0) = 0
+        assert "brightdata 1" in c["measured"]
 
     def test_sourcing_faible_ko_avec_correction(self):
         today = _next_weekday_pair()
@@ -133,7 +144,7 @@ class TestChecks:
         while d.weekday() != 6:  # dimanche
             d += timedelta(days=1)
         report = build_conformity_report(today=d)
-        assert _get(report, "Apify")["skipped"] is True
+        assert _get(report, "Enrichissement")["skipped"] is True
         assert _get(report, "Sourcing")["skipped"] is True
 
     def test_toutes_non_conformites_ont_une_correction(self):

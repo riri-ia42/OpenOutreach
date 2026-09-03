@@ -59,6 +59,19 @@ def _isolate_apify_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_brightdata_env(monkeypatch):
+    """Purge l'env Bright Data (03/09) : django_settings charge .env.production,
+    donc le VRAI token arrivait dans les tests -> la chaine d'enrichissement
+    faisait de VRAIS appels API Bright Data pendant la suite (quota consomme,
+    polling 10s reels). Les tests Bright Data posent explicitement leur env."""
+    monkeypatch.delenv("EKOALU_BRIGHTDATA_TOKEN", raising=False)
+    monkeypatch.delenv("EKOALU_BRIGHTDATA_DATASET", raising=False)
+    monkeypatch.delenv("EKOALU_BRIGHTDATA_ENRICH", raising=False)
+    monkeypatch.delenv("EKOALU_BRIGHTDATA_MONTHLY_CAP", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_shared_exclusions(tmp_path_factory, monkeypatch):
     """Pointe la liste d'exclusion partagee vers un fichier absent + purge le
     cache TTL — sinon les tests liraient le VRAI _partage/exclusions.json

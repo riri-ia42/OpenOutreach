@@ -72,35 +72,44 @@ def build_conformity_report(today=None) -> dict:
     y_start, y_end = _day_bounds(yesterday)
     checks: list[dict] = []
 
-    # 1. Apify (aujourd'hui) — après la tâche 7h30. Mesure = vérité terrain
-    # (snapshots source=apify réellement posés), pas le compteur (le
-    # disjoncteur free-tier le sature volontairement après la limite 10/j).
+    # 1. Enrichissement cookieless (aujourd'hui) — après la tâche 7h30.
+    # Depuis le 02/09 la CHAÎNE (Bright Data → Apify → mini-fiche SERP) fait
+    # le travail : compter les seuls snapshots Apify rendait le contrôle
+    # aveugle (KO du 03/09 alors que Bright Data avait enrichi 40/40).
+    # Mesure = vérité terrain : snapshots cookieless réellement posés du jour,
+    # toutes sources confondues.
     apify_row = ApifyUsageDay.objects.filter(date=today).first()
     failed = getattr(apify_row, "failed", 0) if apify_row else 0
-    enriched_today = Lead.objects.filter(
-        profile_snapshot_at__gte=today_start,
-        profile_snapshot__source="apify",
-    ).count()
+    by_source = {
+        src: Lead.objects.filter(
+            profile_snapshot_at__gte=today_start,
+            profile_snapshot__source=src,
+        ).count()
+        for src in ("brightdata", "apify", "serper_snippet")
+    }
+    enriched_today = sum(by_source.values())
     backlog = len(apify_service.candidate_leads(APIFY_MIN_ENRICHED))
     expected_min = min(APIFY_MIN_ENRICHED, backlog)
+    detail_sources = ", ".join(f"{src} {n}" for src, n in by_source.items() if n)
     if not _is_working_day(today):
-        checks.append(_check("Apify", True, "week-end", "-", "", skipped=True))
+        checks.append(_check("Enrichissement", True, "week-end", "-", "", skipped=True))
     elif enriched_today == 0 and failed == 0 and backlog > 0:
         checks.append(_check(
-            "Apify", False, "0 tentative (backlog non vide)",
+            "Enrichissement", False, "0 tentative (backlog non vide)",
             "la tâche 7h30 a tourné",
             "Vérifier la tâche planifiée EKOALU-Apify-Enrich (Task Scheduler), "
-            "le kill-switch EKOALU_APIFY_ENRICH et data/apify_enrich.log.",
+            "les kill-switches EKOALU_BRIGHTDATA_ENRICH / EKOALU_APIFY_ENRICH "
+            "et data/apify_enrich.log.",
         ))
     else:
         checks.append(_check(
-            "Apify", enriched_today >= expected_min,
-            f"{enriched_today} profil(s) enrichi(s), {failed} échec(s)",
-            f">= {expected_min} (limite free-tier apimaestro : 10/j)",
-            "Vérifier data/apify_enrich.log et le compte Apify (crédit 5 $/mois). "
-            "Si la limite free-tier bride (10 profils/j), options : plan Apify "
-            "Starter 29 $/mois, autre actor via EKOALU_APIFY_ACTOR, ou assumer "
-            "le repli Voyager (lectures sur le compte LinkedIn).",
+            "Enrichissement", enriched_today >= expected_min,
+            f"{enriched_today} profil(s) enrichi(s) ({detail_sources or 'aucune source'}), "
+            f"{failed} échec(s) Apify",
+            f">= {expected_min} via la chaîne cookieless",
+            "Vérifier data/apify_enrich.log, le quota Bright Data "
+            "(BrightdataUsageMonth, 4500/mois) et le compte Apify en secours. "
+            "Dernier recours assumé : repli Voyager (lectures compte LinkedIn).",
         ))
 
     # 2. Sourcing Serper (aujourd'hui) — après la rotation 7h
@@ -199,14 +208,22 @@ def build_conformity_report(today=None) -> dict:
         "(auth_watch, checkpoint).",
     ))
 
-    # 6. Backlog de tâches en retard
-    overdue = Task.objects.filter(
+    # 6. Backlog de tâches en retard — HORS connects (fix 03/09) : le reconcile
+    # sème volontairement 1 connect par campagne active (162 campagnes) et le
+    # quota n'en sert que 12/j → ~160 connects « en retard » est l'état NOMINAL
+    # du système, pas un engorgement (le KO tombait tous les jours pour rien).
+    # Le vrai signal de santé = relances (follow_up) et sondes (check_pending)
+    # en retard ; les connects restent affichés en information.
+    overdue_qs = Task.objects.filter(
         status=Task.Status.PENDING, scheduled_at__lt=today_start,
-    ).count()
+    )
+    overdue_connects = overdue_qs.filter(task_type=Task.TaskType.CONNECT).count()
+    overdue_real = overdue_qs.exclude(task_type=Task.TaskType.CONNECT).count()
     checks.append(_check(
-        "Backlog tâches", overdue < OVERDUE_TASKS_MAX,
-        f"{overdue} tâches en retard",
-        f"< {OVERDUE_TASKS_MAX}",
+        "Backlog tâches", overdue_real < OVERDUE_TASKS_MAX,
+        f"{overdue_real} relances/sondes en retard "
+        f"(+ {overdue_connects} connects semés, nominal au quota 12/j)",
+        f"< {OVERDUE_TASKS_MAX} hors connects",
         "File saturée : vider la file de validation (relances en attente), "
         "vérifier le débit du daemon et les caps ; voir analyse_semaine pour "
         "le détail par type.",
