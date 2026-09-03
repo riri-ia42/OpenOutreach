@@ -90,6 +90,12 @@
                                 {% else %}bg-gray-200 text-gray-700{% endif %}">
                                 {{ o.get_status_display }}
                             </span>
+                            {% if o.style_violations %}
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-semibold"
+                                  title="Le garde-fou de style a laissé passer ce message pour arbitrage : contient un mot banni par la bible commerciale.">
+                                ⚠ mot banni : {{ o.style_violations|join:", " }}
+                            </span>
+                            {% endif %}
                             <span class="font-semibold text-gray-900">{{ o.prospect_name|default:o.prospect_public_id }}</span>
                             {% if o.prospect_company_display %}
                             <span class="text-sm text-gray-700">· {{ o.prospect_company_display }}</span>
@@ -164,22 +170,20 @@
     <div class="max-w-7xl mx-auto flex items-center gap-3 flex-wrap">
         <span class="font-semibold"><span id="bulk-count">0</span> message(s) sélectionné(s)</span>
         {% if status_filter == 'pending' %}
+        {# Pas de confirm() : cocher + cliquer EST la confirmation (capture Richard 03/09). #}
         <button type="submit" name="bulk_action" value="bulk_approve"
-                onclick="return confirm('Approuver ' + document.getElementById('bulk-count').textContent + ' message(s) ?\nIls partiront au prochain cycle daemon.');"
                 class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded font-medium">
             ✓ Approuver tout
         </button>
         {% endif %}
         {% if status_filter == 'approved' %}
         <button type="submit" name="bulk_action" value="bulk_mark_sent"
-                onclick="return confirm('Marquer ' + document.getElementById('bulk-count').textContent + ' message(s) comme envoyés ?');"
                 class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium">
             Marquer envoyé
         </button>
         {% endif %}
         {% if status_filter == 'failed' %}
         <button type="submit" name="bulk_action" value="bulk_requeue"
-                onclick="return confirm('Remettre ' + document.getElementById('bulk-count').textContent + ' message(s) en file approuvés ?\nIls seront ré-envoyés au prochain cycle daemon.');"
                 class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium">
             ⟲ Remettre en file
         </button>

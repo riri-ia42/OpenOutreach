@@ -1533,6 +1533,12 @@ def outbound_list(request):
             .exclude(contact_email="")
             .values_list("public_identifier", "contact_email")
         )
+    # Badge violations de style (capture Richard 03/09) : le garde-fou laisse
+    # passer un message encore fautif après régénération (par design, arbitrage
+    # humain) mais l'UI ne le MONTRAIT pas — « synergies » approuvé sans le voir.
+    from ekoalu.message_validator.style_guard import find_style_violations
+
+    show_style = status_filter in ("pending", "approved", "")
     for o in items:
         d = deal_map.get((o.prospect_public_id, o.campaign_id))
         disp = resolve_prospect_display(o.prospect_public_id, deal=d, company_hint=o.prospect_company)
@@ -1541,6 +1547,9 @@ def outbound_list(request):
         o.prospect_location = disp["location"]
         o.prospect_job_title = disp["job_title"]
         o.prospect_email = email_map.get(o.prospect_public_id, "")
+        o.style_violations = (
+            find_style_violations(o.final_content or o.ai_draft) if show_style else []
+        )
 
     context = {
         "outbound_list": items,
