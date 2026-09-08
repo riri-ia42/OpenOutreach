@@ -82,6 +82,51 @@ BANNED_WORDS: list[str] = (
     + _AFFIRMATIONS_FAUSSES
 )
 
+# ── Signes typographiques IA (capture Richard 08/09 : « interdire les grands
+# traits et autres signes de l'IA », tous canaux). Richard n'écrit JAMAIS ces
+# signes lui-même : chacun trahit la génération. Le trait d'union simple "-",
+# les guillemets « » et les "..." restent autorisés (style Richard réel).
+_SIGNES_IA_SIMPLES: list[tuple[str, str]] = [
+    ("—", 'tiret cadratin "—" (remplacer par virgule, parenthèses ou point)'),
+    ("–", 'tiret demi-cadratin "–" (remplacer par virgule ou trait d\'union simple)'),
+    ("•", 'puce "•"'),
+    ("**", "gras markdown **"),
+    ("__", "soulignement markdown __"),
+    ("](", "lien markdown [texte](url)"),
+    ("`", "backtick markdown"),
+]
+
+# Puces / titres markdown en début de ligne ("- xxx", "* xxx", "# Titre").
+_SIGNES_IA_DEBUT_LIGNE = re.compile(r"^\s*(?:[-*]\s+\S|#{1,4}\s)", re.MULTILINE)
+
+# Émojis, pictogrammes, flèches, coches (✅ ⚠ ✓ → 🚀 …) — jamais dans un
+# message généré, quel que soit le canal (la tolérance 😊 du registre GIE ne
+# concerne que les mails que Richard écrit lui-même).
+_SIGNES_IA_UNICODE = re.compile(
+    "[←-⇿"    # flèches
+    "⌀-⏿"     # pictos techniques (⏰ ⌛ …)
+    "─-╿"     # traits de cadre ─ │ (grands traits horizontaux)
+    "☀-➿"     # symboles divers + dingbats (✅ ✓ ✗ ⚠ ☀ ✂ …)
+    "⬀-⯿"     # flèches et symboles additionnels (⬆ ⭐ …)
+    "\U0001f000-\U0001faff]"  # émojis
+)
+
+
+def find_ai_signs(text: str) -> list[str]:
+    """Signes typographiques IA détectés dans `text` (libellés lisibles)."""
+    if not text:
+        return []
+    found: list[str] = []
+    for needle, label in _SIGNES_IA_SIMPLES:
+        if needle in text:
+            found.append(label)
+    if _SIGNES_IA_DEBUT_LIGNE.search(text):
+        found.append("liste à puces / titre markdown en début de ligne")
+    m = _SIGNES_IA_UNICODE.search(text)
+    if m:
+        found.append(f'émoji ou pictogramme "{m.group(0)}"')
+    return found
+
 # Extra mots bannis via env (séparés par virgule)
 _extra = os.environ.get("EKOALU_EXTRA_BANNED_WORDS", "").strip()
 if _extra:

@@ -132,7 +132,13 @@ class TestJourOffBloqueLinkedInPasEmail:
 
         from ekoalu.human_scheduler import scheduler
         monkeypatch.setattr(scheduler, "_day_off_logged", None)
-        now = self._day_off_at_10h(monkeypatch)  # jour off futur, pas aujourd'hui
+        now = self._day_off_at_10h(monkeypatch)
+        # Force « aujourd'hui » = la veille du jour off : le jour scanné est
+        # alors FUTUR de façon déterministe. Sans ça, la suite échouait quand
+        # elle tournait un jour off réel (vécu le 08/09 : off tiré = 8 et 14).
+        fake_today = now - dt.timedelta(days=1)
+        monkeypatch.setattr(scheduler.timezone, "localtime",
+                            lambda *a, **k: fake_today)
         with caplog.at_level(logging.INFO, logger="ekoalu.human_scheduler.scheduler"):
             assert not scheduler.is_action_allowed_now(now)
         hits = [r for r in caplog.records if "jour off" in r.getMessage().lower()]

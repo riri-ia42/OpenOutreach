@@ -52,6 +52,9 @@ REGLES ABSOLUES :
   restant a votre disposition, dans l'attente, solutions cle en main.
 - Si tu connais le prenom, utilise-le (extrait du profil/historique). Sinon : "Bonjour,".
 - Pas de markdown, pas de guillemets autour du message.
+- TYPOGRAPHIE HUMAINE : jamais de tiret cadratin (—) ni demi-cadratin (–) —
+  utilise virgule, parentheses ou point. Jamais de puces, de gras, d'emojis ni
+  de fleches. Seuls le trait d'union simple et la ponctuation classique.
 - Ecris en francais.
 
 Tu reponds UNIQUEMENT par le texte du message complet (4 blocs separes par
@@ -84,6 +87,9 @@ REGLES ABSOLUES :
   restant a votre disposition, dans l'attente, solutions cle en main.
 - Jamais "Cordialement" (si une cloture est utile : "Bien a vous").
 - Pas de markdown, pas de guillemets autour du message. Ecris en francais.
+- TYPOGRAPHIE HUMAINE : jamais de tiret cadratin (—) ni demi-cadratin (–) —
+  utilise virgule, parentheses ou point. Jamais de puces, de gras, d'emojis ni
+  de fleches.
 
 Tu reponds UNIQUEMENT par le texte du message, rien d'autre.
 """

@@ -93,6 +93,9 @@ RÈGLES ABSOLUES :
   n'hésitez surtout pas, au plaisir d'échanger, restant à votre disposition,
   dans l'attente, dans l'optique de, à l'instar de.
 - Pas de markdown, pas de guillemets autour du corps.
+- TYPOGRAPHIE HUMAINE : jamais de tiret cadratin (—) ni demi-cadratin (–) —
+  utiliser virgule, parenthèses ou point. Jamais de puces, de gras, d'émojis ni
+  de flèches. Seuls le trait d'union simple et la ponctuation classique.
 - Écris en français, vouvoiement obligatoire.
 - Corps total : 8-12 lignes max (clôture comprise), aéré (1 ligne blanche entre blocs).
 - JAMAIS "Cordialement" ni "Bien cordialement" : la clôture est UNIQUEMENT celle du Bloc 5.

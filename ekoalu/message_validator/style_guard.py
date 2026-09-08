@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 
-from ekoalu.message_validator.banned_words import find_banned_words
+from ekoalu.message_validator.banned_words import find_ai_signs, find_banned_words
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +19,15 @@ _FORBIDDEN_CLOSING = re.compile(r"\bcordialement\b", re.IGNORECASE)
 
 
 def find_style_violations(text: str) -> list[str]:
-    """Liste des violations de la charte EKOALU dans `text` (vide si conforme)."""
+    """Liste des violations de la charte EKOALU dans `text` (vide si conforme).
+
+    Couvre les mots bannis (jargon, tournures, affirmations fausses), la
+    cloture "Cordialement" ET les signes typographiques IA (tiret cadratin,
+    puces, markdown, emojis — capture Richard 08/09 : bannis de TOUS les
+    canaux, Richard ne les ecrit jamais lui-meme).
+    """
     violations = list(find_banned_words(text))
+    violations += find_ai_signs(text)
     if _FORBIDDEN_CLOSING.search(text or ""):
         violations.append('cloture interdite "Cordialement" (charte : "Bien a vous")')
     return violations

@@ -41,6 +41,8 @@ CONTRAINTES GÉNÉRALES :
   passion, à l'écoute, permettez-moi, j'aurais le plaisir, n'hésitez surtout pas,
   au plaisir d'échanger, restant à votre disposition, dans l'attente.
 - JAMAIS "Cordialement" ni "Bien cordialement" (charte Richard).
+- TYPOGRAPHIE HUMAINE : jamais de tiret cadratin (—) ni demi-cadratin (–),
+  jamais de puces, de gras, d'émojis ni de flèches.
 - Termine EXACTEMENT par la clôture (rien d'autre après) :
 {signature_block}
 - JAMAIS de coordonnées (téléphone, adresse) dans le corps : le bloc coordonnées
