@@ -133,12 +133,55 @@ BASE_SYSTEM_PROMPT_V2 = BASE_SYSTEM_PROMPT_V1.replace(
 # === Registre des variantes A/B ==============================================
 # Format : { variant_id: (prompt_template, weight) }
 # Le poids contrôle la fréquence de tirage. Ex : (1, 1) = 50/50.
+# Fiche hub #139 (09/09/2026) : l'A/B v1/v2 a tourné de juin au 4 septembre —
+# v1 251 envois / 5 réponses (2,0 %), v2 241 / 14 (5,8 %). v1 passe à 0 :
+# 100 % des cold mails partent en v2. Le prochain challenger (v3) est produit
+# par `manage.py learner_weekly` et activé par Richard via
+# data/prompt_variants/active.json ; la règle d'arrêt (ab_rule.py) écrit
+# ab_winner.json et coupe la perdante sans intervention.
 PROMPT_VARIANTS: dict[str, tuple[str, float]] = {
-    "v1": (BASE_SYSTEM_PROMPT_V1, 1.0),  # wedge technique pur
-    "v2": (BASE_SYSTEM_PROMPT_V2, 1.0),  # preuves chiffrées
+    "v1": (BASE_SYSTEM_PROMPT_V1, 0.0),  # wedge technique pur — perdant de l'A/B
+    "v2": (BASE_SYSTEM_PROMPT_V2, 1.0),  # preuves chiffrées — 100 % depuis le 09/09
 }
 
-DEFAULT_VARIANT = "v1"
+DEFAULT_VARIANT = "v2"
+
+
+def _load_overrides(reg: dict[str, tuple[str, float]]) -> dict[str, tuple[str, float]]:
+    """Applique data/prompt_variants/active.json (variantes ajoutées / poids)
+    puis ab_winner.json (perdantes à 0). Fichier absent ou invalide = registre
+    inchangé. active.json : {"variants": {"v3": {"file": "v3.txt", "weight": 1}},
+    "weights": {"v2": 1.0}} — `file` relatif au dossier, prompt complet avec
+    le marqueur {signature_block}."""
+    import json
+
+    from ekoalu.email_generator.ab_rule import read_winner, variants_dir
+
+    out = dict(reg)
+    cfg_path = variants_dir() / "active.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        cfg = {}
+    for vid, spec in (cfg.get("variants") or {}).items():
+        try:
+            text = (variants_dir() / spec["file"]).read_text(encoding="utf-8")
+        except (KeyError, OSError, TypeError):
+            continue
+        if "{signature_block}" in text:
+            out[vid] = (text, float(spec.get("weight", 1.0)))
+    for vid, w in (cfg.get("weights") or {}).items():
+        if vid in out:
+            out[vid] = (out[vid][0], float(w))
+    winner = read_winner()
+    if winner and winner in out:
+        out = {vid: (t, w if vid == winner else 0.0) for vid, (t, w) in out.items()}
+    return out
+
+
+def active_variants() -> dict[str, tuple[str, float]]:
+    """Registre effectif = code + surcharges fichier (lu à chaque appel, léger)."""
+    return _load_overrides(PROMPT_VARIANTS)
 
 
 def pick_variant(variants: dict[str, tuple[str, float]] | None = None) -> str:
@@ -156,12 +199,12 @@ def pick_variant(variants: dict[str, tuple[str, float]] | None = None) -> str:
     tokens), sous le minimum cachable de 1 024 tokens. On garde donc l'A/B tel
     quel — le gain de mesure prime sur le gain de cache.
     """
-    reg = variants if variants is not None else PROMPT_VARIANTS
-    if not reg:
+    reg = variants if variants is not None else active_variants()
+    live = {vid: w for vid, (_t, w) in reg.items() if w > 0}
+    if not live:
         return DEFAULT_VARIANT
-    ids = list(reg.keys())
-    weights = [reg[i][1] for i in ids]
-    return random.choices(ids, weights=weights, k=1)[0]
+    ids = list(live.keys())
+    return random.choices(ids, weights=[live[i] for i in ids], k=1)[0]
 
 
 def render_system_prompt(variant: str = DEFAULT_VARIANT) -> str:
@@ -171,7 +214,8 @@ def render_system_prompt(variant: str = DEFAULT_VARIANT) -> str:
     clôture textuelle formal-first ; le bloc coordonnées (avec lien RDV) est
     apposé par ekoalu/email_canal/sender.py à l'envoi.
     """
-    template, _weight = PROMPT_VARIANTS.get(variant, PROMPT_VARIANTS[DEFAULT_VARIANT])
+    reg = active_variants()
+    template, _weight = reg.get(variant, reg[DEFAULT_VARIANT])
     return template.format(signature_block=conf.EMAIL_CLOSING_FORMAL_FIRST)
 
 

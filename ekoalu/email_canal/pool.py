@@ -86,8 +86,17 @@ def cold_mail_candidates(dpt: str = "", source: str = "") -> tuple[list["Lead"],
         candidates.append(lead)
     # Cibles prioritaires DECP en tête (décision Richard 2026-07-28) : poseurs
     # non-fabricants qui viennent de gagner un lot — fenêtre commerciale courte.
-    # Tri stable : l'ordre FIFO est conservé à l'intérieur de chaque groupe.
-    candidates.sort(key=_not_priority)
+    # Puis (fiche hub #137, 09/09) tri par RENDEMENT observé du segment
+    # (source, NAF, dpt) sur 90 jours glissants, réserve Mailjet en queue —
+    # avant, le FIFO déroulait 2 449 leads Mailjet à 1,6 % de réponses devant
+    # les métalleries 43.32B à 22 %. Tri stable : FIFO à score égal.
+    from ekoalu.email_canal.yield_score import (
+        build_yield_table, rank_key_factory, yield_ranking_enabled,
+    )
+    if yield_ranking_enabled():
+        candidates.sort(key=rank_key_factory(build_yield_table()))
+    else:
+        candidates.sort(key=_not_priority)
     return candidates, skipped_excluded
 
 

@@ -36,6 +36,9 @@ NAF_EXCLUS = frozenset({
     "41.20A",  # Maisons individuelles = habitat, hors stratégie tertiaire
 })
 
+# Rhône-Alpes au sens EKOALU (CLAUDE.md §Géographie) — filtre `--dpt RA`.
+DPT_RHONE_ALPES = frozenset({"69", "01", "38", "42", "73", "74", "26", "07"})
+
 # --- Filtres email -----------------------------------------------------------
 
 B2C_DOMAINS = frozenset({
@@ -107,6 +110,18 @@ class EligibilityFilters:
     require_dirigeant: bool = True
     require_nominative_email: bool = True
     exclude_b2c_domains: bool = True
+    # Fiche hub #137 (09/09) : périmètre géographique optionnel (None = toute
+    # la France) et seuil d'effectif spécifique par NAF — les métalleries
+    # 43.32B sont des ateliers de 5 à 20 personnes, le seuil global de 10 en
+    # écartait la moitié alors que c'est LA cible « poseur non fabricant ».
+    dpt_allowed: frozenset | None = None
+    min_effectif_by_naf: tuple[tuple[str, int], ...] = ()
+
+    def min_effectif_for(self, code_naf: str) -> int:
+        for naf, seuil in self.min_effectif_by_naf:
+            if naf == code_naf:
+                return seuil
+        return self.min_effectif
 
 
 # --- Codes de rejet (chaînes courtes pour stats) -----------------------------
@@ -116,6 +131,7 @@ REJECT_NO_SIREN = "no_siren"
 REJECT_NAF_EXCLUDED = "naf_excluded"
 REJECT_NAF_NOT_TARGET = "naf_not_target"
 REJECT_EFFECTIF_TOO_SMALL = "effectif_too_small"
+REJECT_DPT_NOT_TARGET = "dpt_not_target"
 REJECT_NO_DIRIGEANT = "no_dirigeant"
 REJECT_EMAIL_GENERIC = "email_generic_local_part"
 REJECT_EMAIL_B2C = "email_b2c_domain"
@@ -187,10 +203,12 @@ def is_eligible(contact: BddProspectContact, filters: EligibilityFilters) -> str
         return REJECT_NAF_EXCLUDED
     if contact.code_naf not in filters.naf_allowed:
         return REJECT_NAF_NOT_TARGET
+    if filters.dpt_allowed is not None and contact.dpt not in filters.dpt_allowed:
+        return REJECT_DPT_NOT_TARGET
 
     # Effectif : on accepte si min OU max satisfait le seuil (souvent un seul est rempli)
     eff = max(contact.effectif_min, contact.effectif_max)
-    if eff < filters.min_effectif:
+    if eff < filters.min_effectif_for(contact.code_naf):
         return REJECT_EFFECTIF_TOO_SMALL
 
     if filters.require_dirigeant and (not contact.dirigeant or contact.dirigeant == "0"):

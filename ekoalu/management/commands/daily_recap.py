@@ -67,6 +67,10 @@ class DailyStats:
     email_cold_by_variant: dict[str, int]
     # Brique K : réponses reçues par variante de cold mail (cumulatif total)
     email_replies_by_variant: dict[str, int]
+    # Fiche #137 : rendement 30 j glissants par source et par NAF
+    email_yield_30d: dict[str, list[tuple[str, int, int]]]
+    # Fiche #139 : verdict de la règle d'arrêt A/B (None tant que non conclu)
+    ab_verdict: str | None
     tasks_completed: int
     tasks_failed: int
     accept_rate_today: float | None
@@ -311,6 +315,23 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         .order_by("cold_variant")
     }
 
+    # Fiche #137 : taux de réponse 30 j par source / NAF (pilote le tri du vivier)
+    from ekoalu.email_canal.yield_score import yield_breakdown
+    email_yield_30d = yield_breakdown(days=30)
+
+    # Fiche #139 : règle d'arrêt de l'A/B — persistée une seule fois
+    from ekoalu.email_generator.ab_rule import evaluate_ab, read_winner, record_winner
+    from ekoalu.email_generator.prompts import active_variants
+    ab_verdict = None
+    live = {v for v, (_t, w) in active_variants().items() if w > 0}
+    verdict = evaluate_ab(email_cold_by_variant, email_replies_by_variant, active=live)
+    if verdict is not None and record_winner(verdict):
+        ab_verdict = (f"A/B conclu : {verdict.winner} ({verdict.winner_rate*100:.1f} %, "
+                      f"{verdict.winner_sent} envois) bat {verdict.loser} "
+                      f"({verdict.loser_rate*100:.1f} %, {verdict.loser_sent}) : poids perdant a 0")
+    elif read_winner():
+        ab_verdict = f"A/B conclu : {read_winner()} en production (ab_winner.json)"
+
     tasks_today_completed = Task.objects.filter(
         completed_at__gte=day_start, completed_at__lt=day_end, status="completed"
     ).count()
@@ -382,6 +403,8 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         email_unsubscribed=email_unsubscribed,
         email_cold_by_variant=email_cold_by_variant,
         email_replies_by_variant=email_replies_by_variant,
+        email_yield_30d=email_yield_30d,
+        ab_verdict=ab_verdict,
         tasks_completed=tasks_today_completed,
         tasks_failed=tasks_today_failed,
         accept_rate_today=accept_rate,
@@ -461,6 +484,30 @@ def _render_system_banner(sys_status: SystemStatus, period: str) -> str:
         f"border-radius:8px;margin:16px 0;'>"
         f"<strong>Etat outil :</strong> {label} -- {msg}{age}</div>{actions_html}"
     )
+
+
+def _render_ab_verdict(verdict: str | None) -> str:
+    if not verdict:
+        return ""
+    return (f"<p style='margin:6px 0;padding:8px 12px;background:#ecfdf5;"
+            f"border-left:4px solid #059669;font-size:13px'>{verdict}</p>")
+
+
+def _render_yield_rows(breakdown: dict[str, list[tuple[str, int, int]]]) -> str:
+    rows = []
+    for group, label in (("source", "Source"), ("naf", "NAF")):
+        for name, n, r in (breakdown or {}).get(group, []):
+            rate = f"{100.0 * r / n:.1f}%" if n else "n/a"
+            rows.append(
+                f"<tr><td style='padding:6px'>{label} : {name}</td>"
+                f"<td style='padding:6px;text-align:right;font-weight:bold'>{n}</td>"
+                f"<td style='padding:6px;text-align:right'>{r}</td>"
+                f"<td style='padding:6px;text-align:right'>{rate}</td></tr>"
+            )
+    if not rows:
+        return ("<tr><td colspan='4' style='color:#6b7280;padding:6px'>"
+                "(aucun cold mail envoye sur 30 jours)</td></tr>")
+    return "\n".join(rows)
 
 
 def _render_ab_rows(by_variant: dict[str, int],
@@ -604,6 +651,17 @@ def render_html(s: DailyStats) -> str:
   </tr></thead>
   <tbody>{_render_ab_rows(s.email_cold_by_variant, s.email_replies_by_variant)}</tbody>
 </table>
+{_render_ab_verdict(s.ab_verdict)}
+<h3 style="color: #1f2937; margin-top: 16px;">Rendement cold mail, 30 jours glissants</h3>
+<table style="width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px;">
+  <thead><tr style="background: #f3f4f6;">
+    <th style="padding: 6px; text-align: left;">Segment</th>
+    <th style="padding: 6px; text-align: right;">Envoyés</th>
+    <th style="padding: 6px; text-align: right;">Réponses</th>
+    <th style="padding: 6px; text-align: right;">Taux</th>
+  </tr></thead>
+  <tbody>{_render_yield_rows(s.email_yield_30d)}</tbody>
+</table>
 
 <h2 style="color: #1f2937;">Par campagne</h2>
 <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
@@ -661,6 +719,16 @@ def render_text(s: DailyStats) -> str:
                 for v, n in sorted(s.email_cold_by_variant.items())
             ]
             or ["  (aucun envoi avec variante)"]
+        ),
+        *([f"  {s.ab_verdict}"] if s.ab_verdict else []),
+        "Rendement 30 j (source / NAF):",
+        *(
+            [
+                f"  - {grp:6} {name:14} : {n} envoyes, {r} reponses ({100.0*r/n:.1f}%)"
+                for grp in ("source", "naf")
+                for name, n, r in (s.email_yield_30d or {}).get(grp, [])
+            ]
+            or ["  (aucun envoi sur 30 jours)"]
         ),
         f"Tasks completed/failed: {s.tasks_completed} / {s.tasks_failed}",
         f"Lectures profil LK   : {s.profile_reads_today} / {s.profile_reads_cap} (cap anti-ban)",

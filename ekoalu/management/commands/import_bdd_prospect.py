@@ -15,6 +15,8 @@ le row est skip (pas de mise à jour V1).
 Usage :
     python manage.py import_bdd_prospect --source "../BDD PROSPECT/enrichis-sirene.json" --dry-run
     python manage.py import_bdd_prospect --source "..." --priority P1 --min-effectif 10
+    # Fiche hub #137 : métalleries + BET de Rhône-Alpes, seuil 5 pour 43.32B
+    python manage.py import_bdd_prospect --source "..." --naf 43.32B,71.12B --dpt RA         --min-effectif 10 --min-effectif-naf 43.32B=5
     python manage.py import_bdd_prospect --source "..." --include-p2 --limit 100
 """
 from __future__ import annotations
@@ -28,6 +30,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from ekoalu.bdd_prospect_import import (
+    DPT_RHONE_ALPES,
     CONTACT_EMAIL_SOURCE,
     NAF_EXCLUS,
     NAF_P1,
@@ -40,6 +43,16 @@ from ekoalu.bdd_prospect_import import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_dpt(raw: str) -> frozenset | None:
+    """'' → None (France entière) ; 'RA' → Rhône-Alpes ; '69,42' → codes explicites."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if raw.upper() == "RA":
+        return DPT_RHONE_ALPES
+    return frozenset(d.strip().zfill(2) for d in raw.split(",") if d.strip())
 
 
 class Command(BaseCommand):
@@ -61,6 +74,18 @@ class Command(BaseCommand):
         parser.add_argument(
             "--min-effectif", type=int, default=10,
             help="Effectif min (CLAUDE.md=10). Mettre 0 pour désactiver.",
+        )
+        parser.add_argument(
+            "--naf", default="",
+            help="Codes NAF explicites (ex 43.32B,71.12B) — prime sur --priority.",
+        )
+        parser.add_argument(
+            "--dpt", default="",
+            help="Départements autorisés (ex 69,42) ou RA = Rhône-Alpes EKOALU. Vide = toute la France.",
+        )
+        parser.add_argument(
+            "--min-effectif-naf", action="append", default=[],
+            help="Seuil d'effectif propre à un NAF, ex 43.32B=5 (répétable).",
         )
         parser.add_argument(
             "--allow-no-dirigeant", action="store_true",
@@ -89,7 +114,10 @@ class Command(BaseCommand):
             raise CommandError(f"Fichier source introuvable : {source}")
 
         # Périmètre NAF
-        if opts["include_p2"] or opts["priority"] == "P1P2":
+        if opts["naf"].strip():
+            naf_allowed = frozenset(c.strip().upper() for c in opts["naf"].split(",") if c.strip())
+            label = "explicite"
+        elif opts["include_p2"] or opts["priority"] == "P1P2":
             naf_allowed = NAF_P1 | NAF_P2
             label = "P1+P2"
         elif opts["priority"] == "all":
@@ -99,6 +127,15 @@ class Command(BaseCommand):
             naf_allowed = NAF_P1
             label = "P1"
 
+        dpt_allowed = _parse_dpt(opts["dpt"])
+        try:
+            min_by_naf = tuple(
+                (k.strip().upper(), int(v)) for k, v in
+                (item.split("=", 1) for item in opts["min_effectif_naf"])
+            )
+        except ValueError as exc:
+            raise CommandError(f"--min-effectif-naf attend NAF=entier (ex 43.32B=5) : {exc}")
+
         filters = EligibilityFilters(
             naf_allowed=naf_allowed,
             naf_excluded=NAF_EXCLUS,
@@ -106,11 +143,14 @@ class Command(BaseCommand):
             require_dirigeant=not opts["allow_no_dirigeant"],
             require_nominative_email=not opts["allow_generic_email"],
             exclude_b2c_domains=not opts["allow_b2c_domain"],
+            dpt_allowed=dpt_allowed,
+            min_effectif_by_naf=min_by_naf,
         )
 
         self.stdout.write(self.style.NOTICE(
             f"Source : {source.name} | NAF={label} ({sorted(naf_allowed)}) | "
-            f"min_eff={filters.min_effectif} | "
+            f"min_eff={filters.min_effectif} par_naf={dict(min_by_naf) or '-'} | "
+            f"dpt={sorted(dpt_allowed) if dpt_allowed else 'France'} | "
             f"req_dirigeant={filters.require_dirigeant} | "
             f"req_nominative={filters.require_nominative_email} | "
             f"excl_b2c={filters.exclude_b2c_domains} | "
