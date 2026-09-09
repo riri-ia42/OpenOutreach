@@ -16,6 +16,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from ekoalu.email_canal import verify
 from ekoalu.email_canal.models import EmailLeadData  # noqa: F401 (futur usage)
 from ekoalu.notifications.graph_mailer import (
     GraphAuthError,
@@ -187,6 +188,41 @@ def _resolve_recipient(po: PendingOutbound) -> str | None:
     return lead.contact_email
 
 
+def _verify_before_send(po: PendingOutbound, recipient: str) -> str | None:
+    """Vérification d'existence avant le 1er contact (fiche hub validée 2026-09-09).
+
+    Renvoie le motif de blocage, ou None si l'envoi peut partir. Une adresse sans
+    MX ou refusée au RCPT TO est bouncée sur place (Lead.email_bounced_at), exclue
+    pour tous les canaux (`_partage/exclusions.json`) et déposée dans le drop-file
+    retour-mail pour l'antichambre. Les follow-ups ne sont pas sondés : le cold
+    mail est passé, et un rebond ultérieur revient par retour-mail.
+    """
+    if po.kind != OutboundKind.EMAIL_COLD or not verify.enabled():
+        return None
+    from django.utils import timezone
+
+    from crm.models import Lead
+    from ekoalu import retour_mail_dropfile, shared_exclusions
+
+    lead = Lead.objects.filter(public_identifier=po.prospect_public_id).first()
+    source = (lead.contact_email_source if lead else "") or ""
+    verdict, detail = verify.verify_address(recipient, source)
+    if verdict not in ("no_mx", "invalid", "parked"):
+        if verdict != "ok":
+            logger.info("Vérification %s non concluante (%s : %s) — envoi maintenu",
+                        recipient, verdict, detail)
+        return None
+    logger.warning("Envoi bloqué PO #%s : %s jugée inexistante avant envoi (%s : %s)",
+                   po.pk, recipient, verdict, detail)
+    if lead is not None and lead.email_bounced_at is None:
+        lead.email_bounced_at = timezone.now()
+        lead.save(update_fields=["email_bounced_at"])
+    provenance = f"prospection-ia:verify:{verdict}:{source or 'inconnue'}"
+    shared_exclusions.add_exclusion(recipient, f"verify_{verdict}", provenance)
+    retour_mail_dropfile.add_hard_bounce(recipient, provenance)
+    return f"adresse inexistante avant envoi ({verdict} : {detail})"
+
+
 def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
     """Envoie un seul PendingOutbound de kind email_*. Retourne (success, error_msg).
 
@@ -202,6 +238,10 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
     if not recipient:
         return False, ("destinataire bloqué (lead absent, sans email, disqualifié, "
                        "unsubscribed, bounced, ou liste d'exclusion partagée)")
+
+    blocked = _verify_before_send(po, recipient)
+    if blocked:
+        return False, blocked
 
     body_text = po.content_to_send
     if not body_text.strip():

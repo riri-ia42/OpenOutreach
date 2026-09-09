@@ -17,21 +17,15 @@ relançable : `manage.py import_retour_mail [--dry-run]`.
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from ekoalu.retour_mail_dropfile import drop_file_path  # noqa: F401 — chemin partagé avec la vérification avant envoi
+
 APP = "prospection-ia"
 
 
-def drop_file_path() -> Path:
-    custom = os.environ.get("RETOUR_MAIL_DROP_FILE", "").strip()
-    if custom:
-        return Path(custom)
-    # commands/ management/ ekoalu/ openoutreach/ prospection-ia/ -> parents[5] = CLAUDE/
-    return Path(__file__).resolve().parents[5] / "_partage" / "retour-mail-corrections.json"
 
 
 class Command(BaseCommand):

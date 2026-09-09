@@ -83,3 +83,12 @@ def _isolate_shared_exclusions(tmp_path_factory, monkeypatch):
     shared_exclusions._cache = None
     yield
     shared_exclusions._cache = None
+
+
+@pytest.fixture(autouse=True)
+def _disable_email_verification(monkeypatch):
+    """Pas de DNS ni de sonde SMTP dans la suite : la verification avant envoi
+    (fiche hub 2026-09-09) est coupee par defaut. test_email_verify.py la
+    reactive explicitement et mocke le reseau."""
+    monkeypatch.setenv("EKOALU_EMAIL_VERIFY", "0")
+    yield
