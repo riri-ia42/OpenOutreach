@@ -17,6 +17,27 @@ from linkedin.enums import ProfileState
 logger = logging.getLogger(__name__)
 
 
+def _drop_open_invitations(profiles: list, stage: str) -> list:
+    """EKOALU (09/09, hub #253) : ecarte les profils dont une invitation est
+    DEJA en file de validation (toutes campagnes). Sans ce filtre, un Deal
+    QUALIFIED en attente de Richard etait re-promu READY_TO_CONNECT a chaque
+    cycle, puis relu (degre + fiche) pour finir INTERCEPTED -> boucle qui
+    vidait le quota connect et le budget lectures sans jamais qualifier."""
+    from ekoalu.outbound_validation.dedup import public_ids_with_open_outbound
+    from ekoalu.outbound_validation.models import OutboundKind
+
+    open_ids = public_ids_with_open_outbound(
+        (p.get("public_identifier", "") for p in profiles), OutboundKind.INVITATION,
+    )
+    if not open_ids:
+        return profiles
+    logger.info(
+        "%s : %d profil(s) ecarte(s), invitation deja en file de validation (%s)",
+        stage, len(open_ids), ", ".join(sorted(open_ids)),
+    )
+    return [p for p in profiles if p.get("public_identifier", "") not in open_ids]
+
+
 def promote_to_ready(session, qualifier: BayesianQualifier, threshold: float) -> int:
     """Promote QUALIFIED profiles above GP confidence threshold to READY_TO_CONNECT.
 
@@ -25,7 +46,7 @@ def promote_to_ready(session, qualifier: BayesianQualifier, threshold: float) ->
     """
     from crm.models import Lead
 
-    profiles = get_qualified_profiles(session)
+    profiles = _drop_open_invitations(get_qualified_profiles(session), "promote_to_ready")
     if not profiles:
         return 0
 
@@ -59,7 +80,9 @@ def promote_to_ready(session, qualifier: BayesianQualifier, threshold: float) ->
 
 def find_ready_candidate(session, qualifier: BayesianQualifier) -> dict | None:
     """Return the top-ranked READY_TO_CONNECT profile, or None."""
-    profiles = get_ready_to_connect_profiles(session)
+    profiles = _drop_open_invitations(
+        get_ready_to_connect_profiles(session), "find_ready_candidate",
+    )
     if not profiles:
         return None
 

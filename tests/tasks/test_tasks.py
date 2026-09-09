@@ -95,6 +95,38 @@ def _build_context(fake_session):
 
 # ── handle_connect tests ────────────────────────────────────────
 
+@pytest.mark.django_db
+class TestHandleConnectOpenInvitation:
+    """Hub #253 (09/09) : invitation deja en file de validation => aucune
+    lecture LinkedIn (ni degre ni fiche), Deal laisse QUALIFIED, reschedule."""
+
+    @pytest.fixture(autouse=True)
+    def _db(self, db):
+        pass
+
+    @patch("linkedin.tasks.connect.strategy_for")
+    @patch("linkedin.actions.connect.send_connection_request")
+    @patch("linkedin.actions.status.get_connection_status")
+    def test_skips_before_any_read(self, mock_status, mock_send, mock_strategy, fake_session):
+        from ekoalu.outbound_validation.models import OutboundKind, PendingOutbound
+
+        _make_qualified(fake_session)
+        set_profile_state(fake_session, "alice", ProfileState.READY_TO_CONNECT.value)
+        PendingOutbound.objects.create(
+            prospect_public_id="alice", kind=OutboundKind.INVITATION, ai_draft="",
+        )
+        candidate = {"public_identifier": "alice", "url": "https://www.linkedin.com/in/alice/", "profile": SAMPLE_PROFILE}
+        mock_strategy.return_value = _mock_strategy(candidate)
+
+        task = _make_task(Task.TaskType.CONNECT, {"campaign_id": fake_session.campaign.pk})
+        handle_connect(task, fake_session, _build_context(fake_session))
+
+        mock_status.assert_not_called()
+        mock_send.assert_not_called()
+        _assert_deal_state(fake_session, "alice", ProfileState.QUALIFIED)
+        assert Task.objects.filter(task_type=Task.TaskType.CONNECT, status=Task.Status.PENDING).exists()
+
+
 
 @pytest.mark.django_db
 class TestHandleConnect:

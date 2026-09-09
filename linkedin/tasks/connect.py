@@ -95,6 +95,23 @@ def handle_connect(task, session, qualifiers):
     public_id = candidate["public_identifier"]
     profile = candidate.get("profile") or candidate
 
+    # EKOALU (09/09, hub #253) — defense en profondeur, ZERO lecture LinkedIn :
+    # si une invitation attend deja Richard pour ce prospect, on ne lit ni le
+    # degre ni la fiche (2 lectures) pour finir INTERCEPTED. Le pool ready
+    # ecarte deja ces profils ; ce garde-fou couvre les autres chemins
+    # (freemium, candidat injecte) et signale qu'un filtre amont a fui.
+    from ekoalu.outbound_validation.dedup import has_open_invitation
+
+    if has_open_invitation(public_id):
+        logger.warning(
+            "[%s] connect %s skip AVANT lecture : invitation deja en file de"
+            " validation (le pool ready aurait du l'ecarter)",
+            campaign, public_id,
+        )
+        set_profile_state(session, public_id, ProfileState.QUALIFIED.value)
+        _reschedule()
+        return
+
     # Freemium campaigns need a Deal before set_profile_state
     if strategy.pre_connect:
         strategy.pre_connect(session, public_id)
