@@ -115,8 +115,9 @@ def cold_mails_sent_on(day: dt.date) -> int:
 
     tz = timezone.get_current_timezone()
     start = timezone.make_aware(dt.datetime.combine(day, dt.time.min), tz)
+    # Fiche #250 : la relance entre dans le quota du jour (50), comme un cold mail.
     return PendingOutbound.objects.filter(
-        kind=OutboundKind.EMAIL_COLD,
+        kind__in=(OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP),
         status=OutboundStatus.SENT,
         sent_at__gte=start,
         sent_at__lt=start + dt.timedelta(days=1),

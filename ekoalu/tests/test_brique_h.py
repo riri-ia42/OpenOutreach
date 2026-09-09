@@ -36,10 +36,13 @@ class TestPickVariant:
             assert pick_variant(custom) in ("a", "b")
 
     def test_distribution_equitable_sur_n_tirages(self):
-        """Avec 2 variantes poids égaux, sur 500 tirages chaque doit dépasser 150."""
+        """Avec 2 variantes poids égaux, sur 500 tirages chaque doit dépasser 150.
+        (Registre explicite : depuis la fiche #139 du 09/09, le registre réel
+        est à 100 % v2 — cf. test_fiche_139_variantes.)"""
+        equal = {"v1": ("tpl v1", 1.0), "v2": ("tpl v2", 1.0)}
         counts = {"v1": 0, "v2": 0}
         for _ in range(500):
-            v = pick_variant()
+            v = pick_variant(equal)
             counts[v] = counts.get(v, 0) + 1
         # tolérance large : chaque variante doit avoir au moins 150 / 500 (30%)
         assert counts["v1"] >= 150

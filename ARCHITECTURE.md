@@ -133,6 +133,12 @@ Three apps in `INSTALLED_APPS`:
 - **`setup/seeds.py`** — User-provided seed profiles: parse URLs, create Leads + QUALIFIED Deals.
 - **`management/setup_crm.py`** — Idempotent CRM bootstrap (Site creation).
 - **`admin.py`** — Django Admin: SiteConfig, Campaign, LinkedInProfile, SearchKeyword, ActionLog, Task, ChatMessage.
+- **`ekoalu/email_canal/yield_score.py`** — Score de rendement du vivier cold mail (fiche #137) : `build_yield_table()`, `rank_key_factory()`, `yield_breakdown()`.
+- **`ekoalu/email_canal/followup.py` / `ekoalu/email_generator/followup_generator.py`** — Relance mail unique J+5 ouvrés (fiche #250) : éligibilité, quota 40 %, génération (autre angle, test chiffrage), envoi dans le fil via `sender._reply_in_thread`.
+- **`ekoalu/email_canal/relation_check.py` / `ekoalu/notifications/outlook_gateway.py`** — Contrôle « déjà en relation » dans Outlook avant cold mail (fiche #251), client lecture seule du Gateway.
+- **`ekoalu/email_canal/rdv.py`** — Notifications Bookings → `ProspectRdv` (fiche #252), rapprochement adresse/domaine/nom.
+- **`ekoalu/email_generator/ab_rule.py`** — Règle d'arrêt de l'A/B des prompts (fiche #139) ; `prompts.active_variants()` = registre + surcharges fichier.
+- **Commandes** — `generate_email_followups`, `check_outlook_relations`, `sync_rdv`, `learner_weekly` (09/09).
 - **`django_settings.py`** — Django settings (SQLite at `data/db.sqlite3`). Apps: crm, chat, linkedin.
 
 

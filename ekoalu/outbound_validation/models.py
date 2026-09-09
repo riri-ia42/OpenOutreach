@@ -70,6 +70,17 @@ class PendingOutbound(models.Model):
     )
     sent_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True)
+    # Fiche #250 : une relance mail pointe vers son cold mail d'origine ; l'id
+    # Graph du message envoyé (retrouvé dans les Éléments envoyés) permet de
+    # répondre DANS le fil plutôt que de fabriquer un faux « Re : ».
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="followups",
+        help_text="Message d'origine (relance mail → cold mail)",
+    )
+    graph_message_id = models.CharField(
+        max_length=300, blank=True, default="",
+        help_text="Id Graph du message envoyé (Éléments envoyés), pour répondre dans le fil",
+    )
 
     class Meta:
         app_label = "ekoalu"

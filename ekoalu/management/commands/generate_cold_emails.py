@@ -122,7 +122,25 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Aucun candidat à générer."))
             return
 
-        capped = candidates[:limit]
+        # Fiche #251 : contrôle Outlook « déjà en relation » avant de générer,
+        # dans l'ordre de la file, jusqu'à remplir le quota. Gateway KO = on
+        # génère sans vérification (log + événement hub), jamais de blocage.
+        from ekoalu.email_canal.relation_check import screen_candidates
+        screened = screen_candidates(candidates, limit)
+        capped = screened.kept
+        if screened.removed:
+            self.stdout.write(self.style.WARNING(
+                f"Écartés (déjà en relation dans Outlook) : {screened.removed}",
+            ))
+        if screened.gateway_down:
+            self.stdout.write(self.style.WARNING("Outlook Gateway indisponible : génération sans contrôle."))
+            try:
+                from ekoalu.notifications.hub_events import post_event
+                post_event("prospection.relation_check", "warn",
+                           "Contrôle Outlook « déjà en relation » indisponible ce matin",
+                           {"status": "gateway_down"})
+            except Exception:  # noqa: BLE001
+                pass
         self.stdout.write(f"Génération : {len(capped)} cold mails")
 
         created = 0

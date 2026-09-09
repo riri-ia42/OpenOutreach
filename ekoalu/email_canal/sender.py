@@ -223,6 +223,45 @@ def _verify_before_send(po: PendingOutbound, recipient: str) -> str | None:
     return f"adresse inexistante avant envoi ({verdict} : {detail})"
 
 
+def _find_sent_message_id(recipient: str, subject: str) -> str:
+    """Id Graph du cold mail dans les Éléments envoyés (fiche #250), '' si introuvable."""
+    from ekoalu.notifications.outlook_gateway import search_messages
+
+    msgs = search_messages(recipient, top=25, folder="sentitems") or []
+    wanted = (subject or "").strip().lower()
+    for m in msgs:
+        to = [r.get("emailAddress", {}).get("address", "").lower()
+              for r in (m.get("toRecipients") or [])]
+        if recipient.lower() in to and (m.get("subject") or "").strip().lower() == wanted:
+            return m.get("id") or ""
+    return ""
+
+
+def _reply_in_thread(po: PendingOutbound, recipient: str, html_body: str,
+                     inline_images: dict | None) -> bool:
+    """Répond dans le fil du cold mail d'origine via Graph reply. False = repli
+    sur un envoi classique (le message reste validé par Richard, on ne le perd pas)."""
+    from ekoalu.notifications.graph_mailer import send_reply
+
+    parent = po.parent
+    if parent is None:
+        return False
+    message_id = parent.graph_message_id or _find_sent_message_id(recipient, parent.subject)
+    if not message_id:
+        logger.warning("Relance PO #%s : cold mail d'origine introuvable dans les envoyés, "
+                       "envoi classique en repli", po.pk)
+        return False
+    if not parent.graph_message_id:
+        parent.graph_message_id = message_id
+        parent.save(update_fields=["graph_message_id"])
+    try:
+        send_reply(original_message_id=message_id, body_html=html_body, inline_images=inline_images)
+    except Exception as exc:  # noqa: BLE001 — repli explicite, jamais silencieux
+        logger.warning("Relance PO #%s : reply Graph KO (%s), envoi classique en repli", po.pk, exc)
+        return False
+    return True
+
+
 def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
     """Envoie un seul PendingOutbound de kind email_*. Retourne (success, error_msg).
 
@@ -260,6 +299,9 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
             file_attachments = [(GUIDE_FILENAME, "application/pdf", guide)]
 
     try:
+        if po.kind == OutboundKind.EMAIL_FOLLOW_UP and _reply_in_thread(po, recipient, html_body, inline_images):
+            logger.info("Relance mail envoyée DANS LE FIL à %s (PO #%s)", recipient, po.pk)
+            return True, ""
         send_mail(subject=po.subject, html_body=html_body, to=recipient,
                   inline_images=inline_images, file_attachments=file_attachments,
                   category="prospect")

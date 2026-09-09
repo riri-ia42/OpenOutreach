@@ -50,6 +50,7 @@ def cold_mail_candidates(dpt: str = "", source: str = "") -> tuple[list["Lead"],
         )
         .exclude(contact_email="")
         .filter(email_data__isnull=False)
+        .filter(email_data__relation_existante__isnull=True)   # fiche #251
     )
     if dpt:
         leads_qs = leads_qs.filter(email_data__dpt=dpt)

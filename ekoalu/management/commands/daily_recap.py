@@ -71,6 +71,13 @@ class DailyStats:
     email_yield_30d: dict[str, list[tuple[str, int, int]]]
     # Fiche #139 : verdict de la règle d'arrêt A/B (None tant que non conclu)
     ab_verdict: str | None
+    # Fiche #251 : leads écartés aujourd'hui « déjà en relation » (Outlook)
+    relation_excluded_today: int
+    # Fiche #252 : RDV pris / tenus sur 30 j, par variante, et sans prospect rapproché
+    rdv_30d: dict[str, int]
+    rdv_by_variant: dict[str, int]
+    # Fiche #250 : relances mail envoyées / réponses (30 j)
+    followup_30d: tuple[int, int]
     tasks_completed: int
     tasks_failed: int
     accept_rate_today: float | None
@@ -332,6 +339,32 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
     elif read_winner():
         ab_verdict = f"A/B conclu : {read_winner()} en production (ab_winner.json)"
 
+    # Fiches #250 / #251 / #252 : relances, déjà en relation, rendez-vous
+    from ekoalu.email_canal.models import EmailLeadData, ProspectRdv
+    relation_excluded_today = EmailLeadData.objects.filter(
+        relation_existante__checked_at__startswith=str(day_start.date()),
+    ).count()
+    month_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    rdv_qs = ProspectRdv.objects.filter(created_at__gte=month_ago)
+    rdv_30d = {
+        "pris": rdv_qs.count(),
+        "tenus": rdv_qs.filter(status=ProspectRdv.Status.HELD).count(),
+        "annules": rdv_qs.filter(status=ProspectRdv.Status.CANCELLED).count(),
+        "sans_prospect": ProspectRdv.objects.filter(lead__isnull=True).count(),
+    }
+    rdv_by_variant = {
+        row["cold_variant"]: row["n"]
+        for row in ProspectRdv.objects.exclude(cold_variant="").exclude(status=ProspectRdv.Status.CANCELLED)
+        .values("cold_variant").annotate(n=Count("id"))
+    }
+    fu_sent_ids = set(PendingOutbound.objects.filter(
+        kind="email_follow_up", status=OutboundStatus.SENT, sent_at__gte=month_ago,
+    ).values_list("prospect_public_id", flat=True))
+    fu_replies = PendingReply.objects.filter(
+        channel=PendingReply.CHANNEL_EMAIL, prospect_public_id__in=fu_sent_ids, created_at__gte=month_ago,
+    ).values("prospect_public_id").distinct().count() if fu_sent_ids else 0
+    followup_30d = (len(fu_sent_ids), fu_replies)
+
     tasks_today_completed = Task.objects.filter(
         completed_at__gte=day_start, completed_at__lt=day_end, status="completed"
     ).count()
@@ -405,6 +438,10 @@ def compute_stats(day: date, period: str = "day") -> DailyStats:
         email_replies_by_variant=email_replies_by_variant,
         email_yield_30d=email_yield_30d,
         ab_verdict=ab_verdict,
+        relation_excluded_today=relation_excluded_today,
+        rdv_30d=rdv_30d,
+        rdv_by_variant=rdv_by_variant,
+        followup_30d=followup_30d,
         tasks_completed=tasks_today_completed,
         tasks_failed=tasks_today_failed,
         accept_rate_today=accept_rate,
@@ -511,11 +548,13 @@ def _render_yield_rows(breakdown: dict[str, list[tuple[str, int, int]]]) -> str:
 
 
 def _render_ab_rows(by_variant: dict[str, int],
-                    replies_by_variant: dict[str, int] | None = None) -> str:
+                    replies_by_variant: dict[str, int] | None = None,
+                    rdv_by_variant: dict[str, int] | None = None) -> str:
     if not by_variant:
-        return ("<tr><td colspan='4' style='color:#6b7280;padding:6px'>"
+        return ("<tr><td colspan='5' style='color:#6b7280;padding:6px'>"
                 "(aucun cold mail envoye, A/B testing en attente de donnees)</td></tr>")
     replies_by_variant = replies_by_variant or {}
+    rdv_by_variant = rdv_by_variant or {}
     rows = []
     for v, n in sorted(by_variant.items()):
         replies = replies_by_variant.get(v, 0)
@@ -524,7 +563,8 @@ def _render_ab_rows(by_variant: dict[str, int],
             f"<tr><td style='padding:6px'>{v}</td>"
             f"<td style='padding:6px;text-align:right;font-weight:bold'>{n}</td>"
             f"<td style='padding:6px;text-align:right'>{replies}</td>"
-            f"<td style='padding:6px;text-align:right'>{rate}</td></tr>"
+            f"<td style='padding:6px;text-align:right'>{rate}</td>"
+            f"<td style='padding:6px;text-align:right'>{rdv_by_variant.get(v, 0)}</td></tr>"
         )
     return "\n".join(rows)
 
@@ -648,9 +688,15 @@ def render_html(s: DailyStats) -> str:
     <th style="padding: 6px; text-align: right;">Envoyés</th>
     <th style="padding: 6px; text-align: right;">Réponses</th>
     <th style="padding: 6px; text-align: right;">Taux</th>
+    <th style="padding: 6px; text-align: right;">RDV</th>
   </tr></thead>
-  <tbody>{_render_ab_rows(s.email_cold_by_variant, s.email_replies_by_variant)}</tbody>
+  <tbody>{_render_ab_rows(s.email_cold_by_variant, s.email_replies_by_variant, s.rdv_by_variant)}</tbody>
 </table>
+<p style="font-size:13px;margin:6px 0">RDV pris sur 30 jours : <strong>{s.rdv_30d.get("pris", 0)}</strong>
+(tenus {s.rdv_30d.get("tenus", 0)}, annulés {s.rdv_30d.get("annules", 0)}) ·
+sans prospect rapproché : {s.rdv_30d.get("sans_prospect", 0)} ·
+relances mail 30 j : {s.followup_30d[0]} envoyées, {s.followup_30d[1]} réponses ·
+écartés aujourd'hui « déjà en relation » : {s.relation_excluded_today}</p>
 {_render_ab_verdict(s.ab_verdict)}
 <h3 style="color: #1f2937; margin-top: 16px;">Rendement cold mail, 30 jours glissants</h3>
 <table style="width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px;">
@@ -721,6 +767,10 @@ def render_text(s: DailyStats) -> str:
             or ["  (aucun envoi avec variante)"]
         ),
         *([f"  {s.ab_verdict}"] if s.ab_verdict else []),
+        f"RDV 30 j             : {s.rdv_30d.get('pris', 0)} pris, {s.rdv_30d.get('tenus', 0)} tenus, "
+        f"{s.rdv_30d.get('annules', 0)} annules, {s.rdv_30d.get('sans_prospect', 0)} sans prospect",
+        f"Relances mail 30 j   : {s.followup_30d[0]} envoyees, {s.followup_30d[1]} reponses",
+        f"Deja en relation     : {s.relation_excluded_today} ecarte(s) aujourd'hui (Outlook)",
         "Rendement 30 j (source / NAF):",
         *(
             [

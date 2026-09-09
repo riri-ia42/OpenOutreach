@@ -53,6 +53,9 @@ class EmailLeadData(models.Model):
 
     # Snapshot row source (debug / re-traitement)
     raw_json = models.JSONField(null=True, blank=True)
+    # Fiche #251 : {"count": n, "last_at": iso, "checked_at": iso, "matched": "email|domain"}
+    # posé par le contrôle Outlook avant cold mail ; null = jamais vérifié ou aucun échange.
+    relation_existante = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -64,3 +67,48 @@ class EmailLeadData(models.Model):
 
     def __str__(self) -> str:
         return f"EmailLeadData({self.entreprise or self.lead_id}, {self.code_naf})"
+
+
+class ProspectRdv(models.Model):
+    """Rendez-vous pris par un prospect (Bookings), rattaché à son lead (fiche #252).
+
+    L'entonnoir s'arrêtait à la réponse ; l'objectif fixé en mai est le RDV visio.
+    Clé d'idempotence = id de la notification Bookings. `lead` null = RDV non
+    rapproché (adresse inconnue de la base) : signalé au récap, à traiter à la main.
+    """
+
+    class Status(models.TextChoices):
+        PLANNED = "planned", "Planifié"
+        HELD = "held", "Tenu"
+        CANCELLED = "cancelled", "Annulé"
+
+    lead = models.ForeignKey("crm.Lead", null=True, blank=True, on_delete=models.SET_NULL,
+                             related_name="rdvs")
+    event_id = models.CharField(max_length=300, unique=True)
+    prospect_email = models.CharField(max_length=254, blank=True, db_index=True)
+    who = models.CharField(max_length=255, blank=True)
+    service = models.CharField(max_length=128, blank=True)
+    start = models.DateTimeField(null=True, blank=True)
+    end = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PLANNED, db_index=True)
+    channel = models.CharField(max_length=16, blank=True, help_text="email | linkedin | autre")
+    cold_variant = models.CharField(max_length=32, blank=True)
+    matched_by = models.CharField(max_length=16, blank=True, help_text="email | domain | ''")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "ekoalu"
+        verbose_name = "RDV prospect"
+        verbose_name_plural = "RDV prospects"
+
+    def __str__(self) -> str:
+        return f"RDV {self.who or self.prospect_email} {self.start:%d/%m %H:%M}" if self.start else f"RDV {self.who}"
+
+    def refresh_status(self) -> None:
+        """planifié → tenu une fois la fin passée (sauf annulation)."""
+        from django.utils import timezone as _tz
+
+        if self.status == self.Status.PLANNED and self.end and self.end < _tz.now():
+            self.status = self.Status.HELD
+            self.save(update_fields=["status"])
+
