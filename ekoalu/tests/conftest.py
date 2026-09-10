@@ -92,3 +92,23 @@ def _disable_email_verification(monkeypatch):
     reactive explicitement et mocke le reseau."""
     monkeypatch.setenv("EKOALU_EMAIL_VERIFY", "0")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_hub(monkeypatch):
+    """Aucun test ne doit atteindre le hub EKOALU (fiche conformite 10/09).
+
+    `_hub_token` lit hub-ekoalu/.env quand l'env est vide : la suite de tests
+    a donc pousse au hub des rapports « NON CONFORME » calcules sur la base de
+    test VIDE (0 lead, 0 envoi), que Richard a valides en fiche les 09 et 10/09.
+    Ici : jeton vide partout (hub_gate ET hub_events qui l'importe par nom) et
+    URL inatteignable, en ceinture et bretelles.
+    """
+    from ekoalu.notifications import hub_events, hub_gate
+
+    monkeypatch.setenv("EKOALU_HUB_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("EKOALU_HUB_TOKEN", "")
+    monkeypatch.setattr(hub_gate, "_hub_token", lambda: "")
+    monkeypatch.setattr(hub_events, "_hub_token", lambda: "")
+    hub_gate.reset_cache()
+
