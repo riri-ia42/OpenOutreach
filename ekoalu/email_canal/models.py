@@ -93,8 +93,22 @@ class ProspectRdv(models.Model):
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.PLANNED, db_index=True)
     channel = models.CharField(max_length=16, blank=True, help_text="email | linkedin | autre")
     cold_variant = models.CharField(max_length=32, blank=True)
-    matched_by = models.CharField(max_length=16, blank=True, help_text="email | domain | ''")
+    matched_by = models.CharField(max_length=16, blank=True, help_text="email | domain | name | ''")
     created_at = models.DateTimeField(auto_now_add=True)
+    # Préparation automatique (10/09) : brief + deck + créneau agenda
+    class Prep(models.TextChoices):
+        TODO = "", "À préparer"
+        DONE = "done", "Préparé"
+        FAILED = "failed", "Échec"
+
+    teams_url = models.CharField(max_length=500, blank=True, default="")
+    calendar_event_id = models.CharField(max_length=300, blank=True, default="",
+                                         help_text="Id Graph de l'événement Bookings dans l'agenda")
+    prep_status = models.CharField(max_length=8, choices=Prep.choices, default=Prep.TODO, blank=True, db_index=True)
+    prep_dir = models.CharField(max_length=500, blank=True, default="")
+    prep_event_id = models.CharField(max_length=300, blank=True, default="",
+                                     help_text="Id Graph du créneau « Prépa » créé 30 min avant")
+    prep_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         app_label = "ekoalu"

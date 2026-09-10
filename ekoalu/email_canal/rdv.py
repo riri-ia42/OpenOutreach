@@ -31,7 +31,7 @@ _MONTHS = {"janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4, "ma
 _DATE_RE = re.compile(r"(\d{1,2})\s+([a-zéû]+)\s+(\d{4})", re.IGNORECASE)
 _TIME_RE = re.compile(r"(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})")
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-_TITLE_RE = re.compile(r"réservation\s+(.+?)\s+pour\s+(.+)$", re.IGNORECASE)
+_TITLE_RE = re.compile(r"réservation\s+(?:annulée\s*:\s*)?(.+?)\s+pour\s+(.+)$", re.IGNORECASE)
 
 
 @dataclass
@@ -130,6 +130,54 @@ def match_lead(email: str, who: str = ""):
     return same[0]
 
 
+def enrich_from_calendar(days_ahead: int = 60) -> int:
+    """Complète email / téléphone / lien Teams des RDV planifiés depuis l'agenda
+    Graph (le corps des événements Bookings porte les « Informations client »
+    que la notification mail n'a pas). Renvoie le nombre de RDV complétés."""
+    from ekoalu.email_canal.models import ProspectRdv
+    from ekoalu.notifications.graph_calendar import booking_details, list_events
+
+    now = timezone.now()
+    events = list_events(now - dt.timedelta(days=1), now + dt.timedelta(days=days_ahead))
+    if not events:
+        return 0
+    by_start: dict[str, dict] = {}
+    for ev in events:
+        if ev.get("isCancelled"):
+            continue
+        raw = ((ev.get("start") or {}).get("dateTime") or "")[:16]
+        if "ekoaluprisederdv" in str(ev.get("organizer") or "").lower():
+            by_start[raw] = ev
+    cancelled_starts = {
+        ((ev.get("start") or {}).get("dateTime") or "")[:16]
+        for ev in events if ev.get("isCancelled") and "ekoaluprisederdv" in str(ev.get("organizer") or "").lower()
+    }
+    n = 0
+    for rdv in ProspectRdv.objects.filter(status=ProspectRdv.Status.PLANNED, start__gte=now - dt.timedelta(days=1)):
+        key = rdv.start.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        ev = by_start.get(key)
+        if not ev:
+            if key in cancelled_starts:
+                rdv.status = ProspectRdv.Status.CANCELLED
+                rdv.save(update_fields=["status"]); n += 1
+            continue
+        d = booking_details(ev)
+        changed = False
+        if d.get("email") and not rdv.prospect_email:
+            rdv.prospect_email = d["email"]; changed = True
+            if rdv.lead_id is None:
+                lead = match_lead(d["email"], rdv.who)
+                if lead is not None:
+                    rdv.lead, rdv.matched_by = lead, "email"
+        if d.get("teams_url") and not rdv.teams_url:
+            rdv.teams_url = d["teams_url"]; changed = True
+        if d.get("event_id") and not rdv.calendar_event_id:
+            rdv.calendar_event_id = d["event_id"]; changed = True
+        if changed:
+            rdv.save(); n += 1
+    return n
+
+
 def fetch_notices(top: int = 100) -> list[BookingNotice] | None:
     from ekoalu.notifications.outlook_gateway import get_message, search_messages
 
@@ -156,7 +204,16 @@ def upsert_rdv(notice: BookingNotice):
 
     lead = match_lead(notice.email, notice.who)
     if notice.cancelled:
-        rdv = ProspectRdv.objects.filter(prospect_email=notice.email).order_by("-start").first() if notice.email else None
+        rdv = None
+        if notice.email:
+            rdv = ProspectRdv.objects.filter(prospect_email=notice.email).order_by("-start").first()
+        if rdv is None and notice.start:
+            # la notification d'annulation ne porte pas l'adresse : même nom + même créneau
+            from ekoalu.person_identity import norm_person_name
+            for cand in ProspectRdv.objects.filter(start=notice.start).exclude(status=ProspectRdv.Status.CANCELLED):
+                if norm_person_name(cand.who.split(" société")[0]) == norm_person_name(notice.who.split(" société")[0]):
+                    rdv = cand
+                    break
         if rdv and rdv.status != ProspectRdv.Status.CANCELLED:
             rdv.status = ProspectRdv.Status.CANCELLED
             rdv.save(update_fields=["status"])

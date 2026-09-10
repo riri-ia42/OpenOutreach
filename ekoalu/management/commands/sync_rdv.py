@@ -39,6 +39,14 @@ class Command(BaseCommand):
                 if rdv.lead_id:
                     matched += 1
                 self._notify(rdv)
+        # Agenda Graph : adresse, téléphone, lien Teams des RDV planifiés (10/09)
+        try:
+            from ekoalu.email_canal.rdv import enrich_from_calendar
+            completed = enrich_from_calendar()
+            if completed:
+                self.stdout.write(f"Complétés depuis l'agenda : {completed}")
+        except Exception as exc:  # noqa: BLE001 — l'agenda est un plus
+            logger.warning("Enrichissement agenda impossible : %s", exc)
         # Passage planifié → tenu pour les RDV dont la date est passée
         for rdv in ProspectRdv.objects.filter(status=ProspectRdv.Status.PLANNED):
             rdv.refresh_status()

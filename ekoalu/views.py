@@ -2617,3 +2617,68 @@ def daily_recap_view(request, day: str):
         html = render_html(stats)
 
     return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Rendez-vous prospects : brief + deck préparés automatiquement (10/09/2026)
+# ---------------------------------------------------------------------------
+
+
+def _rdv_file(pk: int, name: str):
+    from pathlib import Path
+
+    from django.http import FileResponse, Http404, HttpResponse
+
+    from ekoalu.email_canal.models import ProspectRdv
+
+    rdv = ProspectRdv.objects.filter(pk=pk).first()
+    if rdv is None or not rdv.prep_dir:
+        raise Http404("RDV non préparé")
+    path = Path(rdv.prep_dir) / name
+    if not path.exists():
+        raise Http404("fichier absent")
+    if name.endswith(".pdf"):
+        return FileResponse(open(path, "rb"), content_type="application/pdf", filename=path.name)
+    return HttpResponse(path.read_text(encoding="utf-8"), content_type="text/html; charset=utf-8")
+
+
+@staff_member_required
+def rdv_brief(request, pk: int):
+    return _rdv_file(pk, "brief.html")
+
+
+@staff_member_required
+def rdv_deck(request, pk: int):
+    return _rdv_file(pk, "deck.html")
+
+
+@staff_member_required
+def rdv_deck_pdf(request, pk: int):
+    return _rdv_file(pk, "deck.pdf")
+
+
+@staff_member_required
+def rdv_list(request):
+    """Liste des RDV Bookings, état de préparation et liens (page brute, sans template)."""
+    from django.http import HttpResponse
+    from django.utils import timezone as _tz
+    from django.utils.html import escape
+
+    from ekoalu.email_canal.models import ProspectRdv
+
+    rows = []
+    for r in ProspectRdv.objects.order_by("-start")[:60]:
+        when = _tz.localtime(r.start).strftime("%d/%m %H:%M") if r.start else "?"
+        links = ""
+        if r.prep_status == ProspectRdv.Prep.DONE:
+            links = (f'<a href="/ekoalu/rdv/{r.pk}/brief/">brief</a> · <a href="/ekoalu/rdv/{r.pk}/deck/">deck</a>'
+                     f' · <a href="/ekoalu/rdv/{r.pk}/deck.pdf">pdf</a>')
+        rows.append(f"<tr><td>{when}</td><td>{escape(r.who)}</td><td>{escape(r.service)}</td>"
+                    f"<td>{r.get_status_display()}</td><td>{escape(r.lead.public_identifier) if r.lead_id else '<em>sans prospect</em>'}</td>"
+                    f"<td>{r.get_prep_status_display() or 'à préparer'}</td><td>{links}</td></tr>")
+    html = ("<!doctype html><meta charset=utf-8><title>RDV prospects</title>"
+            "<style>body{font-family:system-ui;margin:24px}table{border-collapse:collapse}td,th{padding:6px 10px;border-bottom:1px solid #ddd;text-align:left}</style>"
+            "<h1>Rendez-vous prospects</h1><p><a href='/ekoalu/'>Dashboard</a></p><table><thead><tr><th>Quand</th><th>Qui</th><th>Service</th><th>État</th><th>Lead</th><th>Prépa</th><th>Supports</th></tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table>")
+    return HttpResponse(html)
+

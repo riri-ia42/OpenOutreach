@@ -138,7 +138,8 @@ Three apps in `INSTALLED_APPS`:
 - **`ekoalu/email_canal/relation_check.py` / `ekoalu/notifications/outlook_gateway.py`** — Contrôle « déjà en relation » dans Outlook avant cold mail (fiche #251), client lecture seule du Gateway.
 - **`ekoalu/email_canal/rdv.py`** — Notifications Bookings → `ProspectRdv` (fiche #252), rapprochement adresse/domaine/nom.
 - **`ekoalu/email_generator/ab_rule.py`** — Règle d'arrêt de l'A/B des prompts (fiche #139) ; `prompts.active_variants()` = registre + surcharges fichier.
-- **Commandes** — `generate_email_followups`, `check_outlook_relations`, `sync_rdv`, `learner_weekly` (09/09).
+- **`ekoalu/rdv_prep/`** — Préparation automatique des RDV (10/09) : `research.collect`, `writer.write_brief` (JSON Claude), `render.render_brief/render_deck/deck_to_pdf`, `service.prepare_one/pending_rdvs`. `notifications/graph_calendar.py` = agenda Graph (lecture + création d'événement). Vues `/ekoalu/rdv/…`.
+- **Commandes** — `generate_email_followups`, `check_outlook_relations`, `sync_rdv`, `learner_weekly` (09/09), `prepare_rdv` (10/09).
 - **`django_settings.py`** — Django settings (SQLite at `data/db.sqlite3`). Apps: crm, chat, linkedin.
 
 
