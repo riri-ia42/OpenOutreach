@@ -19,6 +19,7 @@ from pathlib import Path
 from ekoalu.email_canal import verify
 from ekoalu.email_canal.models import EmailLeadData  # noqa: F401 (futur usage)
 from ekoalu.notifications.graph_mailer import (
+    OUTLOOK_PROSPECTION_CATEGORY,
     GraphAuthError,
     GraphConfigError,
     GraphSendError,
@@ -255,7 +256,8 @@ def _reply_in_thread(po: PendingOutbound, recipient: str, html_body: str,
         parent.graph_message_id = message_id
         parent.save(update_fields=["graph_message_id"])
     try:
-        send_reply(original_message_id=message_id, body_html=html_body, inline_images=inline_images)
+        send_reply(original_message_id=message_id, body_html=html_body, inline_images=inline_images,
+                   outlook_categories=[OUTLOOK_PROSPECTION_CATEGORY])
     except Exception as exc:  # noqa: BLE001 — repli explicite, jamais silencieux
         logger.warning("Relance PO #%s : reply Graph KO (%s), envoi classique en repli", po.pk, exc)
         return False
@@ -304,7 +306,9 @@ def send_cold_email(po: PendingOutbound) -> tuple[bool, str]:
             return True, ""
         send_mail(subject=po.subject, html_body=html_body, to=recipient,
                   inline_images=inline_images, file_attachments=file_attachments,
-                  category="prospect")
+                  category="prospect",
+                  # Marqueur lu par SmartMail : cet envoi est suivi ici, pas par lui.
+                  outlook_categories=[OUTLOOK_PROSPECTION_CATEGORY])
     except GraphConfigError as exc:
         logger.error("Graph mal configuré : %s", exc)
         return False, f"graph_config: {exc}"

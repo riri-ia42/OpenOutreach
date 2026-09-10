@@ -18,6 +18,7 @@ from ekoalu.email_canal.sender import (
 )
 from ekoalu.inbox_assist.models import PendingReply
 from ekoalu.notifications.graph_mailer import (
+    OUTLOOK_PROSPECTION_CATEGORY,
     GraphAuthError,
     GraphConfigError,
     GraphSendError,
@@ -61,7 +62,9 @@ def send_email_reply(pr: PendingReply) -> tuple[bool, str]:
 
     try:
         send_reply(original_message_id=pr.inbound_message_id, body_html=body_html,
-                   inline_images=inline_images)
+                   inline_images=inline_images,
+                   # Marqueur lu par SmartMail : cet envoi est suivi ici, pas par lui.
+                   outlook_categories=[OUTLOOK_PROSPECTION_CATEGORY])
     except GraphConfigError as exc:
         logger.error("Graph mal configuré : %s", exc)
         return False, f"graph_config: {exc}"

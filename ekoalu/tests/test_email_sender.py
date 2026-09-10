@@ -100,13 +100,15 @@ class TestSendColdEmailSuccess:
         captured = {}
 
         def _mock_send(*, subject, html_body, to, inline_images=None,
-                       file_attachments=None, category="report"):
+                       file_attachments=None, category="report",
+                       outlook_categories=None):
             captured["subject"] = subject
             captured["html_body"] = html_body
             captured["to"] = to
             captured["inline_images"] = inline_images
             captured["file_attachments"] = file_attachments
             captured["category"] = category
+            captured["outlook_categories"] = outlook_categories
 
         monkeypatch.setattr("ekoalu.email_canal.sender.send_mail", _mock_send)
         success, err = send_cold_email(po)
@@ -119,6 +121,9 @@ class TestSendColdEmailSuccess:
         assert captured["inline_images"] and "logoekoalu" in captured["inline_images"]
         # Les cold mails prospects ne passent JAMAIS par le gate mail_suspended du hub.
         assert captured["category"] == "prospect"
+        # Marqueur Outlook lu par SmartMail (fiche hub 2026-09-10) : cet envoi est
+        # suivi par prospection-ia, SmartMail ne le met pas « en attente de réponse ».
+        assert captured["outlook_categories"] == ["🤖 Prospection"]
 
     def test_guide_joint_au_cold_mais_pas_au_follow_up(self, make_lead_with_po, monkeypatch):
         """Le guide des solutions part en PJ sur le 1er contact uniquement
@@ -170,7 +175,7 @@ class TestGraphUploadSession:
                 return self._payload
 
         def fake_post(url, json=None, headers=None, timeout=None):
-            calls.append(("POST", url))
+            calls.append(("POST", url, json))
             if url.endswith("/messages"):
                 return FakeResp(201, {"id": "draft-1"})
             if url.endswith("/createUploadSession"):
@@ -215,6 +220,29 @@ class TestGraphUploadSession:
         urls = [c[1] for c in calls if c[0] == "POST"]
         assert any(u.endswith("/sendMail") for u in urls)
         assert not any(u.endswith("/createUploadSession") for u in urls)
+
+    def test_categorie_outlook_posee_sur_les_deux_flux(self, monkeypatch):
+        """Le marqueur « 🤖 Prospection » suit l'envoi, en sendMail comme en brouillon."""
+        calls = []
+        gm = self._mock_graph(monkeypatch, calls)
+        gm.send_mail(subject="s", html_body="<p>b</p>", to="dest@x.fr",
+                     outlook_categories=[gm.OUTLOOK_PROSPECTION_CATEGORY])
+        simple = next(c[2] for c in calls if c[1].endswith("/sendMail"))
+        assert simple["message"]["categories"] == ["🤖 Prospection"]
+
+        calls.clear()
+        gm.send_mail(subject="s", html_body="<p>b</p>", to="dest@x.fr",
+                     file_attachments=[("guide.pdf", "application/pdf", b"x" * 5_500_000)],
+                     outlook_categories=[gm.OUTLOOK_PROSPECTION_CATEGORY])
+        draft = next(c[2] for c in calls if c[1].endswith("/messages"))
+        assert draft["categories"] == ["🤖 Prospection"]
+
+    def test_sans_categorie_le_payload_reste_inchange(self, monkeypatch):
+        calls = []
+        gm = self._mock_graph(monkeypatch, calls)
+        gm.send_mail(subject="s", html_body="<p>b</p>", to="richard@ekoalu.com", category="alert")
+        simple = next(c[2] for c in calls if c[1].endswith("/sendMail"))
+        assert "categories" not in simple["message"]
 
 
 class TestSendColdEmailFailures:

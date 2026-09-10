@@ -21,6 +21,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+# Catégorie Outlook posée sur chaque envoi de prospection (cold mail, relance,
+# réponse automatique). SmartMail (fiche hub 2026-09-10) ignore ces envois dans
+# son suivi « en attente de réponse » : prospection-ia gère déjà leur cycle
+# (poller de réponses, retour-mail, relances). Pour Richard, le marqueur
+# distingue d'un coup d'œil ses envois de ceux de la machine.
+OUTLOOK_PROSPECTION_CATEGORY = "🤖 Prospection"
 TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 DEFAULT_SCOPE = "https://graph.microsoft.com/.default offline_access"
 
@@ -175,7 +182,7 @@ _UPLOAD_CHUNK = 327_680 * 10  # 3,125 Mo
 
 def _send_via_upload_session(
     *, subject, html_body, recipient, user_email, token,
-    inline_images, file_attachments,
+    inline_images, file_attachments, outlook_categories=None,
 ) -> None:
     """Flux brouillon -> createUploadSession (chunks) -> send.
 
@@ -190,6 +197,8 @@ def _send_via_upload_session(
         "body": {"contentType": "HTML", "content": html_body},
         "toRecipients": [{"emailAddress": {"address": recipient}}],
     }
+    if outlook_categories:
+        message["categories"] = list(outlook_categories)
     if inline_images:
         message["attachments"] = _inline_attachments(inline_images)
     resp = requests.post(
@@ -263,6 +272,7 @@ def send_mail(
     inline_images: dict[str, bytes] | None = None,
     file_attachments: list[tuple[str, str, bytes]] | None = None,
     category: str = "report",
+    outlook_categories: list[str] | None = None,
 ) -> None:
     """Envoie un mail via Graph sendMail.
 
@@ -278,6 +288,8 @@ def send_mail(
         category: "report" (défaut — récaps/rapports internes, soumis à
             l'interrupteur mail_suspended du hub-ekoalu) ou "alert" (alertes
             critiques : STOP LinkedIn, zombie, budget — jamais supprimées).
+        outlook_categories: catégories Outlook posées sur l'élément envoyé
+            (ex : OUTLOOK_PROSPECTION_CATEGORY — marqueur lu par SmartMail).
 
     Raises:
         GraphConfigError, GraphAuthError, GraphSendError.
@@ -303,6 +315,8 @@ def send_mail(
         },
         "saveToSentItems": True,
     }
+    if outlook_categories:
+        payload["message"]["categories"] = list(outlook_categories)
     # Au-dela de ~2,3 Mo de PJ, la requete sendMail JSON depasse la limite
     # Graph de 4 Mo (base64 x1,37) -> bascule sur le flux brouillon + upload
     # session (chunks, jusqu'a 150 Mo). Ex : guide des solutions 5,5 Mo.
@@ -312,6 +326,7 @@ def send_mail(
             subject=subject, html_body=html_body, recipient=recipient,
             user_email=user_email, token=token,
             inline_images=inline_images, file_attachments=file_attachments,
+            outlook_categories=outlook_categories,
         )
         logger.info("Mail Graph (upload session, PJ %.1f Mo) envoyé à %s — sujet: %s",
                     total_files / 1024 / 1024, recipient, subject[:80])
@@ -371,6 +386,7 @@ def send_reply(
     original_message_id: str,
     body_html: str,
     inline_images: dict[str, bytes] | None = None,
+    outlook_categories: list[str] | None = None,
 ) -> None:
     """Envoie une réponse threadée à un message existant via Graph reply.
 
@@ -401,6 +417,8 @@ def send_reply(
     }
     if inline_images:
         payload["message"] = {"attachments": _inline_attachments(inline_images)}
+    if outlook_categories:
+        payload.setdefault("message", {})["categories"] = list(outlook_categories)
 
     resp = requests.post(
         f"{GRAPH_BASE}/users/{user_email}/messages/{original_message_id}/reply",

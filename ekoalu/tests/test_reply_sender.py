@@ -59,10 +59,11 @@ class TestSendEmailReplySuccess:
     def test_appelle_graph_send_reply(self, monkeypatch):
         captured = {}
 
-        def _mock(*, original_message_id, body_html, inline_images=None):
+        def _mock(*, original_message_id, body_html, inline_images=None, outlook_categories=None):
             captured["msg_id"] = original_message_id
             captured["html"] = body_html
             captured["inline_images"] = inline_images
+            captured["outlook_categories"] = outlook_categories
 
         monkeypatch.setattr("ekoalu.email_canal.reply_sender.send_reply", _mock)
         pr = _make_pr()
