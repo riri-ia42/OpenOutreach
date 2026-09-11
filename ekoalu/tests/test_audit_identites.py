@@ -67,3 +67,45 @@ class TestRegenerationRelance:
         assert kwargs["contact_email"] == "j.dupont@metal.fr"    # garde de salutation
         relance.refresh_from_db()
         assert relance.ai_draft.startswith("Nouvelle relance sur un autre angle")
+
+
+@pytest.mark.django_db
+class TestAffichageIdentite:
+    """La liste de validation ne doit affirmer aucune identité que l'adresse
+    contredit (2e capture Richard du 11/09, lignes entourées)."""
+
+    def _lead(self, pid, email, dirigeant, entreprise):
+        lead = Lead.objects.create(linkedin_url=f"https://bdd-prospect.local/siren/{pid}",
+                                   public_identifier=f"bdd-prospect-{pid}", contact_email=email)
+        EmailLeadData.objects.create(lead=lead, source="bdd_prospect", siren=pid,
+                                     dirigeant=dirigeant, entreprise=entreprise)
+        return lead
+
+    def test_personne_morale_ne_sert_pas_de_nom_ni_de_placeholder(self):
+        from ekoalu.prospect_display import resolve_prospect_display
+
+        self._lead("633620067", "info@borello-isoclair.com", "V2R", "BORELLO ISOCLAIR")
+        disp = resolve_prospect_display("bdd-prospect-633620067")
+        # ni « V2R » (raison sociale), ni « Bdd Prospect » (placeholder du slug)
+        assert disp["name"] == ""
+        assert disp["company"] == "BORELLO ISOCLAIR"
+
+    def test_nom_conserve_mais_signale_quand_l_adresse_le_contredit(self):
+        from ekoalu.prospect_display import identity_warnings, resolve_prospect_display
+
+        self._lead("501661912", "jean.lecuyer2@wanadoo.fr", "Stephanie Lopitaux", "EURL LOPITAUX")
+        disp = resolve_prospect_display("bdd-prospect-501661912")
+        assert disp["name"] == "Stephanie Lopitaux"      # Richard doit voir la donnée
+        warnings = identity_warnings(disp["name"], disp["company"], "jean.lecuyer2@wanadoo.fr")
+        assert warnings == ["nom non confirmé par l'adresse"]
+
+    def test_boite_commune_de_la_societe_ne_declenche_rien(self):
+        from ekoalu.prospect_display import identity_warnings
+
+        assert identity_warnings("Jean Dumont", "DUMONT-SERVE CCBE", "contact@ds-ccbe.com") == []
+
+    def test_societe_non_confirmee_signalee(self):
+        from ekoalu.prospect_display import identity_warnings
+
+        assert identity_warnings("", "NEPSEN", "antoine.roger@belem-ing.fr") == [
+            "société non confirmée par l'adresse"]

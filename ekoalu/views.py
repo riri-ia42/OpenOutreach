@@ -37,8 +37,12 @@ def _build_prospect_card(slug: str, deal=None, company_hint: str = "") -> dict:
     lead = Lead.objects.filter(public_identifier=slug).select_related("email_data").first()
     email_data = getattr(lead, "email_data", None) if lead else None
     if email_data:
-        if email_data.dirigeant:
-            display["name"] = email_data.dirigeant
+        # Le champ « dirigeant » des imports DECP porte parfois le mandataire du
+        # registre (cabinet, holding) : il ne devient jamais le nom du prospect.
+        from ekoalu.email_generator.salutation import clean_person_name, is_person_name
+
+        if email_data.dirigeant and is_person_name(email_data.dirigeant):
+            display["name"] = clean_person_name(email_data.dirigeant)
         display["company"] = email_data.entreprise or display.get("company", "")
         loc_bits = [b for b in (email_data.ville, email_data.cp) if b]
         if loc_bits:
@@ -1435,7 +1439,7 @@ def campaign_detail(request, pk: int):
 def outbound_list(request):
     """Liste des messages sortants à valider + actions en masse."""
     from crm.models import Deal, Lead
-    from ekoalu.prospect_display import resolve_prospect_display
+    from ekoalu.prospect_display import identity_warnings, resolve_prospect_display
 
     if request.method == "POST":
         bulk_action = request.POST.get("bulk_action", "")
@@ -1547,6 +1551,8 @@ def outbound_list(request):
         o.prospect_location = disp["location"]
         o.prospect_job_title = disp["job_title"]
         o.prospect_email = email_map.get(o.prospect_public_id, "")
+        o.identity_warnings = identity_warnings(
+            o.prospect_name, o.prospect_company_display, o.prospect_email)
         o.style_violations = (
             find_style_violations(o.final_content or o.ai_draft) if show_style else []
         )

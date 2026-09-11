@@ -57,10 +57,13 @@ def test_resolve_company_hint_prime_sur_email_data():
 
 
 @pytest.mark.django_db
-def test_resolve_dirigeant_vide_garde_le_placeholder():
+def test_resolve_dirigeant_vide_laisse_la_societe_porter_la_ligne():
+    # 2e capture Richard 11/09 : le placeholder « Bdd Prospect », tiré du slug
+    # synthétique, n'apprenait rien et occupait la place du nom. Sans personne
+    # nommable, le nom reste vide et la liste affiche la société.
     _mail_only_lead(dirigeant="")
     disp = resolve_prospect_display("bdd-prospect-350246039")
-    assert disp["name"] == "Bdd Prospect"
+    assert disp["name"] == ""
     assert disp["company"] == "SOFIPRE"
 
 

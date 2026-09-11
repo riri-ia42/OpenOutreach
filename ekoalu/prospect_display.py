@@ -212,10 +212,33 @@ def resolve_prospect_display(slug: str, deal=None, company_hint: str = "") -> di
             from ekoalu.email_generator.salutation import clean_person_name, is_person_name
 
             person = data["dirigeant"] if is_person_name(data["dirigeant"]) else ""
-            name = clean_person_name(person) or name
+            # Pas de personne nommable : on n'affiche NI la raison sociale en
+            # guise de nom, NI le placeholder « Bdd Prospect » tiré du slug
+            # synthétique. Le nom reste vide, la ligne est portée par la société.
+            name = clean_person_name(person)
             company = company or data["entreprise"]
             location = location or data["ville"]
     return {"name": name, "company": company, "location": location, "job_title": job_title}
+
+
+def identity_warnings(name: str, entreprise: str, contact_email: str) -> list[str]:
+    """Doutes d'identité à AFFICHER sur une ligne de validation.
+
+    Capture Richard 11/09 : le corps du mail est désormais protégé par les
+    gardes, mais la liste continuait d'affirmer « Stephanie Lopitaux » en tête
+    d'un message destiné à jean.lecuyer2@wanadoo.fr. On ne cache pas la donnée
+    (Richard en a besoin pour trancher), on signale qu'elle n'est pas confirmée.
+    """
+    from ekoalu.email_generator.salutation import (
+        company_confirmed_by_email, dirigeant_for_salutation,
+    )
+
+    warnings = []
+    if name and contact_email and not dirigeant_for_salutation(name, contact_email, entreprise):
+        warnings.append("nom non confirmé par l'adresse")
+    if entreprise and contact_email and not company_confirmed_by_email(entreprise, contact_email):
+        warnings.append("société non confirmée par l'adresse")
+    return warnings
 
 
 def resolve_for_lead(lead, deal=None) -> dict:
