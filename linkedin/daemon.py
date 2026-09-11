@@ -384,6 +384,13 @@ def run_daemon(session):
         len(campaigns),
     )
 
+    # Garde anti-décalage (fiche hub 11/09) : ce process fige ses classes de
+    # modèle maintenant. Si une migration est appliquée plus tard, ses écritures
+    # tomberont sur des colonnes qu'il ignore — 27 invitations et relances
+    # perdues en deux jours avant ce garde-fou. On note l'heure de référence.
+    from ekoalu import migration_drift
+    demarrage_process = timezone.now()
+
     cloud_promo = _CloudPromoRotator(interval=60)
     heartbeat = Heartbeat()
     rhythm = _HumanRhythmBreak(heartbeat)
@@ -399,6 +406,14 @@ def run_daemon(session):
     # Single-threaded: one task at a time, no concurrent enqueuing,
     # so sleeping until the next scheduled_at is safe.
     while True:
+        # Le code de ce process est-il encore en phase avec la base ? Sinon on
+        # s'arrête : le watchdog relance avec le code à jour. Mieux vaut une
+        # minute d'interruption qu'une journée d'écritures refusées.
+        applique = migration_drift.drift_detecte(demarrage_process)
+        if applique is not None:
+            migration_drift.signaler(applique, demarrage_process)
+            return
+
         # Arret d'urgence manuel (bouton STOP dashboard) : prioritaire sur
         # tout. Tant que le sentinel existe, aucune action (ni LinkedIn ni
         # drain de la file approved). Ne se purge JAMAIS tout seul : reprise
