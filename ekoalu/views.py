@@ -372,12 +372,40 @@ def _activity_chart_data(days: int = 10) -> dict:
         "connected_at",
     )
 
+    # Objectifs du jour (demande Richard 11/09) : sans eux, l'histogramme dit
+    # combien on a fait, jamais ce qu'on aurait pu faire. Ils varient d'un jour
+    # à l'autre — pondération hebdo, samedi réduit, dimanche et fériés à zéro —
+    # donc une ligne horizontale unique serait fausse.
+    from ekoalu import conf
+    from ekoalu.email_canal.quota import cold_mail_quota_for
+    from ekoalu.human_scheduler import budget
+
+    poids = [budget.daily_weight_factor(d) for d in day_list]
+    objectif_emails = [cold_mail_quota_for(d) for d in day_list]
+    objectif_invit = [max(0, round(conf.DAILY_INVITE_CAP * w)) for w in poids]
+    objectif_msg = [max(0, round(conf.DAILY_MESSAGE_CAP * w)) for w in poids]
+
+    def _atteinte(reel: dict, objectif: list[int]) -> int | None:
+        """% du plafond réellement utilisé sur la fenêtre, hors jours à zéro."""
+        vise = sum(objectif)
+        if not vise:
+            return None
+        return round(100 * sum(reel.get(d, 0) for d in day_list) / vise)
+
     return {
         "labels": json.dumps([d.strftime("%d/%m") for d in day_list]),
         "emails": json.dumps([emails.get(d, 0) for d in day_list]),
         "invitations": json.dumps([invitations.get(d, 0) for d in day_list]),
         "lk_messages": json.dumps([lk_messages.get(d, 0) for d in day_list]),
         "accepted": json.dumps([accepted.get(d, 0) for d in day_list]),
+        "objectif_emails": json.dumps(objectif_emails),
+        "objectif_invitations": json.dumps(objectif_invit),
+        "objectif_lk_messages": json.dumps(objectif_msg),
+        "atteinte": {
+            "emails": _atteinte(emails, objectif_emails),
+            "invitations": _atteinte(invitations, objectif_invit),
+            "lk_messages": _atteinte(lk_messages, objectif_msg),
+        },
         "totals": {
             "emails": sum(emails.values()),
             "invitations": sum(invitations.values()),

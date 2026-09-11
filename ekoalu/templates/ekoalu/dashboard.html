@@ -50,9 +50,11 @@
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-gray-900">Activité — 10 derniers jours</h2>
             <div class="flex flex-wrap gap-3 text-xs text-gray-600">
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#2563eb"></span>Emails : <b>{{ activity_chart.totals.emails }}</b></span>
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#ea580c"></span>Invitations : <b>{{ activity_chart.totals.invitations }}</b></span>
-                <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#7c3aed"></span>Messages LKD : <b>{{ activity_chart.totals.lk_messages }}</b></span>
+                {# Taux d'atteinte du plafond (demande Richard 11/09) : le total seul
+                   ne dit pas si on a rempli la journee ou tourne au quart. #}
+                <span title="Emails envoyés sur la période, et part du plafond cumulé réellement utilisée"><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#2563eb"></span>Emails : <b>{{ activity_chart.totals.emails }}</b>{% if activity_chart.atteinte.emails is not None %} <span class="{% if activity_chart.atteinte.emails < 60 %}text-red-600{% elif activity_chart.atteinte.emails < 85 %}text-amber-600{% else %}text-green-700{% endif %}">({{ activity_chart.atteinte.emails }} % de l'objectif)</span>{% endif %}</span>
+                <span title="Invitations envoyées sur la période, et part du plafond cumulé réellement utilisée"><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#ea580c"></span>Invitations : <b>{{ activity_chart.totals.invitations }}</b>{% if activity_chart.atteinte.invitations is not None %} <span class="{% if activity_chart.atteinte.invitations < 60 %}text-red-600{% elif activity_chart.atteinte.invitations < 85 %}text-amber-600{% else %}text-green-700{% endif %}">({{ activity_chart.atteinte.invitations }} % de l'objectif)</span>{% endif %}</span>
+                <span title="Messages LinkedIn envoyés sur la période, et part du plafond cumulé réellement utilisée"><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#7c3aed"></span>Messages LKD : <b>{{ activity_chart.totals.lk_messages }}</b>{% if activity_chart.atteinte.lk_messages is not None %} <span class="{% if activity_chart.atteinte.lk_messages < 60 %}text-red-600{% elif activity_chart.atteinte.lk_messages < 85 %}text-amber-600{% else %}text-green-700{% endif %}">({{ activity_chart.atteinte.lk_messages }} % de l'objectif)</span>{% endif %}</span>
                 <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style="background:#16a34a"></span>Acceptées : <b>{{ activity_chart.totals.accepted }}</b></span>
             </div>
         </div>
@@ -131,6 +133,12 @@
                 { label: 'Invitations envoyées', data: {{ activity_chart.invitations|safe }}, backgroundColor: '#ea580c' },
                 { label: 'Messages LinkedIn envoyés', data: {{ activity_chart.lk_messages|safe }}, backgroundColor: '#7c3aed' },
                 { label: 'Invitations acceptées', data: {{ activity_chart.accepted|safe }}, type: 'line', borderColor: '#16a34a', backgroundColor: '#16a34a', tension: 0.3, pointRadius: 3 },
+                {# Objectifs (demande Richard 11/09) : en escalier, parce que le
+                   plafond change chaque jour (poids hebdo, samedi reduit, dimanche
+                   et feries a zero). Meme couleur que la barre qu'ils plafonnent. #}
+                { label: 'Objectif emails', data: {{ activity_chart.objectif_emails|safe }}, type: 'line', stepped: 'middle', borderColor: '#2563eb', borderDash: [6,4], borderWidth: 2, pointRadius: 0, fill: false },
+                { label: 'Objectif invitations', data: {{ activity_chart.objectif_invitations|safe }}, type: 'line', stepped: 'middle', borderColor: '#ea580c', borderDash: [6,4], borderWidth: 2, pointRadius: 0, fill: false },
+                { label: 'Objectif messages LinkedIn', data: {{ activity_chart.objectif_lk_messages|safe }}, type: 'line', stepped: 'middle', borderColor: '#7c3aed', borderDash: [6,4], borderWidth: 2, pointRadius: 0, fill: false },
             ],
         },
         options: {
