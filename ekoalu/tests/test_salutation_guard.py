@@ -6,7 +6,11 @@ M. Domaison chez nous. »
 """
 from __future__ import annotations
 
-from ekoalu.email_generator.salutation import dirigeant_for_salutation
+from ekoalu.email_generator.salutation import (
+    clean_person_name,
+    dirigeant_for_salutation,
+    is_person_name,
+)
 
 
 class TestDirigeantForSalutation:
@@ -37,3 +41,58 @@ class TestDirigeantForSalutation:
         assert dirigeant_for_salutation("", "barrier@abac.fr") == ""
         assert dirigeant_for_salutation("Paul Denjean", "") == "Paul Denjean"
         assert dirigeant_for_salutation("Paul Denjean", "sans-arobase") == "Paul Denjean"
+
+
+class TestPersonneMorale:
+    """Capture Richard 11/09 : le champ « dirigeant » des imports DECP porte
+    parfois un mandataire (cabinet comptable, holding) ou un prénom seul."""
+
+    def test_raison_sociale_refusee(self):
+        for x in ("CABINET EMMANUEL CHEVIGNARD", "ARDOUREL & MATHONIER",
+                  "BROCARD PARTICIPATIONS", "DELT'AX", "V2R", "VIMABER",
+                  "SAS CLAUDE LAUMOND", "MENUISERIE DU FOREZ"):
+            assert not is_person_name(x), x
+            assert dirigeant_for_salutation(x, "contact@exemple.fr", "EXEMPLE") == ""
+
+    def test_prenom_seul_refuse(self):
+        assert not is_person_name("CHLOE")
+        assert dirigeant_for_salutation("CHLOE", "secretariat@rolando-poisson.fr",
+                                        "ROLANDO POISSON") == ""
+
+    def test_vraies_personnes_acceptees(self):
+        for x in ("Eric Duchateau", "Charles Tassin de saint pereuse",
+                  "Mourad Ait arab", "Karim Cheikhrouhou"):
+            assert is_person_name(x), x
+
+    def test_casse_normalisee(self):
+        assert clean_person_name("Charles Tassin de saint pereuse") == "Charles Tassin de Saint Pereuse"
+        assert clean_person_name("KARIM CHEIKHROUHOU") == "Karim Cheikhrouhou"
+        assert clean_person_name("jean-pierre MARTIN") == "Jean-Pierre Martin"
+        assert clean_person_name("") == ""
+
+
+class TestBoiteDeSociete:
+    """Une boîte commune de la société garde le nom du dirigeant ; une adresse
+    nominative d'une autre personne ne le garde pas, même sur le domaine de la
+    société (ablampey@blampey.fr vs dirigeant Eric Duchateau)."""
+
+    def test_local_repris_de_la_raison_sociale(self):
+        assert dirigeant_for_salutation("Charles Tassin", "serrurerie-nouvelle@orange.fr",
+                                        "SERRURERIE NOUVELLE") == "Charles Tassin"
+
+    def test_sigle_pointe(self):
+        assert dirigeant_for_salutation("Karim Cheikhrouhou", "vmv@vmv.fr", "V.M.V.") == "Karim Cheikhrouhou"
+
+    def test_initiale_plus_nom_reste_nominatif(self):
+        # ablampey = A. Blampey (une personne), pas la boîte « blampey »
+        assert dirigeant_for_salutation("Eric Duchateau", "ablampey@blampey.fr", "BLAMPEY S.A.S.") == ""
+
+    def test_nom_noye_dans_un_local_composite(self):
+        # felicitedavidpro@outlook.fr = David-alexandre Felicite (vrai destinataire)
+        assert dirigeant_for_salutation("David-alexandre Felicite", "felicitedavidpro@outlook.fr",
+                                        "D.A.F. COUVERTURE BARDAGE") == "David-alexandre Felicite"
+
+    def test_autre_personne_sur_webmail(self):
+        assert dirigeant_for_salutation("Stephanie Lopitaux", "jean.lecuyer2@wanadoo.fr",
+                                        "EURL LOPITAUX") == ""
+

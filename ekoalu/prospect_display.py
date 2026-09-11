@@ -206,7 +206,13 @@ def resolve_prospect_display(slug: str, deal=None, company_hint: str = "") -> di
     if slug.startswith(_SYNTHETIC_SLUG_PREFIXES):
         data = _email_data_display(slug)
         if data:
-            name = data["dirigeant"] or name
+            # Capture Richard 11/09 : un « dirigeant » qui est un cabinet ou une
+            # holding (imports DECP) n'est pas un nom de prospect — on affiche
+            # alors la société seule, jamais « CABINET EMMANUEL CHEVIGNARD ».
+            from ekoalu.email_generator.salutation import clean_person_name, is_person_name
+
+            person = data["dirigeant"] if is_person_name(data["dirigeant"]) else ""
+            name = clean_person_name(person) or name
             company = company or data["entreprise"]
             location = location or data["ville"]
     return {"name": name, "company": company, "location": location, "job_title": job_title}

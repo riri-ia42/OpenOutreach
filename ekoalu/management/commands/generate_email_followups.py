@@ -56,7 +56,7 @@ class Command(BaseCommand):
                 entreprise=getattr(data, "entreprise", ""), dirigeant=getattr(data, "dirigeant", ""),
                 code_naf=getattr(data, "code_naf", ""), activite=getattr(data, "activite", ""),
                 ville=getattr(data, "ville", ""), original_subject=cold.subject,
-                original_body=cold.content_to_send,
+                original_body=cold.content_to_send, contact_email=lead.contact_email or "",
             )
             if not draft.is_valid():
                 self.stdout.write(self.style.ERROR("  Génération vide, skip."))

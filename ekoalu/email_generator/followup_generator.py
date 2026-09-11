@@ -91,10 +91,20 @@ def _ensure_closing(body: str) -> str:
 def generate_email_followup(*, entreprise: str = "", dirigeant: str = "", code_naf: str = "",
                             activite: str = "", ville: str = "", original_subject: str = "",
                             original_body: str = "", instruction: str = "",
+                            contact_email: str = "",
                             model: str | None = None, max_tokens: int = 700) -> FollowupDraft:
-    """Renvoie FollowupDraft(body="") si la génération a échoué."""
-    from ekoalu.email_generator.salutation import dirigeant_for_salutation
+    """Renvoie FollowupDraft(body="") si la génération a échoué.
+
+    `contact_email` : adresse de destination, pour la garde de salutation.
+    """
+    from ekoalu.email_generator.salutation import clean_person_name, dirigeant_for_salutation
     from ekoalu.message_validator.style_guard import enforce_style
+
+    # Garde de salutation (capture Richard 11/09) : la relance nommait le
+    # dirigeant du registre même quand l'adresse désigne quelqu'un d'autre
+    # (« Bonjour M. Duchateau » vers ablampey@blampey.fr) ou quand le champ
+    # porte un cabinet comptable. Même point de passage que le cold mail.
+    dirigeant = clean_person_name(dirigeant_for_salutation(dirigeant, contact_email, entreprise))
 
     client = _get_anthropic_client()
     if client is None:

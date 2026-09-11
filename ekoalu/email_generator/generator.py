@@ -153,7 +153,7 @@ def generate_cold_email(
     from ekoalu.message_validator.style_guard import enforce_style, find_style_violations
 
     if contact_email:
-        dirigeant = dirigeant_for_salutation(dirigeant, contact_email)
+        dirigeant = dirigeant_for_salutation(dirigeant, contact_email, entreprise)
 
     chosen_variant = variant or pick_variant()
 
