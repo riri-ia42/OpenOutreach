@@ -112,3 +112,22 @@ def _isolate_hub(monkeypatch):
     monkeypatch.setattr(hub_events, "_hub_token", lambda: "")
     hub_gate.reset_cache()
 
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path_factory, settings):
+    """Aucun test n'ecrit dans le VRAI `data/` du projet (constat 11/09).
+
+    Suite du correctif du 10/09 : le hub etait isole, mais pas le disque.
+    `test_hub_isolation` appelait `daily_conformity` sans rediriger
+    `settings.ROOT_DIR` — la commande ecrasait donc `data/conformity_last.md`
+    avec un rapport calcule sur la base de test VIDE (« vivier 0 lead », « 0 en
+    file »). Ce fichier est relu au demarrage de chaque session : le vrai
+    verdict du matin disparaissait au profit d'un faux NON CONFORME.
+
+    Ne concerne que les modules qui resolvent ROOT_DIR A L'APPEL (les
+    ecrivains : daily_conformity, daily_recap, analyse_semaine). Ceux qui le
+    figent a l'import gardent leur chemin et leurs isolations dediees.
+    """
+    settings.ROOT_DIR = tmp_path_factory.mktemp("rootdir")
+    yield
