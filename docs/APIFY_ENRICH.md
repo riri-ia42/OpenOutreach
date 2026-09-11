@@ -1,5 +1,15 @@
 # Enrichissement Apify cookieless (câblé dans le pipeline le 07/07)
 
+> ⚠️ **Document partiellement historique (constat 11/09/2026).** Depuis le
+> 02/09, Apify n'est plus le fournisseur principal mais le SECOURS d'une
+> cascade : Bright Data → Apify → mini-fiche SERP → repli Voyager. Le point
+> d'entrée de la tâche planifiée est `manage.py enrich_backlog`, pas
+> `apify_enrich_backlog`. L'acteur par défaut est **apimaestro** depuis le
+> 15/07, pas HarvestAPI (mort à 20 runs cumulés sur le plan Free). La
+> description de référence à jour est dans `CLAUDE.md` (section « Chaîne
+> d'enrichissement cookieless »). Ce qui reste valable ici : le
+> fonctionnement interne du client Apify, ses caps et son disjoncteur.
+
 ## Pourquoi
 
 Aujourd'hui chaque lead sourcé (Serper) doit être **lu sur LinkedIn avec le
@@ -36,13 +46,14 @@ test réel 10-20 profils.
 4. Renseigner dans `.env.production` (à la main, jamais via script) :
    ```
    EKOALU_APIFY_TOKEN=apify_api_xxxxxxxx
-   # optionnel — défaut : harvestapi~linkedin-profile-scraper
-   EKOALU_APIFY_ACTOR=harvestapi~linkedin-profile-scraper
+   # optionnel — défaut (depuis le 15/07) :
+   EKOALU_APIFY_ACTOR=apimaestro~linkedin-profile-batch-scraper-no-cookies-required
    ```
-   Acteur par défaut : **HarvestAPI** (cookieless, 4 $/1000 en mode
-   « no email », accepte l'API sur le plan Free). `dev_fusion` a été écarté
-   au test réel du 07/07 : il refuse les runs API sur le plan Free
-   (« run through the UI only »).
+   Acteur par défaut : **apimaestro** (cookieless, 5 $/1000, fonctionne sur le
+   plan Free mais plafonné à 10 profils/JOUR — d'où le disjoncteur de
+   saturation). HarvestAPI, l'acteur d'origine, est mort le 09/07 : les comptes
+   Free sont bloqués à 20 runs cumulés. `dev_fusion` a été écarté au test réel
+   du 07/07 : il refuse les runs API sur le plan Free.
 
 ## Test réel (10-20 profils)
 
@@ -112,8 +123,8 @@ chemins n'ont pas changé.
 
 | Chemin | Fichier | Comportement |
 |---|---|---|
-| **Backlog (tâche planifiée)** | `manage.py apify_enrich_backlog [--max N] [--dry-run]` via `scripts/apify_enrich.ps1` (repo parent, log `data/apify_enrich.log`) | Enrichit les leads URL-only en attente (snapshot + embedding), plus anciens d'abord |
-| **Daemon (Apify-first)** | `linkedin/pipeline/qualify.py:_embed_urlonly_leads` | À chaque cycle de qualification, les N leads URL-only sont enrichis via Apify au lieu de `Lead.get_embedding` (lecture Voyager) |
+| **Backlog (tâche planifiée)** | `manage.py enrich_backlog [--max N] [--dry-run]` via `scripts/apify_enrich.ps1` (repo parent, 07h30 L-V, log `data/apify_enrich.log`). Plafond par passe : **200** depuis le 11/09 (40 avant, hérité du free-tier Apify). `apify_enrich_backlog` reste pour un usage Apify SEUL. | Bright Data en lot d'abord, puis Apify, puis mini-fiche SERP |
+| **Daemon (chaîne cookieless)** | `linkedin/pipeline/qualify.py:_embed_urlonly_leads` | À chaque cycle de qualification, 2 leads URL-only (`EKOALU_URLONLY_EMBED_PER_CYCLE`) passent par `enrich_lead_cookieless` ; repli `Lead.get_embedding` (1 lecture Voyager) seulement si les TROIS fournisseurs échouent |
 
 Service commun : `ekoalu/apify_enrich/service.py` —
 `enrich_urlonly_leads(max_leads)` (lot) et `enrich_lead(lead)` (unitaire).

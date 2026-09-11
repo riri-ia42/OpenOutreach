@@ -5,8 +5,14 @@ Remplace ``apify_enrich_backlog`` comme point d'entrée de la tâche planifiée
 puis Apify (10/j free-tier), puis mini-fiche SERP pour les restants. Aucun de
 ces chemins ne touche le compte LinkedIn ni le cap lectures.
 
+Le plafond par passe est monté de 40 à 200 le 11/09 (décision Richard) : les 40
+étaient hérités du free-tier Apify (10/jour), sans rapport avec Bright Data qui
+en autorise 4 500 par mois. Le délai d'attente du snapshot suit la taille du lot
+(`client.poll_timeout_for`), sinon un lot de 200 expirait au bout des 300 s
+d'origine et se remboursait en entier pour zéro profil.
+
 Usage :
-    python manage.py enrich_backlog              # jusqu'à 40 leads
+    python manage.py enrich_backlog              # jusqu'à 200 leads
     python manage.py enrich_backlog --max 60
     python manage.py enrich_backlog --dry-run
 """
@@ -24,8 +30,8 @@ class Command(BaseCommand):
             "Bright Data → Apify → mini-fiche SERP.")
 
     def add_arguments(self, parser):
-        parser.add_argument("--max", type=int, default=40,
-                            help="Nombre maximum de leads à traiter (défaut 40).")
+        parser.add_argument("--max", type=int, default=200,
+                            help="Nombre maximum de leads à traiter (défaut 200).")
         parser.add_argument("--dry-run", action="store_true",
                             help="Liste les candidats, zéro appel API.")
 
@@ -57,7 +63,7 @@ class Command(BaseCommand):
         if bd_service.brightdata_ready():
             stats = bd_service.enrich_leads(remaining)
             totals["brightdata"] = stats["enriched"]
-            remaining = [ld for ld in remaining if ld.embedding is None or _refresh_is_urlonly(ld)]
+            remaining = [ld for ld in remaining if _still_to_enrich(ld)]
 
         # 2. Apify pour les restants (son service borne au quota du jour).
         if remaining and apify_service.apify_ready():
@@ -68,7 +74,9 @@ class Command(BaseCommand):
                 if not apify_service.apify_ready():
                     break  # quota du jour épuisé/saturé : inutile d'insister
 
-        # 3. Mini-fiche SERP pour ce qui reste (gratuit, partiel).
+        # 3. Mini-fiche SERP pour ce qui reste (gratuit, partiel). Apify aussi
+        # disqualifie sur « profil introuvable » : on re-filtre avant.
+        remaining = [ld for ld in remaining if _still_to_enrich(ld)]
         for lead in list(remaining):
             if enrich_lead_from_serp(lead):
                 totals["serper_snippet"] += 1
@@ -85,7 +93,13 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("[OK]"))
 
 
-def _refresh_is_urlonly(lead) -> bool:
-    """Relit l'état embedding depuis la DB (enrich_leads a modifié en place)."""
-    lead.refresh_from_db(fields=["embedding", "profile_snapshot"])
-    return lead.embedding is None
+def _still_to_enrich(lead) -> bool:
+    """Le lead doit-il être présenté au fournisseur suivant ?
+
+    Non s'il a maintenant une fiche, et non s'il vient d'être DISQUALIFIÉ :
+    Bright Data répondant « page morte » écarte le prospect mais le laisse sans
+    fiche, donc il repassait à Apify puis à la mini-fiche SERP dans la même
+    passe — du quota dépensé pour un profil qui n'existe plus (constat 11/09).
+    """
+    lead.refresh_from_db(fields=["embedding", "profile_snapshot", "disqualified"])
+    return lead.embedding is None and not lead.disqualified

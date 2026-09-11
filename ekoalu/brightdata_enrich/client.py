@@ -29,7 +29,26 @@ BASE = "https://api.brightdata.com/datasets/v3"
 DEFAULT_DATASET_ID = "gd_l1viktl72bvl7bjuj0"
 
 POLL_INTERVAL_SECONDS = 10
-POLL_TIMEOUT_SECONDS = 300  # les petits lots sortent en 1-3 min
+POLL_TIMEOUT_SECONDS = 300  # plancher : les petits lots sortent en 1-3 min
+POLL_TIMEOUT_MAX_SECONDS = 1800
+# Mesure réelle : 40 profils prêts en ~125 s, soit ~3 s/profil. On budgète le
+# double pour absorber une file d'attente côté fournisseur.
+POLL_SECONDS_PER_URL = 6
+# Chemin UNITAIRE (daemon, `_embed_urlonly_leads`) : un profil qui tarde ne doit
+# pas immobiliser le daemon 5 minutes. Au-delà, on laisse la main au fournisseur
+# suivant ; le lot du matin rattrapera ce lead.
+SINGLE_POLL_TIMEOUT_SECONDS = 90
+
+
+def poll_timeout_for(n_urls: int) -> float:
+    """Délai d'attente proportionnel à la taille du lot, borné.
+
+    Sans ça, monter le lot à 200 profils faisait expirer le snapshot au bout
+    des 300 s d'origine : le lot ENTIER partait en échec et se remboursait,
+    pour zéro profil enrichi.
+    """
+    budget = POLL_SECONDS_PER_URL * max(1, int(n_urls))
+    return float(min(max(POLL_TIMEOUT_SECONDS, budget), POLL_TIMEOUT_MAX_SECONDS))
 
 
 class BrightdataError(RuntimeError):

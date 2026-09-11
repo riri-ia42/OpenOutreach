@@ -86,12 +86,16 @@ def brightdata_ready() -> bool:
 
 
 def enrich_lead(lead) -> bool:
-    """Enrichit UN lead. False = pas fait -> fournisseur suivant de la chaîne."""
-    results = enrich_leads([lead])
+    """Enrichit UN lead. False = pas fait -> fournisseur suivant de la chaîne.
+
+    Chemin du daemon : délai d'attente court (90 s). Un trigger + poll complet
+    de 300 s pour un seul profil immobilisait la boucle de qualification.
+    """
+    results = enrich_leads([lead], poll_timeout=client.SINGLE_POLL_TIMEOUT_SECONDS)
     return results.get("enriched", 0) > 0
 
 
-def enrich_leads(leads: list) -> dict:
+def enrich_leads(leads: list, *, poll_timeout: float | None = None) -> dict:
     """Enrichit un LOT de leads (1 trigger + 1 poll pour tout le lot).
 
     Retourne ``{selected, enriched, failed}``. Les leads non couverts par la
@@ -111,7 +115,10 @@ def enrich_leads(leads: list) -> dict:
     stats["selected"] = len(usable)
     record_usage(len(usable))
     try:
-        records = client.run_profile_scraper([ld.linkedin_url for ld in usable])
+        records = client.run_profile_scraper(
+            [ld.linkedin_url for ld in usable],
+            poll_timeout=poll_timeout or client.poll_timeout_for(len(usable)),
+        )
     except (client.BrightdataError, requests.RequestException) as exc:
         logger.warning(
             "Bright Data : run en échec, %d leads laissés intacts "

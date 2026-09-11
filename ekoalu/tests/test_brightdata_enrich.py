@@ -269,3 +269,110 @@ class TestChaine:
 
         names = [name for name, _r, _e in _providers()]
         assert names == ["brightdata", "apify", "serper_snippet"]
+
+
+class TestRegleCookie:
+    """RÈGLE ABSOLUE : rien de notre session LinkedIn ne part chez le
+    fournisseur. Le test existait côté Apify, pas côté Bright Data (constat
+    11/09) — la garantie ne reposait que sur la forme du payload."""
+
+    def test_trigger_n_envoie_ni_cookie_ni_session(self, monkeypatch):
+        import json as _json
+
+        captured = {}
+
+        class _Resp:
+            status_code = 200
+            text = ""
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return {"snapshot_id": "s_1"}
+
+        def _post(url, **kw):
+            captured["json"] = kw.get("json")
+            captured["headers"] = kw.get("headers") or {}
+            return _Resp()
+
+        monkeypatch.setenv("EKOALU_BRIGHTDATA_TOKEN", "tok")
+        monkeypatch.setattr("ekoalu.brightdata_enrich.client.requests.post", _post)
+        client.trigger(["https://www.linkedin.com/in/jean-dupont-123"])
+
+        sent = _json.dumps(captured["json"]).lower()
+        for banned in ("cookie", "li_at", "session", "jsessionid", "csrf"):
+            assert banned not in sent
+        # seule l'adresse publique part, rien d'autre
+        assert captured["json"] == [{"url": "https://www.linkedin.com/in/jean-dupont-123"}]
+        # et aucun en-tête ne transporte de cookie (seul le jeton Bright Data)
+        assert set(k.lower() for k in captured["headers"]) <= {"authorization", "content-type"}
+
+
+class TestDelaiDAttente:
+    """Le délai d'attente du snapshot suit la taille du lot (11/09).
+
+    Sans ça, monter la passe quotidienne à 200 profils faisait expirer le
+    snapshot au bout des 300 s d'origine : tout le lot échouait et se
+    remboursait, pour zéro profil enrichi.
+    """
+
+    def test_petit_lot_garde_le_plancher(self):
+        assert client.poll_timeout_for(1) == client.POLL_TIMEOUT_SECONDS
+        assert client.poll_timeout_for(40) == client.POLL_TIMEOUT_SECONDS
+
+    def test_gros_lot_obtient_plus_de_temps(self):
+        # 200 profils : ~3 s/profil mesuré, on budgète le double
+        assert client.poll_timeout_for(200) == 1200
+        assert client.poll_timeout_for(200) > client.POLL_TIMEOUT_SECONDS
+
+    def test_plafonne(self):
+        assert client.poll_timeout_for(100000) == client.POLL_TIMEOUT_MAX_SECONDS
+
+    def test_le_chemin_unitaire_ne_bloque_pas_le_daemon(self, monkeypatch):
+        """enrich_lead (daemon) plafonne l'attente à 90 s, pas 300."""
+        vu = {}
+
+        def _run(urls, poll_interval=10, poll_timeout=None):
+            vu["timeout"] = poll_timeout
+            return []
+
+        monkeypatch.setattr(service.client, "run_profile_scraper", _run)
+        monkeypatch.setattr(service, "brightdata_ready", lambda: True)
+        monkeypatch.setattr(service, "remaining_this_month", lambda: 100)
+        monkeypatch.setattr(service, "record_usage", lambda n: None)
+        monkeypatch.setattr(service, "record_failures", lambda n: None)
+
+        class _Lead:
+            linkedin_url = "https://www.linkedin.com/in/jean-dupont-123"
+            public_identifier = "jean-dupont-123"
+
+        service.enrich_lead(_Lead())
+        assert vu["timeout"] == client.SINGLE_POLL_TIMEOUT_SECONDS == 90
+
+
+class TestProfilSupprime:
+    """Un profil « page morte » ne doit pas être repayé chez le fournisseur
+    suivant dans la même passe (constat 11/09)."""
+
+    def test_lead_disqualifie_sort_de_la_liste_de_travail(self, monkeypatch):
+        from crm.models import Lead
+        from ekoalu.management.commands.enrich_backlog import _still_to_enrich
+
+        lead = Lead.objects.create(
+            linkedin_url="https://www.linkedin.com/in/jean-dupont-123",
+            public_identifier="jean-dupont-123")
+        assert _still_to_enrich(lead) is True          # sans fiche, actif
+
+        lead.disqualified = True                       # Bright Data : dead_page
+        lead.save(update_fields=["disqualified"])
+        assert _still_to_enrich(lead) is False         # ne repart pas chez Apify
+
+    def test_lead_enrichi_sort_aussi_de_la_liste(self):
+        from crm.models import Lead
+        from ekoalu.management.commands.enrich_backlog import _still_to_enrich
+
+        lead = Lead.objects.create(
+            linkedin_url="https://www.linkedin.com/in/marie-durand-9",
+            public_identifier="marie-durand-9")
+        lead.embedding = b"x" * 8
+        lead.save(update_fields=["embedding"])
+        assert _still_to_enrich(lead) is False
