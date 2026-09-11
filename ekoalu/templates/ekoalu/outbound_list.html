@@ -24,6 +24,21 @@
     </div>
 </div>
 
+{# Retour arrière : remplace les demandes de confirmation (capture Richard 11/09).
+   Reste visible tant que l'action n'a pas été annulée, sur tous les onglets. #}
+<div id="undo-bar" class="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 {% if not undo_entry %}hidden{% endif %}">
+    <span class="text-sm text-amber-900">
+        Dernière action : <span id="undo-label" class="font-semibold">{{ undo_entry.label }}</span>
+    </span>
+    <form method="post" action="?{{ request.GET.urlencode }}" class="ml-auto">
+        {% csrf_token %}
+        <button type="submit" name="bulk_action" value="undo_last"
+                class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded font-medium">
+            ↩ Annuler la dernière action
+        </button>
+    </form>
+</div>
+
 <!-- Tabs filtres -->
 <div class="bg-white rounded-lg shadow-sm p-1 inline-flex gap-1 border border-gray-200">
     <a href="?status=pending" class="px-4 py-2 rounded text-sm {% if status_filter == 'pending' %}bg-yellow-100 text-yellow-800 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
@@ -148,13 +163,13 @@
                         <button type="button"
                                 class="sortir-btn w-full px-3 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded border border-orange-200 hover:bg-orange-100 whitespace-nowrap"
                                 data-url="{% url 'ekoalu:outbound_sortir_prospect' o.pk %}"
-                                data-confirm="Sortir {{ o.prospect_name|default:o.prospect_public_id }} de la prospection ? Tous canaux, toutes campagnes — définitif sauf requalification manuelle.">
+                                title="Retire cette personne de la prospection, tous canaux. Annulable par « Annuler la dernière action ».">
                             👤✗ Sortir prospect
                         </button>
                         <button type="button"
                                 class="sortir-btn w-full px-3 py-1 bg-red-50 text-red-700 text-xs font-medium rounded border border-red-200 hover:bg-red-100 whitespace-nowrap"
                                 data-url="{% url 'ekoalu:outbound_sortir_societe' o.pk %}"
-                                data-confirm="Sortir la société {{ o.prospect_company_display|default:'(inconnue)' }} ENTIÈRE de la prospection ? Tous ses contacts sont retirés et les imports futurs bloqués.">
+                                title="Retire TOUS les contacts de {{ o.prospect_company_display|default:'cette société' }} et bloque les imports futurs. Annulable par « Annuler la dernière action ».">
                             🏢✗ Sortir société
                         </button>
                         {% endif %}
@@ -198,8 +213,9 @@
             ⟲ Remettre en file
         </button>
         {% endif %}
+        {# Plus de confirm() : cocher + cliquer EST la décision, le retour arrière
+           est le garde-fou (capture Richard 11/09). #}
         <button type="submit" name="bulk_action" value="bulk_reject"
-                onclick="return confirm('Refuser ' + document.getElementById('bulk-count').textContent + ' message(s) ?');"
                 class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">
             ✗ Refuser tout
         </button>
@@ -262,7 +278,6 @@
     const csrfInput = document.querySelector('input[name=csrfmiddlewaretoken]');
     document.querySelectorAll('.sortir-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            if (!confirm(btn.dataset.confirm)) return;
             btn.disabled = true;
             btn.textContent = '…';
             fetch(btn.dataset.url, {
@@ -280,6 +295,12 @@
                             .forEach(li => li.remove());
                 });
                 updateBulkBar();
+                const bar = document.getElementById('undo-bar');
+                const lbl = document.getElementById('undo-label');
+                if (bar && lbl && d.undo_label) {
+                    lbl.textContent = d.undo_label;
+                    bar.classList.remove('hidden');
+                }
             })
             .catch(err => {
                 alert('Sortie impossible : ' + err.message);

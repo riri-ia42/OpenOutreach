@@ -18,8 +18,10 @@ from ekoalu.outbound_validation.models import PendingOutbound
 from ekoalu.qualification_feedback.models import QualificationFeedback
 from ekoalu.read_guard.models import ProfileReadDay
 from ekoalu.sorties.models import ProspectionSortie
+from ekoalu.undo.models import UndoEntry
 
 __all__ = [
+    "UndoEntry",
     "PendingReply",
     "CorrectionExample",
     "PendingOutbound",

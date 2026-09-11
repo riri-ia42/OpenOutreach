@@ -17,6 +17,16 @@ _cache: tuple[float, frozenset[str]] | None = None
 _CACHE_TTL_SECONDS = 60
 
 
+def undo_kind_person() -> str:
+    from ekoalu.undo.models import UndoEntry
+    return UndoEntry.Kind.SORTIR_PROSPECT
+
+
+def undo_kind_company() -> str:
+    from ekoalu.undo.models import UndoEntry
+    return UndoEntry.Kind.SORTIR_SOCIETE
+
+
 def _display_label(public_id: str) -> str:
     """Nom affichable d'un lead (dirigeant mail-only ou heuristique slug)."""
     from ekoalu.prospect_display import resolve_prospect_display
@@ -32,14 +42,18 @@ def sortir_prospect(public_id: str, *, reason: str = "") -> str:
 
     from ekoalu.lead_exclusion import disqualify_leads
     from ekoalu.sorties.models import ProspectionSortie
+    from ekoalu.undo import service as undo
 
     reason = reason or "Sorti de la prospection par Richard"
+    # Photographie AVANT la cascade : après, l'état précédent est perdu
+    # (bouton « Annuler la dernière action », capture Richard 11/09).
+    snapshot = undo.snapshot_leads([public_id])
     disqualify_leads([public_id], reason)
 
     lead = Lead.objects.filter(public_identifier=public_id).select_related("email_data").first()
     data = getattr(lead, "email_data", None) if lead else None
-    label = _display_label(public_id)
-    ProspectionSortie.objects.get_or_create(
+    label = _display_label(public_id) or public_id
+    sortie, created = ProspectionSortie.objects.get_or_create(
         kind=ProspectionSortie.Kind.PERSON,
         public_identifier=public_id,
         defaults={
@@ -49,6 +63,8 @@ def sortir_prospect(public_id: str, *, reason: str = "") -> str:
             "reason": reason,
         },
     )
+    snapshot["sorties"] = [sortie.pk] if created else []
+    undo.record(undo_kind_person(), f"Sortie de {label}", snapshot)
     export_shared_json()
     logger.info("Sortie prospect : %s (%s)", label, public_id)
     return label
@@ -89,6 +105,9 @@ def sortir_societe(*, siren: str = "", company_name: str = "",
             .values_list("prospect_public_id", flat=True)
         )
 
+    from ekoalu.undo import service as undo
+
+    snapshot = undo.snapshot_leads(sorted(slugs))
     n_leads, _n_deals = disqualify_leads(sorted(slugs), reason)
 
     label = company_name or siren
@@ -100,14 +119,17 @@ def sortir_societe(*, siren: str = "", company_name: str = "",
         exists = ProspectionSortie.objects.filter(
             kind=ProspectionSortie.Kind.COMPANY, company_name__iexact=company_name,
         )
+    snapshot["sorties"] = []
     if not exists.exists():
-        ProspectionSortie.objects.create(
+        sortie = ProspectionSortie.objects.create(
             kind=ProspectionSortie.Kind.COMPANY,
             siren=siren,
             label=label,
             company_name=company_name,
             reason=reason,
         )
+        snapshot["sorties"] = [sortie.pk]
+    undo.record(undo_kind_company(), f"Sortie de la société {label}", snapshot)
     invalidate_cache()
     export_shared_json()
     logger.info("Sortie société : %s (siren=%s) — %d personne(s) disqualifiée(s)",

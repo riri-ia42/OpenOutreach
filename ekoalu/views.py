@@ -1442,7 +1442,16 @@ def outbound_list(request):
     from ekoalu.prospect_display import identity_warnings, resolve_prospect_display
 
     if request.method == "POST":
+        from ekoalu.undo import service as undo
+        from ekoalu.undo.models import UndoEntry
+
         bulk_action = request.POST.get("bulk_action", "")
+        # Retour arrière : remplace les demandes de confirmation, qu'on validait
+        # sans lire (capture Richard 11/09). On agit vite, on répare si besoin.
+        if bulk_action == "undo_last":
+            ok, msg = undo.undo_last()
+            (django_messages.success if ok else django_messages.warning)(request, msg)
+            return redirect(request.path + "?" + request.GET.urlencode())
         ids = _parse_bulk_ids(request)
         if not ids:
             django_messages.warning(request, "Aucun message sélectionné.")
@@ -1450,17 +1459,25 @@ def outbound_list(request):
         qs = PendingOutbound.objects.filter(pk__in=ids)
         n = 0
         if bulk_action == "bulk_approve":
+            before = undo.snapshot_outbounds(
+                qs.filter(status=OutboundStatus.PENDING).values_list("pk", flat=True))
             for po in qs.filter(status=OutboundStatus.PENDING):
                 po.status = OutboundStatus.APPROVED
                 po.approved_at = timezone.now()
                 # final_content reste vide -> ai_draft sera envoye tel quel
                 po.save()
                 n += 1
+            if n:
+                undo.record(UndoEntry.Kind.APPROVE, f"Validation de {n} message(s)",
+                            {"outbounds": before})
             django_messages.success(request, f"✓ {n} message(s) approuvé(s) — partira au prochain cycle daemon.")
         elif bulk_action == "bulk_reject":
             reason = request.POST.get("bulk_reason", "").strip() or "(rejet en masse)"
             qs_active = qs.exclude(status__in=[OutboundStatus.SENT, OutboundStatus.REJECTED])
             public_ids = list(qs_active.values_list("prospect_public_id", flat=True).distinct())
+            before = undo.snapshot_leads(public_ids)
+            before["outbounds"] = undo.snapshot_outbounds(
+                qs_active.values_list("pk", flat=True))
             # Tout-ou-rien (cf. refus unitaire) : jamais de message refusé avec
             # son lead resté actif si l'écriture casse en cours de route.
             with transaction.atomic():
@@ -1469,21 +1486,32 @@ def outbound_list(request):
                     rejection_reason=reason,
                 )
                 n_leads, _ = _disqualify_leads_from_reject(public_ids, reason)
+                undo.record(UndoEntry.Kind.REJECT, f"Refus de {n} message(s)", before)
             django_messages.warning(
                 request,
                 f"✗ {n} message(s) refusé(s) — {n_leads} prospect(s) retiré(s) du pipeline.",
             )
         elif bulk_action == "bulk_mark_sent":
+            before = undo.snapshot_outbounds(
+                qs.filter(status=OutboundStatus.APPROVED).values_list("pk", flat=True))
             n = qs.filter(status=OutboundStatus.APPROVED).update(
                 status=OutboundStatus.SENT,
                 sent_at=timezone.now(),
             )
+            if n:
+                undo.record(UndoEntry.Kind.MARK_SENT, f"{n} message(s) marqué(s) envoyés",
+                            {"outbounds": before})
             django_messages.success(request, f"{n} message(s) marqué(s) envoyés manuellement.")
         elif bulk_action == "bulk_requeue":
+            before = undo.snapshot_outbounds(
+                qs.filter(status=OutboundStatus.FAILED).values_list("pk", flat=True))
             n = qs.filter(status=OutboundStatus.FAILED).update(
                 status=OutboundStatus.APPROVED,
                 error_message="",
             )
+            if n:
+                undo.record(UndoEntry.Kind.REQUEUE, f"Remise en file de {n} message(s)",
+                            {"outbounds": before})
             django_messages.success(request, f"⟲ {n} message(s) remis en file — partiront au prochain cycle daemon.")
         else:
             django_messages.error(request, f"Action en masse inconnue : {bulk_action}")
@@ -1557,8 +1585,11 @@ def outbound_list(request):
             find_style_violations(o.final_content or o.ai_draft) if show_style else []
         )
 
+    from ekoalu.undo.service import last_undoable
+
     context = {
         "outbound_list": items,
+        "undo_entry": last_undoable(),
         "counts": counts,
         "status_filter": status_filter,
         "kind_filter": kind_filter,
@@ -1582,6 +1613,13 @@ def _is_ajax(request) -> bool:
     return request.headers.get("x-requested-with") == "XMLHttpRequest"
 
 
+def _undo_label() -> str:
+    """Libellé de la dernière action annulable, pour le bandeau de la liste."""
+    from ekoalu.undo.service import last_undoable
+    entry = last_undoable()
+    return entry.label if entry else ""
+
+
 @staff_member_required
 @require_POST
 def outbound_sortir_prospect(request, pk):
@@ -1596,7 +1634,7 @@ def outbound_sortir_prospect(request, pk):
     po = get_object_or_404(PendingOutbound, pk=pk)
     label = sortir_prospect(po.prospect_public_id)
     if _is_ajax(request):
-        return JsonResponse({"ok": True, "label": label,
+        return JsonResponse({"ok": True, "label": label, "undo_label": _undo_label(),
                              "removed": [po.prospect_public_id]})
     django_messages.warning(
         request, f"👤 {label} sorti(e) de la prospection — état : /ekoalu/sorties/",
@@ -1635,7 +1673,8 @@ def outbound_sortir_societe(request, pk):
         return redirect(request.POST.get("next") or "/ekoalu/messages/?status=pending")
     n, label, slugs = sortir_societe(siren=siren, company_name=company)
     if _is_ajax(request):
-        return JsonResponse({"ok": True, "label": label, "n": n, "removed": slugs})
+        return JsonResponse({"ok": True, "label": label, "n": n, "removed": slugs,
+                             "undo_label": _undo_label()})
     django_messages.warning(
         request,
         f"🏢 {label} sortie de la prospection — {n} contact(s) retiré(s), "
