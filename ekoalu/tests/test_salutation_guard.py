@@ -7,6 +7,7 @@ M. Domaison chez nous. »
 from __future__ import annotations
 
 from ekoalu.email_generator.salutation import (
+    company_confirmed_by_email,
     clean_person_name,
     dirigeant_for_salutation,
     is_person_name,
@@ -96,3 +97,54 @@ class TestBoiteDeSociete:
         assert dirigeant_for_salutation("Stephanie Lopitaux", "jean.lecuyer2@wanadoo.fr",
                                         "EURL LOPITAUX") == ""
 
+
+
+class TestGardeSociete:
+    """Garde « société » : ne pas citer une raison sociale que l'adresse contredit
+    (capture Richard 11/09 — « BUREAU D'ETUDE MATTE » écrit à oza@oza.net)."""
+
+    def test_domaine_d_une_autre_entite_infirme(self):
+        assert not company_confirmed_by_email("BUREAU D'ETUDE MATTE", "oza@oza.net")
+        assert not company_confirmed_by_email("NEPSEN", "antoine.roger@belem-ing.fr")
+        assert not company_confirmed_by_email("SAS CLAUDE LAUMOND", "nicolas@le-galetas.com")
+        assert not company_confirmed_by_email("FORM IN PROD", "a.demonclin@tra-c.com")
+
+    def test_domaine_de_la_societe_confirme(self):
+        assert company_confirmed_by_email("BERLIOZ INDUSTRIE", "contact@berlioz-industrie.fr")
+        assert company_confirmed_by_email("SAS METALLERIE DUPONT", "j.dupont@metalleriedupont.fr")
+
+    def test_sigle_et_forme_contractee_confirment(self):
+        # ALUminium TEChnique Espace Confort → alutecfrance.fr
+        assert company_confirmed_by_email(
+            "ALUMINIUM TECHNIQUE ESPACE CONFORT", "contact@alutecfrance.fr")
+        # enseigne noyée dans un domaine plus long
+        assert company_confirmed_by_email("METAL CONCEPT", "contact@diagatlasconcept.fr")
+
+    def test_webmail_ne_prouve_rien_donc_on_garde(self):
+        assert company_confirmed_by_email("BUREAU D'ETUDE MATTE", "l.matte@orange.fr")
+        assert company_confirmed_by_email("NEPSEN", "contact@wanadoo.fr")
+
+    def test_donnees_manquantes_ne_bloquent_pas(self):
+        assert company_confirmed_by_email("", "x@y.fr")
+        assert company_confirmed_by_email("MATTE", "")
+        assert company_confirmed_by_email("MATTE", "pas-une-adresse")
+
+    def test_enseigne_portee_par_le_local(self):
+        assert company_confirmed_by_email("REZ ON", "rezon@orange.fr")
+
+    def test_chiffres_dans_la_raison_sociale(self):
+        # « AGI2D » / « 2C2 I » : sans tokenisation alphanumérique, leur propre
+        # domaine passait pour celui d'une autre société.
+        assert company_confirmed_by_email("AGI2D", "p.merieux@agi2d.fr")
+        assert company_confirmed_by_email("2C2 I", "2c2i@2c2i.com")
+
+    def test_domaine_nom_plus_suffixe(self):
+        assert company_confirmed_by_email("CVI COMPAGNIE VOSGIENNE D'ISOLATION", "contact@cvi69.com")
+        assert company_confirmed_by_email("ABM ENERGIE CONSEIL SASU", "abmlyon@abmec.fr")
+        # le suffixe ne doit pas rapprocher deux sociétés distinctes
+        assert not company_confirmed_by_email("GSE", "ocante@groupeccr.fr")
+        assert not company_confirmed_by_email("GERONTIM", "c.touveron@fnaqpa.fr")
+
+    def test_raison_sociale_sans_forme_exploitable(self):
+        # « I & D » ne laisse aucun token : on ne peut rien infirmer.
+        assert company_confirmed_by_email("I & D", "apereira@ingenierie-design.fr")

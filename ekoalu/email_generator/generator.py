@@ -148,12 +148,22 @@ def generate_cold_email(
     `variant_used` est rempli systématiquement (même en cas d'échec) pour audit.
     """
     from ekoalu import learning
-    from ekoalu.email_generator.salutation import dirigeant_for_salutation
+    from ekoalu.email_generator.salutation import (
+        company_confirmed_by_email,
+        dirigeant_for_salutation,
+    )
     from ekoalu.inbox_assist.models import CorrectionExample
     from ekoalu.message_validator.style_guard import enforce_style, find_style_violations
 
     if contact_email:
         dirigeant = dirigeant_for_salutation(dirigeant, contact_email, entreprise)
+        # Garde « société » (capture Richard 11/09) : le corps nommait la raison
+        # sociale du registre alors que le domaine appartient à une autre entité
+        # (« BUREAU D'ETUDE MATTE » écrit à oza@oza.net). Non confirmée = non citée.
+        if entreprise and not company_confirmed_by_email(entreprise, contact_email):
+            logger.info("Société %r non confirmée par %s — nom retiré du prompt",
+                        entreprise, contact_email)
+            entreprise = ""
 
     chosen_variant = variant or pick_variant()
 

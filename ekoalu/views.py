@@ -1859,6 +1859,42 @@ def _capture_rejection_learning(outbound: PendingOutbound, reason: str) -> None:
         logging.exception("CorrectionExample (reject) creation failed: %s", e)
 
 
+def _regenerate_followup_draft(outbound: PendingOutbound, instruction: str) -> tuple[bool, str]:
+    """Regenere une RELANCE mail avec le generateur de relance.
+
+    Sans ca, « Regenerer » sur une relance rejouait un cold mail complet (pitch
+    EKOALU depuis zero) dans un fil ou le prospect a deja recu ce pitch.
+    """
+    from crm.models import Lead
+    from ekoalu.email_generator.followup_generator import generate_email_followup
+
+    lead = (
+        Lead.objects
+        .filter(public_identifier=outbound.prospect_public_id)
+        .select_related("email_data")
+        .first()
+    )
+    data = getattr(lead, "email_data", None) if lead else None
+    parent = outbound.parent
+    draft = generate_email_followup(
+        entreprise=(data.entreprise if data else outbound.prospect_company or ""),
+        dirigeant=(data.dirigeant if data else ""),
+        code_naf=(data.code_naf if data else ""),
+        activite=(data.activite if data else ""),
+        ville=(data.ville if data else ""),
+        original_subject=(parent.subject if parent else ""),
+        original_body=(parent.content_to_send if parent else ""),
+        instruction=instruction,
+        contact_email=(lead.contact_email or "") if lead else "",
+    )
+    if not draft.is_valid():
+        return False, "Le générateur de relance a renvoyé un draft vide (clé API ? erreur réseau ?)."
+    outbound.ai_draft = draft.body
+    outbound.final_content = ""
+    outbound.save(update_fields=["ai_draft", "final_content"])
+    return True, ""
+
+
 def _regenerate_email_draft(outbound: PendingOutbound, instruction: str) -> tuple[bool, str]:
     """Regenere un cold mail / email follow-up via le generateur EMAIL EKOALU.
 
@@ -1911,7 +1947,9 @@ def _regenerate_outbound_draft(outbound: PendingOutbound, instruction: str) -> t
     """
     if outbound.kind == OutboundKind.INVITATION:
         return False, "Régénération désactivée pour les invitations (mode sans note)."
-    if outbound.kind in (OutboundKind.EMAIL_COLD, OutboundKind.EMAIL_FOLLOW_UP):
+    if outbound.kind == OutboundKind.EMAIL_FOLLOW_UP:
+        return _regenerate_followup_draft(outbound, instruction)
+    if outbound.kind == OutboundKind.EMAIL_COLD:
         return _regenerate_email_draft(outbound, instruction)
 
     from crm.models import Deal

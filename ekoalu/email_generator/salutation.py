@@ -134,3 +134,73 @@ def dirigeant_for_salutation(dirigeant: str, contact_email: str, entreprise: str
                     or (len(nt) >= 4 and nt in lt):
                 return dirigeant
     return ""
+
+
+# --- Garde « société » (capture Richard 11/09) -------------------------------
+#
+# Le corps du mail nomme parfois la raison sociale du registre alors que
+# l'adresse appartient à une autre entité (« BUREAU D'ETUDE MATTE » écrit à
+# oza@oza.net). Même principe que la salutation : une identité non confirmée
+# ne se cite pas. Un webmail ne confirme ni n'infirme — on garde le nom.
+
+_WEBMAIL_MARKERS = (
+    "orange", "wanadoo", "gmail", "free.fr", "hotmail", "outlook", "sfr",
+    "laposte", "yahoo", "bbox", "gmx", "numericable", "live.", "club-internet",
+    "aol", "neuf.fr", "aliceadsl", "msn.", "icloud", "me.com",
+)
+
+
+def _alnum_tokens(text: str) -> list[str]:
+    """Tokens d'une raison sociale, CHIFFRES COMPRIS : « AGI2D » et « 2C2 I »
+    ne donnent aucun token alphabétique utilisable, et leurs domaines agi2d.fr /
+    2c2i.com passaient pour ceux d'une autre société."""
+    ascii_ = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
+    return re.findall(r"[a-z0-9]{2,}", ascii_.lower())
+
+
+def _company_keys(entreprise: str) -> tuple[set[str], set[str]]:
+    """(formes fortes, toutes les formes) d'une raison sociale.
+
+    Fortes = les mots eux-mêmes et la forme compacte ; ce sont les seules
+    autorisées à reconnaître un domaine par son DÉBUT (cvi69.com pour « CVI »).
+    Toutes = les fortes plus les sigles d'initiales, qui ne valent qu'en
+    correspondance franche (« ALUminium TEChnique » → alutecfrance.fr).
+    """
+    tokens = [t for t in _alnum_tokens(entreprise) if t not in _COMPANY_MARKERS]
+    strong = set(tokens)
+    ascii_ = unicodedata.normalize("NFKD", entreprise or "").encode("ascii", "ignore").decode()
+    compact = "".join(ch for ch in ascii_.lower() if ch.isalnum())
+    if compact:
+        strong.add(compact)
+    keys = set(strong)
+    if len(tokens) > 1:
+        for n in (1, 2, 3, 4):
+            keys.add("".join(t[:n] for t in tokens))          # sigle sur tous les mots
+            keys.add("".join(t[:n] for t in tokens[:2]))      # ALUminium TEChnique → alutec
+    return ({k for k in strong if len(k) > 2}, {k for k in keys if len(k) > 2})
+
+
+def company_confirmed_by_email(entreprise: str, contact_email: str) -> bool:
+    """False seulement si le domaine PRO contredit franchement la raison sociale.
+
+    Inconnu (pas d'email, webmail, pas de raison sociale) → True : on ne peut
+    rien infirmer, le nom du registre reste utilisable.
+    """
+    if not entreprise or not contact_email or "@" not in contact_email:
+        return True
+    domain = contact_email.split("@", 1)[1].lower()
+    if any(w in domain for w in _WEBMAIL_MARKERS):
+        return True
+    root = domain.rsplit(".", 1)[0].replace(".", "").replace("-", "")
+    strong, keys = _company_keys(entreprise)
+    if not root or not keys:
+        return True          # rien à comparer : on ne peut rien infirmer
+    if any(k == root or (len(k) >= 4 and k in root) or (len(root) >= 4 and root in k) for k in keys):
+        return True
+    # domaine bâti sur le nom plus un suffixe (cvi69.com, abmec.fr) : seules les
+    # formes fortes comptent, un sigle d'initiales ferait des rapprochements faux
+    if any(root.startswith(k) for k in strong):
+        return True
+    # le local peut porter l'enseigne (agence@rezon.fr pour REZ'ON)
+    local = contact_email.split("@", 1)[0].lower().replace(".", "").replace("-", "")
+    return any(k == local or (len(k) >= 4 and k in local) for k in keys)

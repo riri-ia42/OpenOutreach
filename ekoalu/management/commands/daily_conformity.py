@@ -18,6 +18,7 @@ Attendus vérifiés (100 % lecture seule, aucun appel réseau payant) :
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -54,12 +55,14 @@ def _check(name: str, ok: bool, measured: str, expected: str,
 
 
 def build_conformity_report(today=None) -> dict:
-    """Évalue les 6 attendus. Retourne {checks, conform, date}."""
+    """Évalue les 8 attendus. Retourne {checks, conform, date}."""
     from crm.models import Deal, Lead
     from ekoalu.apify_enrich import service as apify_service
     from ekoalu import conf
     from ekoalu.apify_enrich.models import ApifyUsageDay
+    from ekoalu.email_canal.models import EmailLeadData
     from ekoalu.email_canal.pool import cold_mail_candidates
+    from ekoalu.email_canal.sender import EMAIL_KINDS
     from ekoalu.human_scheduler.budget import is_day_off
     from ekoalu.lead_routing.models import LeadDiscovery
     from ekoalu.outbound_validation.models import OutboundKind, OutboundStatus, PendingOutbound
@@ -259,6 +262,46 @@ def build_conformity_report(today=None) -> dict:
         "enrichissement NAF via l'API SIRENE des ~36 700 contacts de "
         "contacts-propres.json qui ont un SIREN (chantier de fond, décision "
         "Richard 28/07 : à lancer dès que les leads manquent).",
+    ))
+
+    # 8. Identité des messages en file — le mail salue-t-il la bonne personne et
+    # ne nomme-t-il pas une société que l'adresse contredit ? (capture Richard
+    # 11/09 : « incohérence entre les noms affichés, les mails et les sociétés »).
+    # Les gardes sont dans les générateurs ; ce contrôle vérifie leur effet réel.
+    from ekoalu.management.commands.audit_identites import cites_company
+    from ekoalu.email_generator.salutation import (
+        company_confirmed_by_email, dirigeant_for_salutation,
+    )
+
+    queued = list(PendingOutbound.objects.filter(
+        kind__in=EMAIL_KINDS, status__in=[OutboundStatus.PENDING, OutboundStatus.APPROVED]))
+    q_ids = [po.prospect_public_id for po in queued]
+    q_mails = dict(Lead.objects.filter(public_identifier__in=q_ids)
+                   .values_list("public_identifier", "contact_email"))
+    q_infos = {p: (d, e) for p, d, e in EmailLeadData.objects
+               .filter(lead__public_identifier__in=q_ids)
+               .values_list("lead__public_identifier", "dirigeant", "entreprise")}
+    incoherents = []
+    for po in queued:
+        dirigeant, entreprise = q_infos.get(po.prospect_public_id, ("", ""))
+        email = q_mails.get(po.prospect_public_id) or ""
+        body = po.content_to_send
+        first = body.splitlines()[0] if body else ""
+        salutation_ko = bool(re.match(r"^\s*Bonjour\s+(?!,)", first)) and not dirigeant_for_salutation(
+            dirigeant, email, po.prospect_company or entreprise)
+        societe_ko = bool(entreprise) and cites_company(body, entreprise)             and not company_confirmed_by_email(entreprise, email)
+        if salutation_ko or societe_ko:
+            incoherents.append(po.pk)
+    checks.append(_check(
+        "Identité des messages", not incoherents,
+        f"{len(incoherents)} message(s) incohérent(s) sur {len(queued)} en file"
+        + (f" : {incoherents[:10]}" if incoherents else ""),
+        "0 sur la file",
+        "Un message salue la mauvaise personne ou nomme une société que "
+        "l'adresse contredit. Détail : `manage.py audit_identites` ; "
+        "réécriture : `manage.py audit_identites --regenerate` (1 appel Claude "
+        "par message). Si seule la salutation est en cause, `manage.py "
+        "fix_salutations` corrige sans appel API.",
     ))
 
     conform = all(c["ok"] for c in checks)

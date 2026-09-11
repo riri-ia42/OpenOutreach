@@ -97,7 +97,11 @@ def generate_email_followup(*, entreprise: str = "", dirigeant: str = "", code_n
 
     `contact_email` : adresse de destination, pour la garde de salutation.
     """
-    from ekoalu.email_generator.salutation import clean_person_name, dirigeant_for_salutation
+    from ekoalu.email_generator.salutation import (
+        clean_person_name,
+        company_confirmed_by_email,
+        dirigeant_for_salutation,
+    )
     from ekoalu.message_validator.style_guard import enforce_style
 
     # Garde de salutation (capture Richard 11/09) : la relance nommait le
@@ -105,6 +109,10 @@ def generate_email_followup(*, entreprise: str = "", dirigeant: str = "", code_n
     # (« Bonjour M. Duchateau » vers ablampey@blampey.fr) ou quand le champ
     # porte un cabinet comptable. Même point de passage que le cold mail.
     dirigeant = clean_person_name(dirigeant_for_salutation(dirigeant, contact_email, entreprise))
+    if entreprise and contact_email and not company_confirmed_by_email(entreprise, contact_email):
+        logger.info("Société %r non confirmée par %s — nom retiré du prompt de relance",
+                    entreprise, contact_email)
+        entreprise = ""
 
     client = _get_anthropic_client()
     if client is None:
