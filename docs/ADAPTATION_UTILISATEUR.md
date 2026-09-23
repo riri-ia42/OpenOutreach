@@ -1,246 +1,200 @@
-# Adapter les applications à leur utilisateur — étude de cadrage
+# Outil évolutif en direct : adapter une application à l'utilisateur externe
 
-*23/09/2026 — étape 1 : cartographie des utilisateurs, puis mode de captation et architecture cible. Aucune ligne de code n'est encore écrite.*
+*v2, 23/09/2026. Recadrage : la cible, ce sont les **utilisateurs externes** de GTI Chiffrage et de Cockpit (alias P2), pas les outils internes ni le hub.*
 
----
-
-## 0. Synthèse (lecture rapide)
-
-1. **Écarter le modèle « visuel / auditif / kinesthésique » (VAK) comme base de classement.** L'hypothèse selon laquelle on apprend mieux quand le format correspond à son « style » n'a jamais été validée (Pashler et al., 2008 ; méta-analyses ultérieures). Classer un utilisateur « visuel » produirait une adaptation qui n'améliore rien de mesurable. Ce qui est établi et exploitable :
-   - la **nature du contenu** dicte le format : une élévation de porte se lit en schéma, un écart budgétaire en tableau, une consigne en texte ;
-   - le **niveau d'expertise** : un expert lit plus vite quand on retire l'explication, un novice a besoin de l'étape par étape (effet d'inversion d'expertise) ;
-   - le **contexte d'usage** : poste de travail, mobile, réunion, validation en rafale ;
-   - les **préférences déclarées et observées** de format et de densité, qui influent sur l'adoption même quand elles n'influent pas sur la compréhension.
-2. **14 applications sur 16 n'ont qu'un seul utilisateur : Richard.** Pour elles, le sujet n'est pas de typer des personnes différentes. Il s'agit de décrire **un utilisateur dans plusieurs situations** (chiffreur, validateur, dirigeant en réunion, lecteur du matin). Seules trois applications ont de vraies populations à profiler : Pleine Lune, observatoire-ia et vinriricaviste.
-3. **Le profil de Richard existe déjà en partie, mais il est dispersé :**
-   - le jumeau numérique décrit la manière d'**écrire** en son nom ;
-   - les consignes, les règles apprises et les commentaires captureIA relèvent ses **corrections** ;
-   - ses préférences personnelles de restitution (tableaux, conclusion d'abord, pas de ton marketing) sont une **déclaration** complète, mais aucune application ne la lit.
-
-   Il manque le **profil de restitution** : comment Richard veut **recevoir** l'information.
-4. **Recommandation :** un profil de restitution unique, versionné, servi par le hub (`GET /api/profile`), avec des valeurs par défaut si le hub ne répond pas. Il serait consommé de deux façons :
-   - par les prompts, via un bloc injecté ;
-   - par les interfaces, via le format affiché par défaut.
-
-   Il serait alimenté d'abord par la déclaration, puis par les signaux déjà captés. Mise en place en 3 lots, dont le premier coûte environ 2 jours.
+> **Limite de cette version.** Le code de Cockpit / P2 n'est pas accessible depuis cette session : aucun dépôt ne correspond. Le dépôt `chiffrage-gti` visible date du 11/06 et le décrit encore comme un outil **interne**. Les typologies ci-dessous sont donc des **hypothèses fondées sur le métier** (chaîne de valeur de la menuiserie extérieure en B2B). Elles sont à confronter aux utilisateurs réels.
 
 ---
 
-## 1. Cartographie des applications et des utilisateurs
+## 0. Synthèse
 
-### 1.1 Inventaire (16 dépôts)
+1. **On ne classe pas les gens en « visuel » ou « auditif ».** Cette théorie des styles d'apprentissage n'a pas été validée. Ce qui prédit réellement la bonne interface, c'est :
+   - le **rôle dans la chaîne** : architecte, économiste, entreprise, poseur, maître d'ouvrage ;
+   - l'**expertise en menuiserie** ;
+   - l'**intention de la visite** : budget rapide, chiffrage ferme, vérification technique ;
+   - le **contexte** : bureau ou chantier, ordinateur ou mobile.
 
-| Application | Utilisateurs | Interface | Formats produits | Signaux de préférence existants | Prompt LLM injectable |
-|---|---|---|---|---|---|
-| **chiffrage-gti** | Richard en chiffreur ; l'atelier lit les sorties | Web (Next.js), chat RAG, scripts | Excel, tableaux de coût, schéma SVG, texte RAG | `devis.coef_vente`, statut, surcharges ; corrections notées à la main | `app/api/rag/chat/route.ts` |
-| **prospection-ia / OpenOutreach** | Richard en validateur | Web Django, mails, hub | DM, mails, graphiques, brief et deck de RDV | **Les plus riches** : `CorrectionExample`, `PendingReply` (écart entre brouillon IA et envoi), `QualificationFeedback`, `UndoEntry`, `ActionLog` | `learning.py`, `rdv_prep/writer.py`, générateurs |
-| **mail-assistant** | Richard | Balises mail, VBA Outlook | Brouillons, Notion, rapport hebdo | `processed_emails` (commandes utilisées), `rdv_proposals` (créneau choisi) ; brouillons retouchés **non captés** | `jumeau-prompt.ts`, `weekly-report.ts` |
-| **extraction-plaud** | Richard | CLI planifiée, mails | Comptes rendus, récap du matin, Notion | `draft_skip.txt`, `extra_instruction` ; retouches **non captées** | `draft_mail_cr.py`, `daily_recap.py` |
-| **EKOALU-dashboard** | Richard en réunion de direction ; commerciaux en sujets | Streamlit | Graphiques, KPI, tableaux | Filtres de session uniquement | aucun |
-| **news-ia** | Richard en lecteur | Mail du matin | HTML | Aucun | prompt amont (Cowork) |
-| **cor70-indus / orgadata / thermique-profile-alu** | Richard en chiffreur ; partenaires destinataires | Scripts, Excel, web prévu | XLSX, DXF, CSV, rapports | PROGRESS / DECISIONS en texte libre | RAG prévu |
-| **captureIA** | Richard, sur tous les projets | Capture Windows | Texte injecté dans Claude | **Commentaires de captures** : le seul flux de retours transverse | `inject-captures.ps1` (préambule commun) |
-| **mailing-mailjet** | Richard ; destinataires B2B | CLI | Campagnes HTML | Règle « voir les données avant d'agir » | aucun |
-| **observatoire-ia** | **Externe, plusieurs utilisateurs** (métalliers, FFB) | Web React, JWT | Fiches, bibliothèque de prompts | `users.metier / company_size / region`, likes, téléchargements, `audit_log` | aucun (chatbot retiré) |
-| **pleine-lune + admin** | **Grand public** (lecteurs) + libraires | Application mobile, back-office | Cartes livre, avis, défis | `user_books`, `reviews`, `feature_votes`, événements | modération seulement |
-| **vinriricaviste** | Amis (sans compte), Richard administrateur | Formulaire web | Formulaire, CSV, messages | `vin_responses` | aucun |
-
-**Deux points non résolus :**
-- **« LMAI »** : aucun dépôt ne porte ce nom ni ce terme. À préciser : s'agit-il de mail-assistant, d'observatoire-ia, ou d'un projet non encore sur GitHub ?
-- **hub-ekoalu** : le dépôt n'est pas accessible depuis cette session.
-
-### 1.2 Typologie : 5 situations et 3 populations
-
-Le classement retenu n'est pas « visuel ou auditif » mais **situation × population**.
-
-**A. Situations de Richard** (un seul individu, cinq contextes)
-
-| Situation | Applications | Contrainte dominante | Format optimal (hypothèse à valider) |
-|---|---|---|---|
-| **S1 Chiffreur** | chiffrage-gti, cor70, orgadata, thermique | Exactitude ; objets spatiaux | Schéma et tableau chiffré ; hypothèses explicites ; texte minimal |
-| **S2 Validateur en rafale** | file `/ekoalu/messages/`, brouillons mail-assistant et Plaud | Débit (des centaines d'items) | Liste dense, écart mis en évidence, action en un clic, annulation plutôt que confirmation (déjà adopté le 11/09) |
-| **S3 Dirigeant en pilotage** | EKOALU-dashboard, daily_recap, conformité, hub | Décider vite | Verdict d'abord, puis 3 chiffres, puis le détail sur demande ; graphique avec objectif |
-| **S4 Lecteur du matin** | news-ia, récap Plaud, récap prospection | Temps court, souvent sur mobile | 5 à 10 lignes, lien vers le détail |
-| **S5 Préparation de RDV** | rdv_prep (brief et deck) | Mémorisation avant l'échange | Une page avec l'essentiel en tête, puis les questions ; lisible sur mobile |
-
-**B. Populations externes**
-
-| Population | Application | Hétérogénéité | Enjeu |
-|---|---|---|---|
-| **P1 Lecteurs** (grand public) | Pleine Lune | Forte : âge, goûts, rythme | Recommandation, onboarding, notifications |
-| **P2 Professionnels du métal** | observatoire-ia | Moyenne : métier, taille, maturité IA | Niveau de détail des cas, prompts adaptés au métier |
-| **P3 Destinataires** (prospects, amis, partenaires) | prospection, vinriricaviste, cor70 | Déjà traitée par les personas prospects et le jumeau | Hors périmètre : on ne profile pas un destinataire sur sa façon de consommer l'information |
-
-**Implication :** pour S1 à S5, l'adaptation porte sur la **situation** ; le profil personnel ne sert qu'à régler les curseurs. Pour P1 et P2, le profil est individuel, et le RGPD s'applique pleinement (voir §4).
-
-### 1.3 Dimensions qui valent d'être mesurées
-
-| Dimension | Valeurs | Mesurable par | Levier dans l'application |
-|---|---|---|---|
-| Format principal | tableau / schéma / texte / graphique | déclaration + bascule de vue | vue par défaut |
-| Densité | synthèse / standard / expert | déclaration + taux de dépliage du détail | longueur, `max_tokens`, sections repliées |
-| Ordre | conclusion d'abord / chronologique | déclaration | gabarit de prompt |
-| Niveau d'expertise par domaine | novice → expert | déclaration + vocabulaire des corrections | explications retirées ou ajoutées |
-| Canal | écran / mail / audio / mobile | usage observé (heure, appareil) | choix du canal de restitution |
-| Autonomie | valider chaque action / valider en lot / agir puis annuler | usage de l'annulation, validations en masse | confirmation ou annulation |
-| Ton | sobre / pédagogique | déclaration | bloc de style |
-
-L'**auditif** ne figure pas dans ce tableau comme un trait de personnalité : c'est un **canal**, pertinent en situation (voiture, atelier). Le levier réel est de proposer une version audio du récap du matin, pas d'étiqueter une personne « auditive ».
+   Le format préféré (schéma, tableau, texte) en découle en grande partie.
+2. **Le rôle déclaré à l'entrée porte la majorité de la valeur.** Une question unique (« Vous êtes… ») plus deux ou trois signaux observés dans la première minute suffisent à choisir le bon mode.
+3. **« Évolutif en direct » ne veut pas dire une interface générée à la volée par une IA.** Cela veut dire un **profil à confiance croissante**, mis à jour à chaque action, qui pilote une **liste finie de variantes testées** (vue, densité, vocabulaire, sortie, guidage). L'utilisateur garde toujours la main par une bascule visible.
+4. **Règle non négociable : l'adaptation porte sur la forme, jamais sur le prix ni sur les conditions commerciales.** Faire varier un prix selon le profil détruirait la confiance et exposerait à un risque juridique.
+5. **Recommandation : option B**, profil par scores + règles explicites, dans une brique partagée entre GTI et Cockpit. Le bandit (option C) ne vient qu'après, et seulement si le volume le justifie.
 
 ---
 
-## 2. Comment faire remonter l'information
+## 1. Cartographie des profils externes
 
-| Voie | Coût | Fiabilité | Délai | Usage recommandé |
+### 1.1 Rôles probables (à valider)
+
+| Rôle | Ce qu'il vient chercher | Expertise menuiserie | Format dominant attendu | Contexte |
 |---|---|---|---|---|
-| **Déclaration** : questionnaire court | Faible | Bonne sur les préférences, mauvaise sur les comportements réels | Immédiat | Amorçage (v0 du profil) |
-| **Observation** : signaux implicites | Moyen (instrumentation) | Bonne sur le comportement | 2 à 6 semaines | Corriger la déclaration |
-| **Inférence** : LLM sur les corrections et les captures | Faible (données déjà là) | Moyenne, à faire valider | Immédiat | Proposer des règles, validées par l'humain |
-| Test A/B par utilisateur | Élevé | Très bonne | Il faut du volume | Pleine Lune seulement |
+| **R1 Architecte / maître d'œuvre** | Faisabilité, rendu, performance (Uw, PMR, sécurité incendie) | Moyenne | **Schéma** (élévation), fiche technique | Bureau, phase conception |
+| **R2 Économiste / bureau d'études** | Prix fiable par poste, quantitatif | Moyenne à forte | **Tableau** (format DPGF, Excel) | Bureau, en volume |
+| **R3 Entreprise générale / acheteur** | Prix ferme, délai, comparaison | Faible à moyenne | Tableau court + total + délai | Bureau, pression prix |
+| **R4 Menuisier / poseur partenaire** | Nomenclature, débit, dimensions de pose | **Experte** | Liste de débit, codes profils, schéma coté | Atelier, chantier, mobile |
+| **R5 Maître d'ouvrage / bailleur / gestionnaire** | Budget global, conformité, durabilité | Faible | **Texte** de synthèse + 3 chiffres | Bureau, décision |
+| **R6 Particulier ou prospect non qualifié** | Ordre de grandeur | Nulle | Fourchette de prix, visuel simple | Mobile |
+| **R7 Commercial EKOALU face au client** | Montrer et convaincre en rendez-vous | Experte | Mode présentation : schéma + total | Tablette chez le client |
 
-### 2.1 Questionnaire : 8 questions, choix forcés sur des exemples réels
+Pour Cockpit / P2, le tableau reste à remplir : il faut connaître la fonction de l'outil pour aller plus loin.
 
-Principe : on ne demande pas « êtes-vous visuel ? ». On montre **deux rendus du même contenu** et on demande lequel est le plus utile. Exemples de paires :
+### 1.2 Les dimensions qui pilotent l'adaptation
 
-1. Récap du matin : tableau de 5 lignes, ou 3 phrases.
-2. Devis : schéma coté accompagné de la liste de débit, ou la liste seule.
-3. Écart budgétaire : graphique avec objectif, ou tableau des écarts.
-4. Brouillon de mail : afficher l'écart avec la version précédente, ou le texte complet.
-5. Densité : version 5 lignes, ou version 30 lignes.
-6. Ordre : conclusion puis arguments, ou analyse puis conclusion.
-7. Action risquée : confirmation préalable, ou annulation possible après coup.
-8. Canal pour une alerte non urgente : mail, notification du hub, ou résumé audio.
+On ne stocke pas une étiquette figée (« R2 »). On stocke un **vecteur** de dimensions, chacune avec sa confiance. Un utilisateur réel est souvent un mélange : un économiste peut être expert en menuiserie.
 
-Durée : moins de 2 minutes. Les réponses forment la v0 du profil.
-
-### 2.2 Signaux déjà captés, ou à capter pour un coût faible
-
-| Signal | Où | Ce qu'il révèle | État |
-|---|---|---|---|
-| Écart entre brouillon IA et texte envoyé | `PendingReply` (prospection) | Style, longueur, ton | **Capté** |
-| Consignes de régénération | `CorrectionExample` | Préférences de fond et de forme | **Capté**, promu en règles à partir de 3 occurrences |
-| Usage de l'annulation, actions en masse | `UndoEntry` | Autonomie | **Capté** |
-| Commentaires captureIA | `captures/*.md` sur tous les projets | Irritants d'interface | **Capté mais non structuré** : c'est la source la plus riche et elle n'est exploitée par rien |
-| Écart entre brouillon et envoi | mail-assistant `/r`, Plaud comptes rendus | Style | **Manquant** (lecture des Éléments envoyés via le Gateway) |
-| Bascule tableau / graphique, dépliage du détail | dashboards | Format, densité | **Manquant** (un événement JS vers le hub) |
-| Ouverture et lecture des récaps | news-ia, récaps | Canal, horaire | **Manquant** (pixel ou lien de suivi interne) |
-
-### 2.3 Inférence encadrée
-
-Une tâche hebdomadaire, sur le modèle de `learner_weekly`, lit les corrections, les captures et les écarts de la semaine. Elle **propose** des modifications du profil sous forme de fiches du hub ; Richard les valide ou les refuse. **Le profil n'est jamais réécrit sans validation.** C'est le même principe que les règles apprises et les variantes de prompt déjà en place.
+| Dimension | Valeurs | Ce qui change dans l'outil |
+|---|---|---|
+| `expertise` | novice / intermédiaire / expert | Vocabulaire (« dormant » ou « cadre fixe »), aide contextuelle, codes profils visibles ou masqués |
+| `intention` | estimer / chiffrer / vérifier / présenter | Parcours : saisie en 3 champs ou configurateur complet |
+| `format` | schéma / tableau / texte | Vue par défaut du résultat |
+| `densite` | synthèse / détail | Sections repliées ou dépliées, longueur des réponses du chat |
+| `sortie` | PDF / Excel / DPGF / lien | Export mis en avant |
+| `contexte` | ordinateur / mobile / présentation | Mise en page, taille des cibles tactiles |
+| `guidage` | assistant pas à pas / formulaire libre | Mode assistant ou expert |
 
 ---
 
-## 3. Solution proposée
+## 2. Comment détecter le profil
+
+### 2.1 Trois étages
+
+| Étage | Moment | Moyen | Poids initial |
+|---|---|---|---|
+| **Déclaré** | Entrée dans l'outil | 1 question obligatoire (rôle) + 1 optionnelle (« Plutôt schéma ou tableau ? ») | Élevé au départ, décroît |
+| **Observé** | Chaque action | Événements d'usage (§2.2) | Croît avec le volume |
+| **Inféré** | Chat ou upload | Classification par LLM du vocabulaire et des documents déposés | Moyen, jamais seul |
+
+Pas de questionnaire long : au-delà de 2 questions, l'abandon à l'entrée coûte plus que le gain. Le profil se complète **au fil de l'usage**.
+
+### 2.2 Signaux observables, ce qu'ils indiquent et leur poids
+
+| Signal | Indique | Poids |
+|---|---|---|
+| Dépose un PDF de plan ou un DPGF au lieu de saisir | intention `chiffrer`, format `tableau` | fort |
+| Saisit des dimensions en mm au premier essai, sans aide | `expertise` expert | fort |
+| Utilise des codes profils ou du vocabulaire technique dans le chat (tapée, dormant, ouvrant T) | `expertise` expert | fort |
+| Ouvre l'aide ou survole les infobulles à répétition | `expertise` novice | moyen |
+| Bascule sur la vue schéma, ou ne la quitte pas | `format` schéma | moyen |
+| Déplie le détail de la nomenclature | `densite` détail | moyen |
+| Choisit l'export Excel plutôt que PDF | `sortie` Excel, rôle R2 / R3 | fort |
+| Session sur mobile en journée de semaine | `contexte` chantier | moyen |
+| Revient plusieurs fois sur le même devis et modifie les options | `intention` comparer ou arbitrer | moyen |
+| Abandonne à une étape donnée | Point de friction **pour ce profil** | indicateur de pilotage |
+
+**Le signal le plus fiable reste la bascule manuelle** (« Vue simple / Vue expert », « Schéma / Tableau »). Un choix manuel l'emporte sur toute inférence et se mémorise.
+
+### 2.3 Mise à jour du profil
+
+- Chaque signal ajuste le score d'une dimension (exemple : `+0,3` vers expert).
+- On applique une **décroissance** : les signaux anciens pèsent moins, et le profil suit l'évolution d'un utilisateur qui monte en compétence.
+- On bascule de mode seulement au-delà d'un **seuil**, avec une **hystérésis** (un seuil de retour différent du seuil d'aller) pour que l'interface ne change pas d'aspect à chaque clic.
+- Un changement de mode s'annonce en une ligne (« Vue passée en mode expert — revenir »), jamais en silence.
+
+---
+
+## 3. Architecture de l'outil évolutif
 
 ### 3.1 Options
 
-| | **A. Fichier déclaré** | **B. Service de profil dans le hub** (recommandé) | **C. Adaptation automatique par utilisateur** |
+| | **A. Modes fixes** | **B. Profil par scores + règles** (recommandé) | **C. Optimisation automatique (bandit) / interface générée par IA** |
 |---|---|---|---|
-| Principe | `profil_restitution.json` local, lu par chaque application | `GET /api/profile?user=&situation=` + `POST /api/profile/signals` ; valeurs par défaut si le hub ne répond pas | Bandit ou modèle par utilisateur, qui choisit le format |
-| Coût | ~2 jours | ~2 à 3 semaines, en incluant A | Plusieurs semaines par application |
-| Gain | Cohérence immédiate des prompts | Profil vivant, alimenté par les signaux, une seule source | Optimal à grand volume |
-| Risques | Profil figé, dérive entre applications | Dépendance au hub (atténuée par les valeurs par défaut), gouvernance | Sur-ingénierie : pas de volume pour 14 applications sur 16 |
-| Charge mentale pour Richard | Nulle | 1 fiche de validation par semaine | Opaque |
-| Pertinent pour | Toutes les applications de Richard | Toutes les applications de Richard | Pleine Lune uniquement, à terme |
+| Principe | 2 ou 3 modes (Simple / Expert / Présentation), choisis par l'utilisateur | Profil multidimensionnel mis à jour en direct ; des règles lisibles choisissent les variantes | L'algorithme teste les variantes et garde la plus performante par profil, ou un LLM compose l'écran |
+| Délai | ~1 semaine | ~3 à 4 semaines, A compris | +4 à 8 semaines |
+| Données nécessaires | Aucune | Quelques dizaines d'utilisateurs | **Plusieurs centaines de sessions par semaine et par point de décision** |
+| Explicabilité | Totale | Bonne (chaque règle est lisible) | Faible |
+| Risques | Profil rigide | Réglage des seuils | Sur-ingénierie, comportements imprévisibles, IA qui invente un écran faux |
+| Évolutivité | Faible | Forte : on ajoute des règles et des variantes | Maximale |
 
-**Recommandation :** faire A, puis B. C ne se justifie que sur Pleine Lune, et seulement au-delà d'environ 1 000 utilisateurs actifs.
+**Recommandation : B**, bâti sur A. C seulement si le volume l'exige, et **uniquement en bandit sur des variantes déjà validées**. Jamais d'interface générée par IA sur un outil de chiffrage : une cote ou un prix mal affiché coûte plus que ce que l'adaptation rapporte.
 
-### 3.2 Architecture cible (option B)
+### 3.2 Schéma de principe
 
 ```
-            ┌───────────── déclaration (questionnaire, page /reglages du hub)
-            │  ┌────────── signaux (corrections, écarts, annulations, bascules, captures)
-            ▼  ▼
-   hub-ekoalu  ── profil versionné { commun + surcharges par situation }
-            │        ▲
-            │        └── fiche hebdo « modification de profil proposée » → validation Richard
-            ▼
-   GET /api/profile?user=richard&situation=S3   (cache 60 s ; valeurs par défaut si le hub ne répond pas)
-       ├─► bloc prompt  : profile_block(situation)  → ajouté au prompt SYSTÈME (préfixe stable, mis en cache)
-       └─► UI           : vue par défaut, densité, confirmation ou annulation
+ Navigateur (GTI, Cockpit)
+   ├─ sdk-adaptation.js : capte les événements (§2.2), applique le manifeste
+   │        │ événements                     ▲ manifeste (vue, densité, vocabulaire, export)
+   ▼        ▼                                │
+ Service profil (brique partagée, base de l'application, PAS le hub)
+   ├─ profil = { dimension: {valeur, confiance, maj} } + choix manuels (prioritaires)
+   ├─ moteur de règles  : profil → manifeste d'adaptation
+   └─ bloc prompt       : profil → consignes de registre et de profondeur pour le chat / RAG
+        │
+        └─ tableau de pilotage : taux de devis finalisés, temps de chiffrage, abandons, par profil
 ```
 
-Règles de conception :
-- **Deux profils séparés.** Le jumeau numérique décrit comment écrire *au nom de* Richard. Le profil de restitution décrit comment écrire *pour* Richard. Mélanger les deux ferait fuiter le style de restitution dans les messages envoyés aux prospects.
-- **La situation l'emporte sur le trait.** Le profil a une partie commune et une surcharge par situation (S1 à S5). Le chiffreur veut le schéma ; le lecteur du matin veut 5 lignes.
-- **Aucun blocage.** Hub injoignable = valeurs par défaut codées, sur le même modèle que `hub_gate.py` qui laisse passer en cas de panne.
-- **Cache de prompt préservé.** Le bloc de profil ne change qu'à la validation d'une nouvelle version : il reste stable et peut donc aller dans le prompt système.
-- **Versionnement.** Chaque version du profil est horodatée, ce qui permet de revenir en arrière et d'attribuer un effet à un changement.
-
-### 3.3 Schéma du profil (proposition)
+**Le manifeste d'adaptation**, exemple :
 
 ```json
 {
-  "user": "richard",
-  "version": 3,
-  "valide_le": "2026-09-30",
-  "commun": {
-    "ordre": "conclusion_dabord",
-    "densite": "synthese_puis_detail",
-    "format_prefere": ["tableau", "schema"],
-    "a_eviter": ["ton_marketing", "digressions", "metaphores"],
-    "expertise": { "batiment": "expert", "finance": "expert", "juridique": "avance", "dev": "avance" },
-    "autonomie": "agir_puis_annuler",
-    "canal_alerte": "hub"
-  },
-  "situations": {
-    "S1_chiffreur": { "format_prefere": ["schema", "tableau"], "hypotheses_explicites": true },
-    "S2_validateur": { "densite": "minimale", "afficher_ecart": true },
-    "S3_pilotage": { "graphique_avec_objectif": true, "max_lignes_synthese": 10 },
-    "S4_matin": { "max_lignes": 8, "canal": "mail" },
-    "S5_rdv": { "une_page": true }
-  },
-  "source": { "declare": 0.7, "observe": 0.3 }
+  "vue_resultat": "schema",
+  "densite": "synthese",
+  "vocabulaire": "technique",
+  "codes_profils_visibles": true,
+  "export_principal": "excel",
+  "guidage": "libre",
+  "raison": "expertise=expert (0.82), sortie=excel (0.74)"
 }
 ```
 
-Les valeurs ci-dessus sont des exemples. Le contenu réel du profil reste **local ou dans le hub**, jamais dans un dépôt : OpenOutreach est public.
+Le champ `raison` sert à expliquer l'adaptation à l'utilisateur, et au débogage.
 
-### 3.4 Points d'injection prioritaires
+### 3.3 Ce que l'on adapte, et ce que l'on n'adapte jamais
 
-| Rang | Point | Situation | Effort | Gain |
-|---|---|---|---|---|
-| 1 | Préambule `captureIA/inject-captures.ps1` + `REGLES_CTO.md` | toutes les sessions Claude Code | 0,5 jour | Élevé : touche tous les projets d'un coup |
-| 2 | `rdv_prep/writer.py`, `daily_recap`, `daily_conformity` | S3, S5 | 0,5 jour | Élevé |
-| 3 | `chiffrage-gti` : chat RAG + vue devis | S1 | 1 jour | Moyen à élevé |
-| 4 | `mail-assistant/weekly-report.ts`, `extraction-plaud/daily_recap.py` | S4 | 0,5 jour | Moyen |
-| 5 | EKOALU-dashboard : vue par défaut persistée | S3 | 1 jour | Moyen |
-| 6 | Pleine Lune : préférences à l'onboarding + recommandations | P1 | 1 à 2 semaines | Produit : fidélisation |
+| Adapté | Jamais adapté |
+|---|---|
+| Vue par défaut, ordre des sections, densité | **Prix, remises, coefficients, conditions commerciales** |
+| Vocabulaire, aide, infobulles | Hypothèses de calcul et avertissements techniques (chute, performance) |
+| Export mis en avant | Mentions légales et réglementaires |
+| Registre et profondeur des réponses du chat | Contenu factuel des réponses |
+| Parcours : assistant ou formulaire libre | Accès aux fonctions : tout reste accessible en un clic |
 
-Les générateurs de prospection (DM, cold mail) **ne sont pas concernés** : ils écrivent pour le prospect, pas pour Richard.
+### 3.4 Brique commune à GTI et Cockpit
 
----
-
-## 4. Risques et limites
-
-- **Données personnelles (P1, P2).** Le profilage des lecteurs de Pleine Lune et des membres de l'observatoire demande :
-  - une information claire dans la politique de confidentialité ;
-  - le consentement pour toute inférence qui n'est pas strictement nécessaire au service ;
-  - la minimisation des données ;
-  - la possibilité de réinitialiser son profil.
-
-  L'observatoire appartient à l'Union des Métalliers : l'accord de son propriétaire est un préalable. L'article 22 du RGPD (décision automatisée) n'est pas en jeu, car l'adaptation d'un format ne produit pas d'effet juridique.
-- **Bulle de préférence.** Un profil trop appliqué finit par masquer l'information inhabituelle. Garde-fou : une alerte critique (sécurité, budget, blocage) ignore toujours le profil.
-- **Préférence et efficacité ne coïncident pas toujours.** Préférer le tableau ne garantit pas une meilleure décision avec le tableau. Pour S3, il faut mesurer le temps entre la réception et l'action, pas seulement la satisfaction.
-- **Dérive entre applications.** Sans source unique (option A seule), chaque application finira avec sa propre copie. C'est ce qui justifie l'option B.
-- **Limites de cette étude :**
-  - hub-ekoalu non inspecté ;
-  - « LMAI » non identifié ;
-  - les formats optimaux par situation sont des hypothèses, à confirmer par le questionnaire.
+Il faut une seule brique `adaptation` (SDK côté navigateur + module serveur), et non deux implémentations :
+- même vocabulaire de dimensions ;
+- chaque application déclare ses propres **variantes** et ses **règles** ;
+- profil stocké **par application**. Un profil partagé entre les deux n'a de sens que si les utilisateurs sont communs **et** consentent à ce croisement.
 
 ---
 
-## 5. Suite proposée
+## 4. Contraintes
 
-| Lot | Contenu | Durée | Livrable |
-|---|---|---|---|
-| **L1** | Questionnaire (8 paires) → profil v0 ; bloc injecté dans le préambule captureIA, `REGLES_CTO.md`, rdv_prep et les récaps | ~2 jours | Profil v0 + 4 points d'injection |
-| **L2** | Endpoint profil dans le hub + page /reglages ; captation des écarts brouillon / envoi (mail-assistant, Plaud) et des bascules de vue ; fiche hebdo « modification proposée » | ~2 à 3 semaines | Profil vivant |
-| **L3** | Pleine Lune : préférences à l'onboarding, recommandations, consentement | ~2 semaines | Profil lecteur |
+| Sujet | Contrainte | Traitement |
+|---|---|---|
+| **RGPD** | Un utilisateur B2B identifié reste une personne physique : le profil est une donnée personnelle | Base légale : intérêt légitime (ergonomie), à documenter ; information dans la politique de confidentialité ; aucune inférence sensible ; droit de réinitialiser son profil ; durée de conservation (exemple : 13 mois sans activité) |
+| **Traceurs (CNIL)** | La mesure d'usage via cookies ou stockage local peut exiger un consentement | Événements rattachés au compte, côté serveur, finalité strictement fonctionnelle (adaptation). Si des outils d'analyse tiers sont ajoutés, bandeau de consentement |
+| **Confiance** | Une interface qui change d'aspect sans prévenir déstabilise | Hystérésis, annonce du changement, bascule manuelle toujours visible |
+| **Qualité du chiffrage** | Masquer une information à un novice peut cacher un risque | Les avertissements techniques ne sont jamais masqués, seulement reformulés |
+| **Compte ou anonyme** | Sans compte, le profil ne survit qu'à la session | Avant l'identification, le profil est tenu par la session (et par appareil si le consentement le permet) ; rattachement au compte à la connexion |
 
-**Décisions attendues :**
-1. Identifier « LMAI ».
-2. Donner accès au code du hub (pour L2).
-3. Valider le choix A puis B.
-4. Pleine Lune et l'observatoire : dans ce chantier ou dans un chantier séparé ?
+---
+
+## 5. Pilotage : prouver que l'adaptation rapporte
+
+Indicateurs à suivre **par profil**, en comparant une version adaptée à une version standard (groupe témoin d'environ 10 %) :
+
+| Indicateur | Cible indicative |
+|---|---|
+| Taux de devis menés jusqu'à l'export | +15 à 25 % |
+| Temps médian jusqu'au premier chiffrage | −30 % |
+| Abandons à l'entrée (question de rôle) | < 10 % |
+| Taux de bascule manuelle après une adaptation automatique | < 20 % (au-delà, la règle est mauvaise) |
+| Conversion devis → demande de contact ou commande | À mesurer ; c'est l'indicateur du ROI |
+
+Sans groupe témoin, on ne peut pas savoir si l'adaptation rapporte ou si l'on se fait plaisir.
+
+---
+
+## 6. Suite proposée
+
+| Lot | Contenu | Durée |
+|---|---|---|
+| **L0 Cartographie réelle** | Confronter les rôles R1 à R7 aux utilisateurs réels de GTI et de Cockpit (liste des comptes, 5 entretiens ou relecture des demandes reçues) ; fixer 3 profils prioritaires | 2 à 3 jours |
+| **L1 Instrumentation + modes** | SDK d'événements, question de rôle, modes Simple / Expert / Présentation avec bascule, sur GTI | ~1 semaine |
+| **L2 Profil en direct** | Scores, décroissance, hystérésis, moteur de règles, manifeste, bloc prompt pour le chat RAG ; extension à Cockpit | 2 à 3 semaines |
+| **L3 Optimisation** | Groupe témoin, tableau de pilotage, bandit sur 1 ou 2 points de décision si le volume le permet | Selon le volume |
+
+**Éléments nécessaires pour passer de l'hypothèse au concret :**
+1. Accès au dépôt de Cockpit / P2 et à la version actuelle de GTI Chiffrage, ouverte à l'externe.
+2. Qui sont aujourd'hui les utilisateurs externes (rôles, nombre, fréquence) et s'ils ont un compte.
+3. Le volume attendu (sessions par mois), qui décide de l'opportunité de l'option C.
